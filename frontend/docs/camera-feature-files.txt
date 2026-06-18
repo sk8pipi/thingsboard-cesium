@@ -1,0 +1,362 @@
+Cesium 摄像头功能文件说明
+
+说明
+
+- 本文件作为摄像头相关功能的同步记录。
+- 以后只要继续修改这套摄像头点位、视频预览、转流脚本、地图交互、Gateway 状态接入相关内容，都同步更新到这个文件。
+- 当前记录包含首页地图和 Cesium 大屏编辑页面两套入口。
+- 当前方案明确为“仅预览型摄像头”方案。
+- 当前方案不包含控制能力，不包含 RPC，不包含 PTZ，不包含 ONVIF。
+- 当前视频流继续走 `RTSP -> FFmpeg -> HLS -> http-server -> hls.js`，视频流本身不经过 Gateway。
+
+文件列表与功能说明
+
+1. src/views/tb/map/cameraTypes.ts
+功能：
+- 定义仅预览型摄像头的数据结构。
+- 同时包含静态 attributes、动态 telemetry、地图点位兼容字段。
+- 统一约束 cameraId、名称、经纬度、海拔、流地址、协议、状态、告警等级等字段。
+- 提供 `CAMERA_ATTRIBUTE_KEYS`、`CAMERA_TELEMETRY_KEYS`、`resolveCameraStatus` 等运行时辅助能力。
+
+2. src/views/tb/map/cameraMock.ts
+功能：
+- 提供当前摄像头示例数据。
+- 给地图上的摄像头点位提供名称、位置、状态和浏览器可播放的 HLS 地址。
+- 作为前端兜底静态点位数据源保留，不能删除。
+- 当前默认播放地址为 `/live/camera-001/index.m3u8`。
+
+3. src/views/tb/map/useCameraOverlay.ts
+功能：
+- 管理摄像头预览面板的打开、关闭和切换状态。
+- 保存当前选中的摄像头。
+- 与 runtime 合并后的 `cameraPoints` 配合工作。
+- 后续如果扩展多个摄像头切换，可以继续复用这个 composable。
+
+4. src/views/tb/map/useTbCameraRuntime.ts
+功能：
+- 前端摄像头运行时数据层。
+- 优先从 ThingsBoard 获取摄像头 attributes 和 telemetry。
+- 如果获取不到，则自动回退到 `cameraMock.ts`。
+- 对 `deviceId` 做 UUID 校验，只有合法的 ThingsBoard 设备 ID 才会发起 attributes / telemetry 请求。
+- mock 示例里的占位 `deviceId` 不会再触发 `Invalid UUID string` 请求错误。
+- 本地 `playerError`、`previewOpenCount`、`previewLastOpenTs` 只有在值真实变化时才会更新，避免无效响应式重算。
+- 合并策略明确区分：
+  - `cameraMock.ts` 负责静态兜底点位
+  - ThingsBoard 负责动态状态和可覆盖的静态属性
+  - 前端本地 UI 状态负责当前会话的 `playerError`、`previewOpenCount`、`previewLastOpenTs`
+- 对首页地图和大屏编辑页提供统一的 `cameraPoints` 数据源。
+
+5. src/views/tb/map/CameraVideoPanel.vue
+功能：
+- 页面右上角固定定位的视频预览面板。
+- 继续保留原有 `video + hls.js` 播放主逻辑，不替换现有视频方案。
+- 显示摄像头名称、状态、位置说明和关闭按钮。
+- 新增状态展示区，显示：
+  - `online`
+  - `streamAlive`
+  - `bitrateKbps`
+  - `lastHeartbeatTs`
+  - `playerError`
+  - `alarmText`
+  - `alarmLevel`
+  - `previewOpenCount`
+- 在播放失败和恢复时向页面回传状态事件，供 runtime 更新本地 UI 状态。
+- 对 `AbortError` 和自动播放拦截场景做了降噪处理，避免控制台持续刷屏。
+- 对播放器错误 / 恢复事件做了去重，避免同一状态反复回传导致页面卡顿。
+- 不新增任何控制按钮。
+
+6. src/views/tb/map/CesiumMap.vue
+功能：
+- 在原有传感器点位之外，新增摄像头点位渲染能力。
+- 为摄像头创建独立的 Cesium `CustomDataSource`。
+- 使用 `Entity / Billboard` 在地图上显示摄像头图标和名称。
+- 监听 Cesium 点击事件，区分传感器点位和摄像头点位。
+- 点击摄像头点位时向外发出 `camera-click` 事件。
+- 摄像头图标会根据运行时状态变化：
+  - `online + streamAlive` 正常
+  - `online + streamAlive=false` 异常
+  - `offline` 离线
+  - 有 `alarmLevel` 时高亮
+- 点位 properties 中会保留摄像头状态字段，便于点击时直接带出预览数据。
+- 地图只会在点位渲染相关字段变化时重绘，不会因为播放器错误文案或预览次数变化而整张图反复刷新。
+- 点位重绘签名已改为稳定字符串，避免因为新数组引用导致误判为“需要重绘”。
+
+7. src/views/tb/map/MapHome.vue
+功能：
+- 首页地图入口。
+- 通过 `useTbCameraRuntime.ts` 获取摄像头运行时数据，而不是直接固定使用 mock 列表。
+- 将摄像头点位数据传入 `CesiumMap`。
+- 监听 `camera-click` 事件。
+- 打开右上角 `CameraVideoPanel` 视频预览面板。
+- 在用户打开预览时记录本地 `previewOpenCount` 和 `previewLastOpenTs`。
+- 在播放器报错或恢复时，同步更新 runtime 中的本地错误状态。
+- 保留原有传感器弹层逻辑，并与摄像头预览逻辑协同工作。
+
+8. src/views/tb/map/MapWidgetEditor.vue
+功能：
+- Cesium 大屏编辑页面入口。
+- 与首页共用 `useTbCameraRuntime.ts`，保持同一套摄像头运行时状态来源。
+- 点击摄像头点位后，会打开与首页相同的 `CameraVideoPanel` 监控预览面板。
+- 在用户打开预览时记录本地 `previewOpenCount` 和 `previewLastOpenTs`。
+- 在播放器报错或恢复时，同步更新 runtime 中的本地错误状态。
+- 保留原有传感器配置弹层和传感器预览逻辑。
+- 在进入编辑、取消编辑、保存编辑时，会同步关闭摄像头预览面板，避免状态冲突。
+
+9. src/views/tb/map/SensorWidgetPopup.vue
+功能：
+- 原本用于传感器弹层。
+- 本次做过类型兼容调整，避免地图页面在传入传感器 widget 配置时出现类型冲突。
+- 不是摄像头播放核心文件，但属于联动修改的一部分。
+
+10. vite.config.ts
+功能：
+- 新增 `/live` 代理配置。
+- 开发环境下，前端访问 `/live/...` 时，会转发到本地 HLS 静态服务。
+- 避免在前端代码里直接写死完整的本地服务地址，便于调试和后续替换。
+
+11. package.json
+功能：
+- 新增 `hls.js` 依赖。
+- 为 `CameraVideoPanel.vue` 提供 HLS 播放能力。
+
+12. pnpm-lock.yaml
+功能：
+- 锁定 `hls.js` 及相关依赖版本。
+- 保证不同机器安装依赖时结果一致。
+
+13. scripts/start-camera-hls.bat
+功能：
+- 一键启动 `RTSP -> HLS` 转流和本地静态服务。
+- 启动 FFmpeg，把摄像头 RTSP 实时转成 HLS 文件。
+- 启动 `http-server`，把 HLS 文件通过 HTTP 暴露给前端访问。
+- 顶部可修改摄像头账号、密码、IP、RTSP 路径、输出目录和端口。
+
+14. scripts/stop-camera-hls.bat
+功能：
+- 一键停止 `start-camera-hls.bat` 启动的两个窗口进程。
+- 关闭 FFmpeg 转流窗口。
+- 关闭 `http-server` 静态服务窗口。
+
+15. tools/camera-adapter/package.json
+功能：
+- 仅预览型摄像头本地 adapter 的独立依赖定义。
+- 提供 `pnpm dev`、`pnpm build`、`pnpm start` 运行入口。
+- 不影响主前端项目依赖。
+
+16. tools/camera-adapter/tsconfig.json
+功能：
+- adapter 的 TypeScript 编译配置。
+- 将 `src` 编译到 `dist`，便于本地调试和后续部署。
+
+17. tools/camera-adapter/src/types.ts
+功能：
+- 定义 adapter 内部使用的 topic payload 类型。
+- 包含 meta、state、health 三类消息结构。
+- 明确这套模型是“仅预览型摄像头”，不包含控制字段。
+
+18. tools/camera-adapter/src/config.ts
+功能：
+- 管理 adapter 的 MQTT 连接参数、摄像头静态信息、HLS 目录和健康检查阈值。
+- 支持通过环境变量覆盖默认值。
+- 当前默认对接 `camera-001` 示例摄像头。
+
+19. tools/camera-adapter/src/index.ts
+功能：
+- adapter 主入口。
+- 周期性检查本地 HLS 目录，推导 `online` 和 `streamAlive`。
+- 周期性发布 `camera/{cameraId}/meta`、`camera/{cameraId}/state`、`camera/{cameraId}/health`。
+- 不接收任何控制命令，不实现任何 RPC。
+
+20. tools/camera-adapter/README.md
+功能：
+- 说明 adapter 的用途、目录结构、运行方式和环境变量。
+- 给出 MQTT topic 规范、payload 示例和 Gateway mapping 建议。
+- 明确这套方案是“仅预览型摄像头”，视频流不经过 Gateway。
+
+整体流程说明
+
+1. 摄像头提供 RTSP 地址。
+2. `scripts/start-camera-hls.bat` 启动 FFmpeg，把 RTSP 转成 HLS。
+3. 同一个脚本再启动 `http-server`，对外提供 `index.m3u8` 和 `ts` 分片。
+4. 本地 adapter 检查 HLS 输出目录并通过 MQTT 发布摄像头状态。
+5. ThingsBoard Gateway 通过 MQTT connector 接入摄像头 attributes 和 telemetry。
+6. 前端通过 `useTbCameraRuntime.ts` 优先读取 ThingsBoard 数据，失败时回退到 `cameraMock.ts`。
+7. 前端通过 `/live/camera-001/index.m3u8` 访问 HLS 地址。
+8. 用户点击 Cesium 地图上的摄像头点位。
+9. 右上角 `CameraVideoPanel` 打开并播放实时视频，同时展示运行时状态。
+
+当前已接入页面
+
+- 首页地图页面：`src/views/tb/map/MapHome.vue`
+- Cesium 大屏编辑页面：`src/views/tb/map/MapWidgetEditor.vue`
+
+当前已新增 adapter 能力
+
+- 本地仅状态适配工具目录：`tools/camera-adapter/`
+- 发布 topic：
+  - `camera/{cameraId}/meta`
+  - `camera/{cameraId}/state`
+  - `camera/{cameraId}/health`
+- Gateway 只接入 attributes 和 telemetry
+- 当前明确不包含：
+  - RPC
+  - 控制 topic
+  - PTZ
+  - ONVIF
+  - 视频流经 Gateway
+
+当前前端状态接入策略
+
+- 前端摄像头静态兜底数据来自 `src/views/tb/map/cameraMock.ts`
+- 前端优先从 ThingsBoard 读取摄像头 attributes 和 telemetry
+- 如果 ThingsBoard 当前取不到数据，则自动回退到 mock 数据
+- 当前会话中的播放器错误和预览次数，由前端 runtime 本地维护，避免影响现有视频链路
+- 前端只有在摄像头 `deviceId` 是合法 UUID 时，才会向 ThingsBoard 请求 attributes 和 telemetry
+- 首页和大屏编辑页统一共用 `src/views/tb/map/useTbCameraRuntime.ts`
+
+当前已知前提
+
+- 前端不能直接播放 RTSP。
+- 必须保证摄像头 RTSP 用户名、密码、路径正确。
+- 只有 FFmpeg 成功生成 `index.m3u8` 后，前端视频才能正常播放。
+- 当前版本只做预览和状态展示，不提供任何控制能力。
+
+本次卡顿问题排查结论
+
+- 之前点击摄像头点位后页面卡死，不是单一播放器错误，而是响应式更新链路叠加导致的“更新风暴”。
+- 触发链路大致是：
+  1. 点击摄像头点位，打开 `CameraVideoPanel.vue`
+  2. 播放器初始化过程中触发自动播放、错误、恢复等状态变化
+  3. `CameraVideoPanel.vue` 把这些状态回传给 `useTbCameraRuntime.ts`
+  4. runtime 更新本地 `playerError`、`previewOpenCount`、`previewLastOpenTs`
+  5. `cameraPoints` 重新计算
+  6. `CesiumMap.vue` 误判为摄像头点位需要重绘
+  7. Cesium 整张图反复重绘，页面出现明显卡顿甚至假死
+- 当前已经通过下面几项修复切断这条链路：
+  - 对 mock `deviceId` 做 UUID 校验，避免无效 telemetry 请求和错误回调
+  - 对播放器 `AbortError` 和自动播放拦截场景做降噪
+  - 对播放器错误 / 恢复事件做去重
+  - 对 runtime 本地 UI 状态更新做“值没变化就不更新”
+  - 对 Cesium 摄像头点位重绘改成稳定签名判断，只在真正影响点位显示的字段变化时重绘
+- 现在页面不卡的原因，不是视频链路被替换，而是“播放器状态变化 -> runtime 更新 -> cameraPoints 重算 -> Cesium 重绘”的连锁反应已经被压住。
+
+后续维护约定
+
+- 以后只要新增、删除或修改摄像头相关文件，都同步更新本文件。
+- 如果后续把 `cameraMock.ts` 替换成真实后端数据源，也需要在本文件里补充说明。
+- 如果后续继续推进“仅预览型摄像头 + Gateway 状态接入”，优先维护 `tools/camera-adapter/` 和 `src/views/tb/map/useTbCameraRuntime.ts`，不改坏现有视频链路。
+- 如果后续要扩展音频、多个摄像头切换、状态灯、告警联动，也继续把相关文件和职责补进这里。
+- 如果后续要做控制类能力，必须单独开新方案说明，不能直接混入当前“仅预览型摄像头”实现。
+
+2026-05-05 虚拟油井摄像头闭环更新
+
+本次目标
+
+- 在现有 Cesium 地图链路上接入 `virtual-oilwell-cam-001` 测试点位。
+- 保持媒体流走 `MediaMTX -> 前端 hls.js`，不经过 Gateway / ThingsBoard。
+- 保持设备属性、遥测、告警的数据模型可继续演进到 `Gateway -> ThingsBoard -> 前端`。
+
+本次新增和修改文件
+
+1. `src/views/tb/map/cameraTypes.ts`
+- 扩展摄像头统一类型，补齐 `cameraCode`、`cameraName`、`rtspUrl`、`hlsUrl`、`webRtcUrl`、`streamOnline`、`fps`、`bitrate`、`delayMs`、`supportsPtz`、`supportsZoom`、`supportsPreset`、`controlMode`、`videoLoss`、`motionDetected`、`tamperAlarm` 等字段。
+- 保留现有 `CameraPoint` 作为 Cesium 点位对象，同时新增 `buildCameraPoint()` 统一归一化入口。
+- `resolveCameraStatus()` 现在按下面规则输出：
+  - `online=false` -> `offline`
+  - `online=true && streamOnline=false` -> `warning`
+  - `alarmLevel=critical` -> `error`
+
+2. `src/views/tb/map/mockVirtualCameras.ts`
+- 新增本地测试摄像头数组。
+- 当前包含 `virtual-oilwell-cam-001`。
+- HLS 地址直接指向 `http://localhost:8888/virtual-oilwell-cam-001/index.m3u8`。
+- RTSP 和 WebRTC 地址只作为属性展示，不在前端直接播放。
+- 明确保留 `TODO: 后续替换为 ThingsBoard Device attributes / latest telemetry 数据源。`
+
+3. `src/views/tb/map/cameraMock.ts`
+- 改成兼容导出层，继续导出 `cameraMockList`，避免现有引用断裂。
+- 实际数据改为来自 `mockVirtualCameras.ts`。
+
+4. `src/views/tb/map/services/cameraDeviceService.ts`
+- 新增摄像头数据服务入口。
+- 当前 `loadCameraDevices()` / `loadCameraPoints()` 返回 mock 数据。
+- 以后替换成 ThingsBoard REST / entity alias / telemetry 合并时，不需要改 Cesium 组件。
+
+5. `src/views/tb/map/useTbCameraRuntime.ts`
+- 不再直接写死引用 `cameraMock.ts`，改为先走 `cameraDeviceService.ts`。
+- 运行时仍保留：
+  - ThingsBoard attributes 合并
+  - latest telemetry 合并
+  - WebSocket latest telemetry 订阅
+  - 本地 `playerError` / `previewOpenCount` / `previewLastOpenTs` UI 状态
+- 新增对 `streamOnline`、`fps`、`bitrate`、`delayMs`、能力字段、告警字段的合并处理。
+
+6. `src/views/tb/map/CesiumMap.vue`
+- 继续复用现有单一 Cesium click handler，不新增重复 handler。
+- 摄像头 entity id 统一使用 `cameraCode`。
+- 摄像头点位 properties 新增：
+  - `cameraCode`
+  - `hlsUrl`
+  - `rtspUrl`
+  - `webRtcUrl`
+  - `streamOnline`
+  - `fps`
+  - `bitrate`
+  - `delayMs`
+  - `supportsPtz`
+  - `supportsZoom`
+  - `supportsPreset`
+  - `controlMode`
+- 点击摄像头点位后，仍然走现有 `camera-click` 事件回传。
+
+7. `src/views/tb/map/CameraVideoPanel.vue`
+- 保持右上角固定浮层和深色半透明大屏风格。
+- 播放地址优先使用 `camera.hlsUrl`，回退到 `camera.streamUrl`。
+- 当 `hlsUrl` 为空或 `streamOnline=false` 时，显示：
+  - `视频流离线或未配置播放地址`
+- 切换摄像头、关闭弹窗、组件卸载时都会销毁旧 `Hls` 实例并清理 video source。
+- 当前 `supportsPtz=false` 时不显示云台控制区。
+- 未来 `supportsPtz=true` 时会显示预留控制区，但控制函数只保留 `ThingsBoard RPC` TODO，不直连媒体服务器。
+- 在 HTTPS 开发环境下，HLS 地址必须优先走同源 `/live/...` 代理，不能直接写 `http://localhost:8888/...`，否则浏览器会因 Mixed Content 拦截 `.m3u8` 和分片请求。
+- 当前桌面浏览器调试时，播放器逻辑应优先使用 `hls.js`，只在 `hls.js` 不可用时才回退原生 HLS；否则部分浏览器会发出带 `?cookieCheck=1` 的探测请求，MediaMTX 可能返回 `404`。
+- 当前本地调试还需要对 `hls.js` 子请求做 URL 归一化：
+  - 如果请求路径变成 `/{cameraCode}/...`，需要补回 `/live`
+  - 如果查询参数里出现 `cookieCheck=1`，需要在 loader 层去掉
+  - 这样可以避免 `manifestLoadError` 和同源 `404`
+- MediaMTX 当前输出的多轨 HLS 依赖 `session` 查询参数：
+  - `index.m3u8` 里的 `video1_stream.m3u8?session=...`
+  - `audio2_stream.m3u8?session=...`
+  - 以及 media playlist 里的 `init.mp4` / `seg*.mp4` / `part*.mp4`
+- 前端 `hls.js` loader 需要在收到 playlist 文本后继续重写其中的相对 URI，确保 `/live/...` 前缀和 `session` 参数一起保留下来，否则会出现 `401 Unauthorized`。
+
+当前 mock 摄像头
+
+- `cameraCode`: `virtual-oilwell-cam-001`
+- `cameraName`: `虚拟油井摄像头-001`
+- `hlsUrl`: `http://localhost:8888/virtual-oilwell-cam-001/index.m3u8`
+- `webRtcUrl`: `http://localhost:8889/virtual-oilwell-cam-001`
+- `rtspUrl`: `rtsp://localhost:8554/virtual-oilwell-cam-001`
+- `supportsPtz`: `false`
+- `supportsZoom`: `false`
+- `supportsPreset`: `false`
+- `controlMode`: `none`
+
+2026-05-05 HLS 401 supplement
+- MediaMTX master playlist currently returns `audio2_stream.m3u8?session=...` and `video1_stream.m3u8?session=...`.
+- If the frontend gives `index.m3u8` directly to `hls.js`, some browser + loader combinations may re-request the independent audio playlist without the `session` query and trigger `401 Unauthorized`.
+- `src/views/tb/map/CameraVideoPanel.vue` now fetches the master playlist first, selects the first `#EXT-X-STREAM-INF` video media playlist, and then passes that session-bearing child playlist URL to `hls.js`.
+- The master-playlist prefetch step must also seed the local HLS session cache with child playlist URIs; otherwise `hls.js` may re-issue `/live/.../video1_stream.m3u8` without query params and the loader will have no `session` value to restore.
+- The current loader also pins the active primary video playlist URL. If `hls.js` later re-requests the same `video1_stream.m3u8` path without query params, the loader restores the full session-bearing URL instead of letting the request fall through to `401`.
+- For the current local virtual camera, the popup now prefers a proxied MediaMTX preview page (`/live-view/{cameraCode}/`) through an iframe. This reuses the MediaMTX built-in stable player over HTTPS and avoids the repeated `video1_stream.m3u8 401` failure inside the custom popup player.
+- The direct `hls.js` path is still kept in `CameraVideoPanel.vue` as the generic fallback for cameras that only expose raw HLS playlists and do not have a dedicated monitor page.
+- Vite proxy ordering matters here: `/live-view` must be registered before the generic `/live` camera-stream rule, otherwise `/live-view/...` will be matched by `/live` first and incorrectly rewritten into `/-view/...`, which causes `404 Not Found` for the iframe player page and its `index.m3u8`.
+- This is a local playback stability safeguard for the current virtual camera loop. It keeps the media path as `MediaMTX -> frontend hls.js` and does not route video content through Gateway or ThingsBoard.
+
+Gateway 配置预留说明
+
+- 本次没有直接修改 `E:\simulationEquipment\tb-gateway\config\mqtt.json`。
+- 当前已读取到现有 `sensor/data` mapping，后续应在其基础上追加 `virtual-camera/...` topic mapping，不能覆盖原有 `sim-sensor-001` 流程。
+- 视频流内容不通过 MQTT / Gateway / ThingsBoard，只上传 URL、状态、遥测和事件字段。
+- 当前项目开发态 `/live` 代理默认应指向 `http://127.0.0.1:8888`，与本地 MediaMTX HLS 端口保持一致；如果后续换端口，再通过 `VITE_CAMERA_STREAM_PROXY_TARGET` 覆盖。
+- `/live` 代理必须同时做路径改写：`/live/virtual-oilwell-cam-001/index.m3u8 -> /virtual-oilwell-cam-001/index.m3u8`，否则 MediaMTX 会返回 `404 Not Found`。
+- 本地浏览器调试时，部分 HLS 请求可能直接落到 `/{cameraCode}/...`，例如 `/virtual-oilwell-cam-001/index.m3u8`；Vite 需要额外代理 `^/virtual-.*` 到 MediaMTX，避免播放器内部路径漂移导致 `404`。

@@ -1,0 +1,13 @@
+export enum RelationTypeGroup {
+  COMMON = 'COMMON',
+  DASHBOARD = 'DASHBOARD',
+  RULE_CHAIN = 'RULE_CHAIN',
+  RULE_NODE = 'RULE_NODE',
+  EDGE = 'EDGE',
+  EDGE_AUTO_ASSIGN_RULE_CHAIN = 'EDGE_AUTO_ASSIGN_RULE_CHAIN',
+}
+
+export enum EntitySearchDirection {
+  TO = 'TO',
+  FROM = 'FROM',
+}

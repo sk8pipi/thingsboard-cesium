@@ -1,0 +1,52 @@
+# Dependencies
+frontend/node_modules/
+backend/**/node_modules/
+
+# Frontend build output and local runtime files
+frontend/dist/
+frontend/.cache/
+frontend/dev-server.log
+frontend/dev-server.err
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+frontend/vite.config.ts.timestamp*
+
+# Java / Maven build output
+backend/**/target/
+backend/**/build/
+backend/**/output/
+backend/**/bin/
+backend/**/*.class
+
+# Local environment and secrets
+.env
+.env.local
+.env.*.local
+frontend/.env
+frontend/.env.local
+frontend/.env.development
+frontend/.env.production
+backend/**/.env
+backend/**/local.properties
+hls-cookies*.txt
+
+# IDE and OS files
+.idea/
+.vscode/
+*.iml
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+
+# Misc generated files
+*.log
+*.toDelete
+*.versionsBackup
+dependency-reduced-pom.xml
+.instance_id
