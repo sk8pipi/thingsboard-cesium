@@ -15,6 +15,8 @@
  */
 package org.thingsboard.server.service.entitiy.dashboard;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.stereotype.Service;
@@ -33,6 +35,7 @@ import org.thingsboard.server.common.data.id.TenantId;
 import org.thingsboard.server.dao.dashboard.DashboardService;
 import org.thingsboard.server.queue.util.TbCoreComponent;
 import org.thingsboard.server.service.entitiy.AbstractTbEntityService;
+import org.thingsboard.server.service.map.MapTemplateUpdateService;
 import org.thingsboard.server.service.resource.TbResourceService;
 import org.thingsboard.server.service.security.model.SecurityUser;
 
@@ -44,8 +47,13 @@ import java.util.Set;
 @AllArgsConstructor
 public class DefaultTbDashboardService extends AbstractTbEntityService implements TbDashboardService {
 
+    private static final String MAP_TEMPLATE_CONFIG_KEY = "__mapWidgetEditor";
+    private static final String MAP_TEMPLATE_VERSION_KEY = "version";
+    private static final String MAP_TEMPLATE_UPDATED_TIME_KEY = "updatedTime";
+
     private final DashboardService dashboardService;
     private final TbResourceService tbResourceService;
+    private final MapTemplateUpdateService mapTemplateUpdateService;
 
     @Override
     public Dashboard save(Dashboard dashboard, SecurityUser user) throws Exception {
@@ -57,10 +65,16 @@ public class DefaultTbDashboardService extends AbstractTbEntityService implement
         }
 
         try {
+            Dashboard existingDashboard = dashboard.getId() != null
+                    ? dashboardService.findDashboardById(tenantId, dashboard.getId()) : null;
+            Long mapTemplateVersion = prepareMapTemplateVersion(dashboard, existingDashboard);
             Dashboard savedDashboard = checkNotNull(dashboardService.saveDashboard(dashboard));
             autoCommit(user, savedDashboard.getId());
             logEntityActionService.logEntityAction(tenantId, savedDashboard.getId(), savedDashboard, null,
                     actionType, user);
+            if (mapTemplateVersion != null) {
+                mapTemplateUpdateService.publish(savedDashboard, mapTemplateVersion, mapTemplateVersion);
+            }
             return savedDashboard;
         } catch (Exception e) {
             logEntityActionService.logEntityAction(tenantId, emptyId(EntityType.DASHBOARD), dashboard, actionType, user, e);
@@ -289,6 +303,62 @@ public class DefaultTbDashboardService extends AbstractTbEntityService implement
         } catch (Exception e) {
             logEntityActionService.logEntityAction(tenantId, emptyId(EntityType.DASHBOARD), actionType, user, e, dashboardId.toString());
             throw e;
+        }
+    }
+
+    private Long prepareMapTemplateVersion(Dashboard dashboard, Dashboard existingDashboard) {
+        JsonNode newTemplate = getMapTemplateNode(dashboard);
+        if (!(newTemplate instanceof ObjectNode newTemplateObject)) {
+            return null;
+        }
+
+        JsonNode existingTemplate = getMapTemplateNode(existingDashboard);
+        if (sameTemplateContent(newTemplate, existingTemplate)) {
+            copyExistingTemplateVersion(newTemplateObject, existingTemplate);
+            return null;
+        }
+
+        long version = System.currentTimeMillis();
+        newTemplateObject.put(MAP_TEMPLATE_VERSION_KEY, version);
+        newTemplateObject.put(MAP_TEMPLATE_UPDATED_TIME_KEY, version);
+        return version;
+    }
+
+    private JsonNode getMapTemplateNode(Dashboard dashboard) {
+        if (dashboard == null || dashboard.getConfiguration() == null || !dashboard.getConfiguration().isObject()) {
+            return null;
+        }
+        return dashboard.getConfiguration().get(MAP_TEMPLATE_CONFIG_KEY);
+    }
+
+    private boolean sameTemplateContent(JsonNode newTemplate, JsonNode existingTemplate) {
+        if (newTemplate == null || existingTemplate == null) {
+            return newTemplate == existingTemplate;
+        }
+        return stripMapTemplateVersion(newTemplate).equals(stripMapTemplateVersion(existingTemplate));
+    }
+
+    private JsonNode stripMapTemplateVersion(JsonNode template) {
+        if (!(template instanceof ObjectNode templateObject)) {
+            return template;
+        }
+        ObjectNode copy = templateObject.deepCopy();
+        copy.remove(MAP_TEMPLATE_VERSION_KEY);
+        copy.remove(MAP_TEMPLATE_UPDATED_TIME_KEY);
+        return copy;
+    }
+
+    private void copyExistingTemplateVersion(ObjectNode newTemplateObject, JsonNode existingTemplate) {
+        if (!(existingTemplate instanceof ObjectNode existingTemplateObject)) {
+            return;
+        }
+        JsonNode existingVersion = existingTemplateObject.get(MAP_TEMPLATE_VERSION_KEY);
+        JsonNode existingUpdatedTime = existingTemplateObject.get(MAP_TEMPLATE_UPDATED_TIME_KEY);
+        if (existingVersion != null) {
+            newTemplateObject.set(MAP_TEMPLATE_VERSION_KEY, existingVersion);
+        }
+        if (existingUpdatedTime != null) {
+            newTemplateObject.set(MAP_TEMPLATE_UPDATED_TIME_KEY, existingUpdatedTime);
         }
     }
 
