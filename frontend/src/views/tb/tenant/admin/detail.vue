@@ -21,7 +21,11 @@
     </template>
     <div v-show="tabActiveKey == DetailTabItemEnum.DETAIL.key">
       <div class="space-x-4">
-        <a-button type="primary" @click="handleAdminLogin">
+        <a-button
+          v-if="userStore.systemParams?.userTokenAccessEnabled === true"
+          type="primary"
+          @click="handleAdminLogin"
+        >
           <Icon :icon="'ant-design:login-outlined'" />{{ t('tb.user.admin.action.loginAsAdmin') }}
         </a-button>
         <a-button
@@ -122,8 +126,10 @@
   import Telemetry from '/@/views/tb/telemetry/index.vue';
   import Relation from '/@/views/tb/relation/list.vue';
   import { DetailTabItemEnum } from '/@/enums/detailTabEnum';
+  import { useUserStore } from '/@/store/modules/user';
 
   const emit = defineEmits(['edit', 'delete', 'login', 'register']);
+  const userStore = useUserStore();
 
   const { t } = useI18n('tb');
   const { createConfirm, showMessage } = useMessage();

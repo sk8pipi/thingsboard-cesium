@@ -74,6 +74,7 @@ export const usePermissionStore = defineStore('app-permission', {
     resetState(): void {
       this.isDynamicAddedRoute = false;
       this.backMenuList = [];
+      this.frontMenuList = [];
       this.lastBuildMenuTime = 0;
     },
     async changePermissionCode() {

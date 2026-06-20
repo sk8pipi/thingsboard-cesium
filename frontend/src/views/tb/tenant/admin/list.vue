@@ -47,7 +47,7 @@
   import { Icon } from '/@/components/Icon';
   import { router } from '/@/router';
   import { tenantInfoById, TenantInfo } from '/@/api/tb/tenant';
-  import { getTenantAdmins, deleteUser, getUserToken, getUserById } from '/@/api/tb/user';
+  import { getTenantAdmins, deleteUser } from '/@/api/tb/user';
   import { reactive } from 'vue';
   import InputForm from './form.vue';
   import DetailDrawer from './detail.vue';
@@ -120,6 +120,7 @@
       {
         icon: 'ant-design:login-outlined',
         title: t('tb.user.admin.action.loginAsAdmin'),
+        ifShow: () => userStore.systemParams?.userTokenAccessEnabled === true,
         onClick: handleLoginUser.bind(this, { ...record }),
       },
       {
@@ -162,11 +163,7 @@
 
   async function handleLoginUser(record: Recordable) {
     try {
-      const jwtPair = await getUserToken(record.id.id);
-      userStore.setToken(jwtPair);
-      userStore.setSessionTimeout(false);
-
-      const userInfo = await userStore.getUserInfoAction();
+      const userInfo = await userStore.loginAsUser(record.id.id);
 
       if (userInfo) {
         notification.success({
@@ -174,13 +171,9 @@
           description: `${t('sys.login.loginSuccessDesc')}: ${userInfo.email}`,
           duration: 3,
         });
-
-        await userStore.afterLoginAction(userInfo, true);
       }
     } catch (error: any) {
       showMessage(error.message, 'error');
-    } finally {
-      location.reload();
     }
   }
 

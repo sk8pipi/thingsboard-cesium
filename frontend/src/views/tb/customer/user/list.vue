@@ -47,7 +47,7 @@
   import { Icon } from '/@/components/Icon';
   import { router } from '/@/router';
   import { getCustomerById, Customer } from '/@/api/tb/customer';
-  import { getCustomerUsers, deleteUser, getUserToken, getUserById } from '/@/api/tb/user';
+  import { getCustomerUsers, deleteUser } from '/@/api/tb/user';
   import { reactive } from 'vue';
   import InputForm from './form.vue';
   import DetailDrawer from './detail.vue';
@@ -120,6 +120,7 @@
       {
         icon: 'ant-design:login-outlined',
         title: t('tb.user.action.loginAsUser'),
+        ifShow: () => userStore.systemParams?.userTokenAccessEnabled === true,
         onClick: handleLoginUser.bind(this, { ...record }),
       },
       {
@@ -162,13 +163,7 @@
 
   async function handleLoginUser(record: Recordable) {
     try {
-      const jwtPair = await getUserToken(record.id.id);
-      userStore.setToken(jwtPair);
-      userStore.setSessionTimeout(false);
-
-      const userInfo = await getUserById(record.id.id);
-
-      await userStore.afterLoginAction(userInfo, true);
+      const userInfo = await userStore.loginAsUser(record.id.id);
 
       if (userInfo) {
         notification.success({
@@ -179,8 +174,6 @@
       }
     } catch (error: any) {
       showMessage(error.message, 'error');
-    } finally {
-      location.reload();
     }
   }
 

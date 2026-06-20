@@ -8,8 +8,9 @@ import { getAuthCache, setAuthCache } from '/@/utils/auth';
 import { loginApi, logoutApi, userInfoApi, LoginParams } from '/@/api/tb/login';
 // import { useI18n } from '/@/hooks/web/useI18n';
 // import { useMessage } from '/@/hooks/web/useMessage';
-import { router } from '/@/router';
+import { router, resetRouter } from '/@/router';
 import { usePermissionStore } from '/@/store/modules/permission';
+import { useMultipleTabStore } from '/@/store/modules/multipleTab';
 import { RouteRecordRaw } from 'vue-router';
 import { PAGE_NOT_FOUND_ROUTE } from '/@/router/routes/basic';
 import { useGlobSetting } from '/@/hooks/setting';
@@ -19,6 +20,7 @@ import { Authority } from '/@/enums/authorityEnum';
 import { getExpiration } from '/@/utils/jwt';
 import { publicPath } from '/@/utils/env';
 import { getSystemParams, SystemParams } from '/@/api/tb/systemInfo';
+import { getUserToken } from '/@/api/tb/user';
 import { useLocale } from '/@/locales/useLocale';
 import type { LocaleType } from '/#/config';
 import { localeList } from '/@/settings/localeSetting';
@@ -157,6 +159,15 @@ export const useUserStore = defineStore('app-user', {
     },
     // async afterLoginAction(goHome?: boolean): Promise<GetUserInfoModel | null> {
     async afterLoginAction(res: UserInfo, goHome?: boolean) {
+      const permissionStore = usePermissionStore();
+      const authorityChanged = Boolean(this.getAuthority && this.getAuthority !== res.authority);
+
+      if (authorityChanged && permissionStore.isDynamicAddedRoute) {
+        resetRouter();
+        permissionStore.resetState();
+        useMultipleTabStore().resetState();
+      }
+
       this.setUserInfo(res);
       this.initPageCache(res);
       this.setSessionTimeout(false);
@@ -165,7 +176,6 @@ export const useUserStore = defineStore('app-user', {
       if (res.additionalInfo?.lang) {
         await this.changeUserLocale(res.additionalInfo?.lang);
       }
-      const permissionStore = usePermissionStore();
       if (!permissionStore.isDynamicAddedRoute) {
         const routes = await permissionStore.buildRoutesAction();
         routes.forEach((route) => {
@@ -189,6 +199,20 @@ export const useUserStore = defineStore('app-user', {
       }
       return res || null;
     },
+    async loginAsUser(userId: string) {
+      const systemParams = await this.getSystemParams();
+      if (!systemParams.userTokenAccessEnabled) {
+        throw new Error('ThingsBoard 后端未启用用户身份切换功能');
+      }
+
+      const jwtPair = await getUserToken(userId);
+      this.setToken(jwtPair);
+      this.setSessionTimeout(false);
+
+      const userInfo = await userInfoApi();
+      await this.afterLoginAction(userInfo, true);
+      return userInfo;
+    },
     async getUserInfoAction() {
       // ✅ 1) 没 token：直接不请求，避免 /api/auth/user 401
       const token = this.getToken;
@@ -202,6 +226,11 @@ export const useUserStore = defineStore('app-user', {
         this.setUserInfo(res);
         this.initPageCache(res);
         this.setSessionTimeout(false);
+        try {
+          this.systemParams = await getSystemParams();
+        } catch (error) {
+          console.warn('Failed to load system parameters', error);
+        }
         return res;
       } catch (e: any) {
         // ✅ 3) token 过期/无效时：把状态清掉并回登录
