@@ -25,6 +25,10 @@ export type RuntimeWidgetLike = {
   config?: Record<string, any>;
 };
 
+export type DatasourceRuntimeOptions = {
+  getExternalValues?: (entityType: string, entityId: string) => Record<string, unknown> | undefined | null;
+};
+
 type DataKeyMeta = {
   name: string;
   type?: string;
@@ -299,11 +303,12 @@ function appendRealtime(d: WidgetRuntimeData, keys: string[], payload: any) {
   d.updatedAt = Date.now();
 }
 
-export function createDatasourceRuntime() {
+export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) {
   const token = localStorage.getItem('jwt_token') || '';
   const wsClient = new TbWsTelemetryClient(token);
 
   const runtimeDataMap = new Map<string, WidgetRuntimeData>();
+  const mountedWidgetMap = new Map<string, RuntimeWidgetLike>();
 
   function connect() {
     wsClient.connect();
@@ -322,6 +327,7 @@ export function createDatasourceRuntime() {
       clearLatestPolling(d);
     });
     runtimeDataMap.clear();
+    mountedWidgetMap.clear();
     wsClient.close();
   }
 
@@ -350,6 +356,34 @@ export function createDatasourceRuntime() {
     if (d.wsTsSubCmdId) wsClient.unsubscribe(d.wsTsSubCmdId);
     d.wsHistoryCmdId = undefined;
     d.wsTsSubCmdId = undefined;
+  }
+
+  function applyExternalLatest(widget: RuntimeWidgetLike) {
+    const d = ensureRuntimeData(widget.id);
+    const ds = normalizeDatasource(widget.config);
+
+    if (!ds) {
+      return false;
+    }
+
+    const externalValues = options.getExternalValues?.(ds.entityType, ds.entityId);
+    if (!externalValues) {
+      return false;
+    }
+
+    const latestValues = ds.keys.reduce<Record<string, number | string | null>>((result, key) => {
+      const value = externalValues[key];
+      if (value !== undefined) {
+        result[key] = toNumberMaybe(value);
+      }
+      return result;
+    }, {});
+
+    d.latestValues = latestValues;
+    applyLatestValuesToSeries(d, latestValues);
+    d.updatedAt = Date.now();
+    d.error = undefined;
+    return true;
   }
 
   async function fetchLatestOnce(widget: RuntimeWidgetLike) {
@@ -421,6 +455,10 @@ export function createDatasourceRuntime() {
       return d;
     }
 
+    if (applyExternalLatest(widget)) {
+      return d;
+    }
+
     void fetchLatestOnce(widget);
 
     d.latestPollTimer = window.setInterval(() => {
@@ -445,6 +483,11 @@ export function createDatasourceRuntime() {
 
     if (!ds) {
       d.error = 'datasource 无效：缺少 entityId 或 keys';
+      return d;
+    }
+
+    if (applyExternalLatest(widget)) {
+      unsubscribeTimeseries(d);
       return d;
     }
 
@@ -489,6 +532,7 @@ export function createDatasourceRuntime() {
   function mountWidgetRuntime(widget: RuntimeWidgetLike) {
     const d = ensureRuntimeData(widget.id);
     const category = widget.category;
+    mountedWidgetMap.set(widget.id, widget);
 
     if (category === 'timeseries') {
       return subscribeTimeseries(widget);
@@ -511,6 +555,13 @@ export function createDatasourceRuntime() {
     clearLatestPolling(d);
     unsubscribeTimeseries(d);
     runtimeDataMap.delete(widgetId);
+    mountedWidgetMap.delete(widgetId);
+  }
+
+  function refreshExternalValues() {
+    mountedWidgetMap.forEach((widget) => {
+      applyExternalLatest(widget);
+    });
   }
 
   return {
@@ -519,5 +570,6 @@ export function createDatasourceRuntime() {
     ensureRuntimeData,
     mountWidgetRuntime,
     unmountWidgetRuntime,
+    refreshExternalValues,
   };
 }

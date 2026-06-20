@@ -12,6 +12,7 @@
   import { createDatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
   import { widgetRegistry } from '../dashboard/runtime/widgets/registry/widgetRegistry';
   import type { DashboardWidget, GridItem, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
+  import type { MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
 
   type WidgetData = DashboardWidget & {
     type?: LocalWidgetKey;
@@ -26,13 +27,16 @@
   const props = defineProps<{
     storageKey: string;
     data?: WidgetLayerData | null;
+    runtimeDevices?: MapTemplateRuntimeDevices | null;
   }>();
 
   const gridEl = ref<HTMLDivElement | null>(null);
   let grid: any = null;
 
   const mountedApps = new Map<string, ReturnType<typeof createApp>>();
-  const datasourceRuntime = createDatasourceRuntime();
+  const datasourceRuntime = createDatasourceRuntime({
+    getExternalValues: (_entityType, entityId) => props.runtimeDevices?.[entityId],
+  });
 
   let renderPatched = false;
   function patchGridstackRenderOnce() {
@@ -216,6 +220,14 @@
     async () => {
       await nextTick();
       await render();
+    },
+    { deep: true },
+  );
+
+  watch(
+    () => props.runtimeDevices,
+    () => {
+      datasourceRuntime.refreshExternalValues();
     },
     { deep: true },
   );

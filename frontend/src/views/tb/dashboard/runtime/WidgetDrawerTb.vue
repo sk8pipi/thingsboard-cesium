@@ -90,24 +90,31 @@
                   class="tb-widget-card"
                   @click="emitAdd(w)"
                 >
-                  <div class="tb-widget-card-top">
-                    <img v-if="resolveImg(w.image)" class="tb-widget-img" :src="resolveImg(w.image)!" alt="" />
-                    <div v-else class="tb-widget-img placeholder">TB</div>
-
-                    <div class="tb-widget-meta">
-                      <div class="tb-widget-name">{{ w.name }}</div>
-                      <div class="tb-widget-alias">{{ w.alias }}</div>
-
-                      <div class="tb-widget-tags">
-                        <span class="tb-tag">{{ normalizeType(w.type) }}</span>
-                        <span class="tb-tag sub">{{ w.bundleAlias }}</span>
-                      </div>
+                  <div class="tb-widget-preview">
+                    <img
+                      v-if="getPreviewImage(w)"
+                      class="tb-widget-img"
+                      :src="getPreviewImage(w)"
+                      :alt="getDisplayName(w)"
+                      loading="lazy"
+                      @error="w.previewImage = ''"
+                    />
+                    <div v-else class="tb-widget-img placeholder">
+                      <span>{{ getPreviewInitials(w) }}</span>
                     </div>
                   </div>
 
-                  <div class="tb-widget-desc">
-                    {{ w.description || '暂无描述' }}
+                  <div class="tb-widget-meta">
+                    <div class="tb-widget-name" :title="getDisplayName(w)">{{ getDisplayName(w) }}</div>
+                    <div class="tb-widget-alias" :title="w.alias">{{ w.alias }}</div>
+
+                    <div class="tb-widget-tags">
+                      <span class="tb-tag">{{ normalizeType(w.type) }}</span>
+                      <span class="tb-tag sub">{{ w.bundleAlias }}</span>
+                    </div>
                   </div>
+
+                  <div class="tb-widget-desc">{{ w.description || '暂无描述' }}</div>
 
                   <div class="tb-widget-card-actions">
                     <el-button size="small" type="primary" @click.stop="emitAdd(w)">添加</el-button>
@@ -125,8 +132,9 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, onMounted, ref, watch } from 'vue';
-  import { getAllWidgetsBundles, getWidgetTypes, type TbWidgetType, type TbWidgetsBundle } from './tbWidgetApi';
+  import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+  import { imagePreview, tbImagePrefix } from '/@/api/tb/images';
+  import { getAllWidgetsBundles, getWidgetTypesDetails, type TbWidgetType, type TbWidgetsBundle } from './tbWidgetApi';
 
   const LOCAL_BUNDLE_ALIAS = '__local__';
 
@@ -138,7 +146,7 @@
       bundleAlias: LOCAL_BUNDLE_ALIAS,
       type: 'MAP',
       description: '基于 Cesium 的 3D 地图部件',
-      image: '',
+      previewImage: createPreviewSvg('3D Map', '#2563eb', '#22c55e'),
     } as any,
     {
       id: { id: 'local-chart' } as any,
@@ -147,7 +155,7 @@
       bundleAlias: LOCAL_BUNDLE_ALIAS,
       type: 'CHART',
       description: '基于 Apache ECharts 的图表部件',
-      image: '',
+      previewImage: createPreviewSvg('Chart', '#7c3aed', '#f59e0b'),
     } as any,
   ];
 
@@ -163,8 +171,7 @@
     { label: '自定义', value: 'tenant' },
   ] as const;
   const drawerSize = computed(() => {
-    // 2/5 屏幕 = 40vw，同时给个最小/最大，避免太窄/太宽
-    return '40vw';
+    return 'clamp(620px, 48vw, 960px)';
   });
   const props = defineProps<{ modelValue: boolean }>();
   const emit = defineEmits<{
@@ -234,12 +241,17 @@
   const widgetsLoading = ref(false);
   const widgetTypes = ref<TbWidgetType[]>([]);
   const widgetSearch = ref('');
+  const objectUrls = new Set<string>();
+  let widgetRequestSeq = 0;
 
   async function reloadWidgetTypes() {
     if (!activeBundleAlias.value) return;
 
+    const requestSeq = ++widgetRequestSeq;
+
     // ✅ 本地分类：不请求后端，直接给本地两个部件
     if (activeBundleAlias.value === LOCAL_BUNDLE_ALIAS) {
+      widgetsLoading.value = false;
       const kw = widgetSearch.value.trim().toLowerCase();
       const list = !kw
         ? localWidgetTypes
@@ -255,14 +267,28 @@
 
     widgetsLoading.value = true;
     try {
-      const list = await getWidgetTypes({
+      const list = await getWidgetTypesDetails({
         isSystem: activeBundleIsSystem.value,
         bundleAlias: activeBundleAlias.value,
         textSearch: widgetSearch.value.trim() || undefined,
+        inlineImages: true,
       });
-      widgetTypes.value = (list || []).slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      if (requestSeq !== widgetRequestSeq) return;
+
+      const normalizedList = (list || [])
+        .slice()
+        .sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b)))
+        .map((item) => ({
+          ...item,
+          previewImage: resolveInlineImage(item.image) || item.previewImage || '',
+        }));
+
+      widgetTypes.value = normalizedList;
+      void enrichPreviewImages(normalizedList, requestSeq);
     } finally {
-      widgetsLoading.value = false;
+      if (requestSeq === widgetRequestSeq) {
+        widgetsLoading.value = false;
+      }
     }
   }
 
@@ -270,12 +296,63 @@
     emit('add', w);
   }
 
-  // ====== 图片处理（TB 返回可能是 base64，也可能是 data:...）======
-  function resolveImg(img?: string) {
+  function getDisplayName(w: TbWidgetType) {
+    return w.name || w.title || w.label || w.alias || '未命名部件';
+  }
+
+  function getPreviewImage(w: TbWidgetType) {
+    return w.previewImage || resolveInlineImage(w.image);
+  }
+
+  function getPreviewInitials(w: TbWidgetType) {
+    return getDisplayName(w).trim().slice(0, 2).toUpperCase() || 'TB';
+  }
+
+  // ====== 图片处理（TB 返回可能是 base64、data:...，也可能是 tb-image; 引用）======
+  function resolveInlineImage(img?: string) {
     if (!img) return '';
+    if (img.startsWith(tbImagePrefix)) return '';
     if (img.startsWith('data:')) return img;
-    // 很多 TB 字段是 base64（不带前缀）
+    if (/^(https?:|blob:|\/)/.test(img)) return img;
+    if (img.trim().startsWith('<svg')) {
+      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(img)}`;
+    }
     return `data:image/png;base64,${img}`;
+  }
+
+  async function enrichPreviewImages(list: TbWidgetType[], requestSeq: number) {
+    const tasks = list.map(async (item) => {
+      if (item.previewImage || !item.image?.startsWith(tbImagePrefix)) return;
+
+      try {
+        const link = item.image.replace(tbImagePrefix, '');
+        const file = await imagePreview(link);
+        if (requestSeq !== widgetRequestSeq) return;
+
+        const url = URL.createObjectURL(file);
+        objectUrls.add(url);
+        item.previewImage = url;
+      } catch {
+        item.previewImage = '';
+      }
+    });
+
+    await Promise.all(tasks);
+  }
+
+  function createPreviewSvg(label: string, primary: string, accent: string) {
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 210">
+        <rect width="360" height="210" rx="18" fill="#f8fafc"/>
+        <rect x="24" y="24" width="312" height="162" rx="14" fill="#ffffff" stroke="#dbe3ef"/>
+        <path d="M46 152 C82 112 120 134 152 96 S230 62 316 100" fill="none" stroke="${primary}" stroke-width="12" stroke-linecap="round"/>
+        <rect x="58" y="116" width="38" height="44" rx="8" fill="${accent}" opacity=".88"/>
+        <rect x="112" y="86" width="38" height="74" rx="8" fill="${primary}" opacity=".88"/>
+        <rect x="166" y="104" width="38" height="56" rx="8" fill="${accent}" opacity=".72"/>
+        <text x="180" y="54" fill="#172033" font-family="Arial, sans-serif" font-size="24" font-weight="700" text-anchor="middle">${label}</text>
+      </svg>
+    `;
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   }
 
   function normalizeType(t?: string) {
@@ -324,6 +401,11 @@
   onMounted(() => {
     // 如果你希望首次就预热，可打开这一句
     // reloadBundles();
+  });
+
+  onBeforeUnmount(() => {
+    objectUrls.forEach((url) => URL.revokeObjectURL(url));
+    objectUrls.clear();
   });
 </script>
 
@@ -419,51 +501,76 @@
 
   .tb-widget-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
     padding: 2px;
   }
 
   .tb-widget-card {
     cursor: pointer;
-    border-radius: 12px;
+    border-radius: 8px;
+    overflow: hidden;
+    transition:
+      border-color 0.18s ease,
+      transform 0.18s ease,
+      box-shadow 0.18s ease;
+  }
+  .tb-widget-card:hover {
+    transform: translateY(-2px);
+    border-color: #91caff;
   }
 
-  .tb-widget-card-top {
+  :deep(.tb-widget-card .el-card__body) {
     display: flex;
-    gap: 10px;
-    align-items: flex-start;
+    min-height: 100%;
+    flex-direction: column;
+    padding: 10px;
+  }
+
+  .tb-widget-preview {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #f8fafc;
   }
   .tb-widget-img {
-    width: 56px;
-    height: 56px;
-    object-fit: cover;
-    border-radius: 10px;
-    border: 1px solid #eee;
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: contain;
   }
   .tb-widget-img.placeholder {
     display: flex;
     align-items: center;
     justify-content: center;
+    color: #64748b;
+    font-size: 22px;
     font-weight: 800;
-    opacity: 0.5;
-    background: #f6f7fb;
+    background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(20, 184, 166, 0.1)), #f8fafc;
   }
 
   .tb-widget-meta {
-    flex: 1;
     min-width: 0;
+    padding-top: 10px;
   }
   .tb-widget-name {
     font-weight: 800;
-    font-size: 13px;
-    line-height: 18px;
-    margin-bottom: 2px;
+    font-size: 14px;
+    line-height: 20px;
+    margin-bottom: 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .tb-widget-alias {
     font-size: 12px;
     opacity: 0.7;
-    word-break: break-all;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .tb-widget-tags {
     display: flex;
@@ -483,10 +590,15 @@
   }
 
   .tb-widget-desc {
-    margin-top: 10px;
+    display: -webkit-box;
+    min-height: 36px;
     font-size: 12px;
+    line-height: 18px;
+    margin-top: 8px;
+    overflow: hidden;
     opacity: 0.75;
-    min-height: 32px;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 
   .tb-widget-card-actions {

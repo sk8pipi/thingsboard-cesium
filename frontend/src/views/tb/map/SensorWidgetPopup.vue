@@ -10,9 +10,7 @@
         </div>
       </div>
 
-      <button class="sensor-widget-popup__close" type="button" @click="$emit('close')">
-        关闭
-      </button>
+      <button class="sensor-widget-popup__close" type="button" @click="$emit('close')"> 关闭 </button>
     </div>
 
     <div class="sensor-widget-popup__info">
@@ -22,16 +20,10 @@
       </div>
     </div>
 
-    <div v-if="!normalizedWidgets.length" class="sensor-widget-popup__empty">
-      暂无部件
-    </div>
+    <div v-if="!normalizedWidgets.length" class="sensor-widget-popup__empty"> 暂无部件 </div>
 
     <div v-else class="sensor-widget-popup__body">
-      <div
-        v-for="w in normalizedWidgets"
-        :key="w.id"
-        class="sensor-widget-popup__item"
-      >
+      <div v-for="w in normalizedWidgets" :key="w.id" class="sensor-widget-popup__item">
         <div class="sensor-widget-popup__item-title">{{ w.title }}</div>
         <div class="sensor-widget-popup__mount">
           <div :id="`sensor-popup-mount-${w.id}`" class="sensor-widget-popup__mount-inner"></div>
@@ -48,6 +40,7 @@
   import type { DashboardWidget, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
   import { widgetRegistry } from '../dashboard/runtime/widgets/registry/widgetRegistry';
   import type { PopupWidgetConfig } from './sensorPopupWidgetStorage';
+  import type { MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
 
   type WidgetData = DashboardWidget & {
     type?: LocalWidgetKey;
@@ -60,6 +53,7 @@
     visible: boolean;
     sensor?: any;
     widgets: SensorPopupWidgetInput[];
+    runtimeDevices?: MapTemplateRuntimeDevices | null;
   }>();
 
   defineEmits<{
@@ -67,7 +61,9 @@
   }>();
 
   const mountedApps = new Map<string, ReturnType<typeof createApp>>();
-  const datasourceRuntime = createDatasourceRuntime();
+  const datasourceRuntime = createDatasourceRuntime({
+    getExternalValues: (_entityType, entityId) => props.runtimeDevices?.[entityId],
+  });
 
   function formatCoordinate(value: unknown) {
     const coordinate = Number(value);
@@ -168,6 +164,14 @@
     () => [props.visible, props.widgets],
     async () => {
       await remountAll();
+    },
+    { deep: true },
+  );
+
+  watch(
+    () => [props.sensor, props.runtimeDevices],
+    () => {
+      datasourceRuntime.refreshExternalValues();
     },
     { deep: true },
   );

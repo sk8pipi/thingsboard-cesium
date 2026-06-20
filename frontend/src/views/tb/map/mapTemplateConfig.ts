@@ -30,6 +30,7 @@ export type MapSceneModel = {
 
 export type MapTemplateState = {
   version: number;
+  updatedTime?: number;
   scene: MapTemplateScene;
   layout: GridItem[];
   widgets: Record<string, any>;
@@ -54,7 +55,7 @@ export function createDefaultMapTemplateState(): MapTemplateState {
 
 export function normalizeMapTemplateState(state?: Partial<MapTemplateState> | null): MapTemplateState {
   const fallback = createDefaultMapTemplateState();
-  const scene = state?.scene || {};
+  const scene: Partial<MapTemplateScene> = state?.scene || {};
 
   return {
     ...fallback,

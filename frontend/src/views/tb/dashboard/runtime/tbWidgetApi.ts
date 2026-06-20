@@ -33,11 +33,14 @@ export interface TbWidgetType {
   id: { id: string };
   alias: string;
   name: string;
+  title?: string;
+  label?: string;
   bundleAlias: string;
 
   // 不同版本字段可能不完全一致
   description?: string;
   image?: string;
+  previewImage?: string;
 
   // type 常见：timeseries / latest / alarm / control / static
   //（TB UI 里会显示在列表的 “Type” 列）
@@ -100,5 +103,20 @@ export async function getWidgetTypes(params: {
   return defHttp.get<TbWidgetType[]>({
     url: '/api/widgetTypes',
     params,
+  });
+}
+
+export async function getWidgetTypesDetails(params: {
+  isSystem: boolean;
+  bundleAlias: string;
+  textSearch?: string;
+  inlineImages?: boolean;
+}) {
+  return defHttp.get<TbWidgetType[]>({
+    url: '/api/widgetTypesDetails',
+    params: {
+      inlineImages: true,
+      ...params,
+    },
   });
 }

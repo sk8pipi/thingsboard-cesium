@@ -96,6 +96,7 @@
       :visible="sensorConfigVisible"
       :sensor="selectedSensor"
       :widgets="selectedSensor ? getSensorPopupWidgetsForEditor(selectedSensor.id) : []"
+      @changed="handleSensorPopupChanged"
       @close="sensorConfigVisible = false"
       @saved="handleSensorPopupSaved"
     />
@@ -137,25 +138,59 @@
           style="display: none"
           @change="onImportFileChange"
         />
-        <button class="mw-add-item" type="button" @click="fileInputEl?.click()">导入 ThingsBoard 部件 JSON</button>
 
-        <button
-          v-for="def in builtInWidgetDefs"
-          :key="def.key"
-          class="mw-add-item"
-          type="button"
-          @click="addWidgetByKey(def.key)"
-        >
-          内置：{{ def.title }}
+        <button class="mw-widget-card mw-widget-card--import" type="button" @click="fileInputEl?.click()">
+          <div class="mw-widget-preview mw-widget-preview--import">
+            <span>JSON</span>
+          </div>
+          <div class="mw-widget-info">
+            <div class="mw-widget-name">导入 ThingsBoard 部件 JSON</div>
+            <div class="mw-widget-desc">从导出的 JSON 生成可复用部件</div>
+          </div>
         </button>
+
+        <div class="mw-lib-title">内置部件</div>
+
+        <div class="mw-widget-grid">
+          <button
+            v-for="def in builtInWidgetDefs"
+            :key="def.key"
+            class="mw-widget-card"
+            type="button"
+            @click="addWidgetByKey(def.key)"
+          >
+            <div class="mw-widget-preview">
+              <img class="mw-widget-preview-img" :src="getBuiltInPreview(def.key)" :alt="def.title" loading="lazy" />
+            </div>
+            <div class="mw-widget-info">
+              <div class="mw-widget-name" :title="def.title">{{ def.title }}</div>
+              <div class="mw-widget-meta">{{ getBuiltInKindLabel(def.key) }}</div>
+            </div>
+          </button>
+        </div>
 
         <div v-if="libraryDefs.length" class="mw-lib-title">已导入部件</div>
 
-        <div v-for="def in libraryDefs" :key="def.id" class="mw-lib-item">
-          <button class="mw-add-item" type="button" @click="addFromLibrary(def)">
-            {{ def.name }} <span class="mw-lib-kind">（{{ def.kind }}）</span>
-          </button>
-          <button class="mw-lib-del" type="button" @click="deleteFromLibrary(def.id)">删除</button>
+        <div v-if="libraryDefs.length" class="mw-widget-grid">
+          <div v-for="def in libraryDefs" :key="def.id" class="mw-widget-card-wrap">
+            <button class="mw-widget-card" type="button" @click="addFromLibrary(def)">
+              <div class="mw-widget-preview">
+                <img
+                  v-if="getLibraryPreview(def)"
+                  class="mw-widget-preview-img"
+                  :src="getLibraryPreview(def)"
+                  :alt="def.name"
+                  loading="lazy"
+                />
+                <div v-else class="mw-widget-preview-placeholder">{{ getLibraryKindLabel(def.kind) }}</div>
+              </div>
+              <div class="mw-widget-info">
+                <div class="mw-widget-name" :title="def.name">{{ def.name }}</div>
+                <div class="mw-widget-meta">{{ getLibraryKindLabel(def.kind) }}</div>
+              </div>
+            </button>
+            <button class="mw-lib-del" type="button" title="删除" @click="deleteFromLibrary(def.id)">删除</button>
+          </div>
         </div>
 
         <div v-if="!libraryDefs.length" class="mw-empty-hint">暂无已导入部件</div>
@@ -369,6 +404,161 @@
       editorMode.value,
     ),
   );
+
+  const widgetPreviewByKey: Partial<Record<LocalWidgetKey, string>> = {
+    timeseriesLine: createWidgetPreviewSvg('折线图', 'line', '#2563eb', '#22c55e'),
+    timeseriesScatter: createWidgetPreviewSvg('散点图', 'scatter', '#2563eb', '#f59e0b'),
+    timeseriesBarWithLabels: createWidgetPreviewSvg('柱状图', 'bar', '#0f766e', '#38bdf8'),
+    rangeChart: createWidgetPreviewSvg('范围图', 'area', '#7c3aed', '#f59e0b'),
+    stateChart: createWidgetPreviewSvg('状态图', 'step', '#0891b2', '#84cc16'),
+    latestPie: createWidgetPreviewSvg('饼图', 'pie', '#7c3aed', '#f97316'),
+    latestBar: createWidgetPreviewSvg('柱状图', 'bar', '#2563eb', '#f59e0b'),
+    latestRadar: createWidgetPreviewSvg('雷达图', 'radar', '#0f766e', '#22c55e'),
+    latestPolarArea: createWidgetPreviewSvg('极区图', 'pie', '#be185d', '#38bdf8'),
+    ledIndicator: createWidgetPreviewSvg('LED', 'led', '#16a34a', '#facc15'),
+    staticHtml: createWidgetPreviewSvg('HTML', 'static', '#475569', '#38bdf8'),
+    alarmTable: createWidgetPreviewSvg('告警表格', 'table', '#dc2626', '#f97316'),
+    alarmCard: createWidgetPreviewSvg('告警卡片', 'card', '#dc2626', '#f59e0b'),
+    controlSwitch: createWidgetPreviewSvg('开关控制', 'switch', '#0284c7', '#22c55e'),
+  };
+
+  function getBuiltInPreview(key: LocalWidgetKey) {
+    return widgetPreviewByKey[key] || createWidgetPreviewSvg('部件', 'card', '#2563eb', '#22c55e');
+  }
+
+  function getBuiltInKindLabel(key: LocalWidgetKey) {
+    const def = widgetRegistry[key];
+    if (!def) return '部件';
+
+    const map: Record<string, string> = {
+      timeseries: '时序部件',
+      latest: '最新值部件',
+      alarm: '告警部件',
+      control: '控制部件',
+      static: '静态部件',
+    };
+    return map[def.category] || '部件';
+  }
+
+  function getLibraryKindLabel(kind?: string) {
+    const map: Record<string, string> = {
+      chart: '折线图',
+      pie: '饼图',
+      bar: '柱状图',
+      static: '静态部件',
+      cesium3d: '三维地图',
+      unknown: '导入部件',
+    };
+    return map[String(kind || 'unknown')] || String(kind || '导入部件');
+  }
+
+  function getLibraryPreview(def: CustomWidgetDefinition) {
+    const rawImage =
+      def.raw?.image ||
+      def.raw?.previewImage ||
+      def.raw?.widget?.image ||
+      def.raw?.widgetType?.image ||
+      def.raw?.descriptor?.image ||
+      def.tb?.raw?.image;
+
+    return resolveWidgetPreviewImage(rawImage) || createWidgetPreviewSvg(def.name, def.kind, '#2563eb', '#22c55e');
+  }
+
+  function resolveWidgetPreviewImage(image?: string) {
+    if (!image || typeof image !== 'string') return '';
+    const value = image.trim();
+    if (!value || value.startsWith('tb-image;')) return '';
+    if (value.startsWith('data:')) return value;
+    if (/^(https?:|blob:|\/)/.test(value)) return value;
+    if (value.startsWith('<svg')) {
+      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(value)}`;
+    }
+    return `data:image/png;base64,${value}`;
+  }
+
+  function createWidgetPreviewSvg(label: string, kind: string, primary: string, accent: string) {
+    const safeLabel = escapeSvgText(label || '部件');
+    const normalizedKind = String(kind || '').toLowerCase();
+    const chartShape = getPreviewShape(normalizedKind, primary, accent);
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+        <rect width="320" height="180" rx="16" fill="#f8fafc"/>
+        <rect x="18" y="18" width="284" height="144" rx="14" fill="#ffffff" stroke="#dbe3ef"/>
+        <text x="160" y="45" fill="#172033" font-family="Arial, sans-serif" font-size="18" font-weight="700" text-anchor="middle">${safeLabel}</text>
+        ${chartShape}
+      </svg>
+    `;
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  }
+
+  function getPreviewShape(kind: string, primary: string, accent: string) {
+    if (kind.includes('pie')) {
+      return `
+        <circle cx="160" cy="104" r="42" fill="${primary}" opacity=".9"/>
+        <path d="M160 104 L160 62 A42 42 0 0 1 199 120 Z" fill="${accent}"/>
+        <circle cx="160" cy="104" r="18" fill="#fff" opacity=".95"/>
+      `;
+    }
+
+    if (kind.includes('bar')) {
+      return `
+        <rect x="92" y="106" width="24" height="34" rx="5" fill="${accent}"/>
+        <rect x="128" y="82" width="24" height="58" rx="5" fill="${primary}"/>
+        <rect x="164" y="96" width="24" height="44" rx="5" fill="${accent}" opacity=".78"/>
+        <rect x="200" y="70" width="24" height="70" rx="5" fill="${primary}" opacity=".78"/>
+      `;
+    }
+
+    if (kind.includes('scatter')) {
+      return `
+        <circle cx="96" cy="124" r="8" fill="${accent}"/>
+        <circle cx="126" cy="96" r="7" fill="${primary}"/>
+        <circle cx="164" cy="116" r="9" fill="${accent}" opacity=".8"/>
+        <circle cx="204" cy="78" r="8" fill="${primary}" opacity=".85"/>
+        <circle cx="232" cy="108" r="7" fill="${accent}"/>
+      `;
+    }
+
+    if (kind.includes('switch')) {
+      return `
+        <rect x="94" y="82" width="132" height="54" rx="27" fill="${primary}" opacity=".9"/>
+        <circle cx="198" cy="109" r="22" fill="#fff"/>
+        <path d="M117 109 h48" stroke="${accent}" stroke-width="10" stroke-linecap="round"/>
+      `;
+    }
+
+    if (kind.includes('led')) {
+      return `
+        <circle cx="160" cy="104" r="38" fill="${accent}" opacity=".95"/>
+        <circle cx="148" cy="90" r="11" fill="#fff" opacity=".75"/>
+        <path d="M118 146 h84" stroke="${primary}" stroke-width="8" stroke-linecap="round"/>
+      `;
+    }
+
+    if (kind.includes('table')) {
+      return `
+        <rect x="78" y="70" width="164" height="74" rx="8" fill="#f8fafc" stroke="${primary}" stroke-width="3"/>
+        <path d="M78 94 H242 M78 118 H242 M120 70 V144 M184 70 V144" stroke="${accent}" stroke-width="3" opacity=".85"/>
+      `;
+    }
+
+    if (kind.includes('static') || kind.includes('card')) {
+      return `
+        <rect x="86" y="70" width="148" height="74" rx="10" fill="#f8fafc" stroke="${primary}" stroke-width="3"/>
+        <path d="M108 94 H212 M108 116 H184" stroke="${accent}" stroke-width="8" stroke-linecap="round"/>
+      `;
+    }
+
+    return `
+      <path d="M70 128 C106 86 132 122 160 92 S218 68 250 108" fill="none" stroke="${primary}" stroke-width="10" stroke-linecap="round"/>
+      <path d="M70 140 H250" stroke="#dbe3ef" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="160" cy="92" r="8" fill="${accent}"/>
+    `;
+  }
+
+  function escapeSvgText(text: string) {
+    return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
 
   function patchGridstackRenderOnce() {
     if (renderPatched) return;
@@ -1137,6 +1327,10 @@
   }
 
   function getSensorPopupWidgetsForView(sensorId: string): PopupWidgetConfig[] {
+    if (isDashboardTemplateMode.value) {
+      return draftSensorPopupBindings.value[sensorId] || [];
+    }
+
     if (editorMode.value === 'view') {
       return getSensorPopupWidgets(sensorId);
     }
@@ -1147,7 +1341,7 @@
     return draftSensorPopupBindings.value[sensorId] || [];
   }
 
-  function handleSensorPopupSaved(widgetsForSensor: PopupWidgetConfig[]) {
+  async function persistSensorPopupWidgets(widgetsForSensor: PopupWidgetConfig[]) {
     if (!selectedSensor.value) return;
 
     draftSensorPopupBindings.value = {
@@ -1155,6 +1349,21 @@
       [selectedSensor.value.id]: cloneJson(widgetsForSensor),
     };
 
+    try {
+      const state = getEditorState();
+      await persistEditorState(state);
+      originalSensorPopupBindings.value = cloneJson(state.sensorPopupBindings);
+    } catch (error: any) {
+      errorMsg.value = error?.message || String(error);
+    }
+  }
+
+  async function handleSensorPopupChanged(widgetsForSensor: PopupWidgetConfig[]) {
+    await persistSensorPopupWidgets(widgetsForSensor);
+  }
+
+  async function handleSensorPopupSaved(widgetsForSensor: PopupWidgetConfig[]) {
+    await persistSensorPopupWidgets(widgetsForSensor);
     sensorConfigVisible.value = false;
   }
 
@@ -1433,7 +1642,9 @@
     top: 58px;
     left: 12px;
     z-index: 30;
-    width: 280px;
+    width: min(620px, calc(100vw - 24px));
+    max-height: calc(100vh - 96px);
+    overflow: hidden;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.18);
     background: rgba(25, 30, 40, 0.94);
@@ -1446,32 +1657,131 @@
   .mw-lib-title {
     font-size: 13px;
     font-weight: 600;
-    margin-bottom: 8px;
+    margin: 4px 0 8px;
   }
 
   .mw-add-list {
     display: grid;
-    gap: 8px;
+    max-height: calc(100vh - 170px);
+    gap: 10px;
+    overflow-y: auto;
+    padding-right: 2px;
   }
 
-  .mw-add-item,
-  .mw-lib-del {
+  .mw-widget-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .mw-widget-card-wrap {
+    position: relative;
+    min-width: 0;
+  }
+
+  .mw-widget-card {
+    width: 100%;
     border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.09);
     color: #fff;
-    border-radius: 10px;
-    padding: 9px 10px;
+    border-radius: 8px;
+    padding: 8px;
     cursor: pointer;
     text-align: left;
+    transition:
+      border-color 0.16s ease,
+      background 0.16s ease,
+      transform 0.16s ease;
   }
-
-  .mw-lib-item {
+  .mw-widget-card:hover {
+    transform: translateY(-1px);
+    border-color: rgba(125, 211, 252, 0.75);
+    background: rgba(255, 255, 255, 0.14);
+  }
+  .mw-widget-card--import {
     display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 8px;
+    grid-template-columns: 96px 1fr;
+    gap: 10px;
+    align-items: center;
   }
 
-  .mw-lib-kind,
+  .mw-widget-preview {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(15, 23, 42, 0.56);
+  }
+  .mw-widget-preview--import {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #bae6fd;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 0;
+    background: linear-gradient(135deg, rgba(14, 165, 233, 0.24), rgba(34, 197, 94, 0.2));
+  }
+  .mw-widget-preview-img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+  }
+  .mw-widget-preview-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    color: rgba(255, 255, 255, 0.76);
+    font-size: 13px;
+    font-weight: 700;
+    background: linear-gradient(135deg, rgba(37, 99, 235, 0.28), rgba(20, 184, 166, 0.22));
+  }
+
+  .mw-widget-info {
+    min-width: 0;
+    padding-top: 8px;
+  }
+  .mw-widget-card--import .mw-widget-info {
+    padding-top: 0;
+  }
+  .mw-widget-name {
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 18px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mw-widget-meta,
+  .mw-widget-desc {
+    margin-top: 3px;
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 12px;
+    line-height: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mw-lib-del {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(127, 29, 29, 0.86);
+    color: #fff;
+    border-radius: 999px;
+    padding: 3px 7px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 16px;
+  }
+
   .mw-empty-hint {
     opacity: 0.72;
     font-size: 12px;

@@ -17,6 +17,7 @@
       class="map-widgets"
       :storage-key="storageKey"
       :data="assignedTemplateState"
+      :runtime-devices="assignedTemplateRuntimeDevices"
     />
 
     <SensorWidgetPopup
@@ -24,6 +25,7 @@
       :visible="sensorPreviewVisible"
       :sensor="selectedSensor"
       :widgets="selectedSensor ? getSensorPopupWidgetsForView(selectedSensor.id) : []"
+      :runtime-devices="assignedTemplateRuntimeDevices"
       @close="sensorPreviewVisible = false"
     />
 
@@ -59,6 +61,13 @@
   import { loadCameraRuntimeInfo } from './services/cameraDeviceRuntimeService';
   import { applyCompactModelLayout } from './services/compactMapPointLayout';
   import {
+    getAssignedMapTemplateRuntime,
+    subscribeAssignedMapTemplateRuntimeEvents,
+    type MapTemplateRuntimeDevices,
+    type MapTemplateRuntimeEvent,
+    type MapTemplateRuntimeResponse,
+  } from './services/mapTemplateRuntimeService';
+  import {
     loadDeviceMapPoints,
     loadDeviceMapPointStatuses,
     type DeviceMapPointStatus,
@@ -87,6 +96,7 @@
   const manualMapPoints = ref<MapPoint[]>(loadMapPoints());
   const deviceMapPoints = ref<MapPoint[]>([]);
   const assignedTemplateDeviceStatuses = ref<DeviceMapPointStatus[]>([]);
+  const assignedTemplateRuntimeDeviceMap = ref<MapTemplateRuntimeDevices>({});
   const selectedSensor = ref<SensorMapPoint | null>(null);
   const sensorPreviewVisible = ref(false);
 
@@ -97,6 +107,8 @@
   let cameraRuntimeRequestId = 0;
   let devicePointRefreshTimer: number | undefined;
   let templateReloading = false;
+  let mapTemplateRuntimeAvailable = true;
+  let unsubscribeMapTemplateUpdates: (() => void) | undefined;
 
   const isSysAdminMap = computed(() => userStore.getAuthority === Authority.SYS_ADMIN);
   const isCustomerUserMap = computed(() => userStore.getAuthority === Authority.CUSTOMER_USER);
@@ -104,6 +116,7 @@
   const currentAssignedTemplateDashboardId = ref('');
   const storageKey = computed(() => getMapWidgetStorageKey());
   const assignedTemplateMapPoints = computed(() => assignedTemplateState.value?.mapPoints || []);
+  const assignedTemplateRuntimeDevices = computed(() => assignedTemplateRuntimeDeviceMap.value);
   const assignedTemplateStatusMap = computed(() => {
     const statusMap = new Map<string, DeviceMapPointStatus>();
     assignedTemplateDeviceStatuses.value.forEach((status) => {
@@ -172,6 +185,110 @@
     });
   }
 
+  function toRuntimeBoolean(value: unknown): boolean | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+
+    const normalized = String(value).trim().toLowerCase();
+    if (['true', '1', 'yes', 'online', 'on', 'active'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'offline', 'off', 'inactive'].includes(normalized)) return false;
+    return undefined;
+  }
+
+  function normalizeRuntimeStatusText(value: unknown, online: boolean | undefined) {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (normalized === 'online') return '\u5728\u7ebf';
+    if (normalized === 'offline') return '\u79bb\u7ebf';
+    if (typeof value === 'string' && value.trim()) return value;
+    if (online === undefined) return undefined;
+    return online ? '\u5728\u7ebf' : '\u79bb\u7ebf';
+  }
+
+  function mergeRuntimeIntoPoint(point: MapPoint, runtime?: Record<string, unknown>): MapPoint {
+    if (!runtime) return point;
+
+    const online = toRuntimeBoolean(runtime.online ?? runtime.status ?? runtime.active);
+    const streamOnline = online === false ? false : toRuntimeBoolean(runtime.streamOnline ?? runtime.streamAlive);
+    const statusText = normalizeRuntimeStatusText(runtime.statusText, online) || point.statusText;
+    const color =
+      online === undefined ? (point as any).color : online ? (point.type === 'camera' ? 'green' : 'blue') : 'gray';
+
+    return {
+      ...point,
+      ...runtime,
+      id: point.id,
+      type: point.type,
+      name: point.name,
+      entityType: point.entityType,
+      entityId: point.entityId,
+      entityName: point.entityName,
+      online: online ?? point.online,
+      streamOnline: streamOnline ?? (point as any).streamOnline,
+      streamAlive: online === false ? false : ((runtime as any).streamAlive ?? (point as any).streamAlive),
+      statusText,
+      color,
+    } as MapPoint;
+  }
+
+  function mergeRuntimeIntoTemplateState(
+    state: MapTemplateState,
+    devices?: MapTemplateRuntimeDevices,
+  ): MapTemplateState {
+    const runtimeDevices = devices || {};
+    return {
+      ...state,
+      mapPoints: state.mapPoints.map((point) => mergeRuntimeIntoPoint(point, runtimeDevices[point.entityId])),
+    };
+  }
+
+  function syncOpenPopupsFromAssignedTemplate(devices?: MapTemplateRuntimeDevices) {
+    if (selectedSensor.value) {
+      const currentSensor = assignedTemplateState.value?.mapPoints.find(
+        (point): point is SensorMapPoint => point.type === 'sensor' && point.id === selectedSensor.value?.id,
+      );
+      if (currentSensor) {
+        selectedSensor.value = currentSensor;
+      }
+    }
+
+    const currentCameraRuntime = selectedCameraRuntime.value;
+    const selectedCameraEntityId = currentCameraRuntime?.entityId;
+    if (currentCameraRuntime && selectedCameraEntityId && devices?.[selectedCameraEntityId]) {
+      selectedCameraRuntime.value = {
+        ...currentCameraRuntime,
+        ...devices[selectedCameraEntityId],
+      } as CameraRuntimeInfo;
+    }
+  }
+
+  function applyAssignedTemplateRuntime(runtime: MapTemplateRuntimeResponse) {
+    const normalized = normalizeMapTemplateState(runtime.template);
+    assignedTemplateRuntimeDeviceMap.value = runtime.devices || {};
+    assignedTemplateState.value = mergeRuntimeIntoTemplateState(normalized, assignedTemplateRuntimeDeviceMap.value);
+    assignedTemplateDeviceStatuses.value = [];
+    syncOpenPopupsFromAssignedTemplate(assignedTemplateRuntimeDeviceMap.value);
+  }
+
+  function applyAssignedTemplateRuntimeEvent(event: MapTemplateRuntimeEvent) {
+    if (event.template) {
+      applyAssignedTemplateRuntime(event);
+      return;
+    }
+
+    if (!assignedTemplateState.value) return;
+    assignedTemplateRuntimeDeviceMap.value = {
+      ...assignedTemplateRuntimeDeviceMap.value,
+      ...(event.devices || {}),
+    };
+    assignedTemplateState.value = mergeRuntimeIntoTemplateState(
+      assignedTemplateState.value,
+      assignedTemplateRuntimeDeviceMap.value,
+    );
+    assignedTemplateDeviceStatuses.value = [];
+    syncOpenPopupsFromAssignedTemplate(assignedTemplateRuntimeDeviceMap.value);
+  }
+
   async function fetchAccessibleDeviceInfos(params: {
     pageSize: number;
     page: number;
@@ -208,6 +325,11 @@
   }
 
   async function refreshAssignedTemplatePointStatuses() {
+    if (isCustomerUserMap.value) {
+      assignedTemplateDeviceStatuses.value = [];
+      return;
+    }
+
     const deviceIds = assignedTemplateMapPoints.value
       .filter((point) => point.entityType === 'DEVICE')
       .map((point) => point.entityId);
@@ -224,22 +346,65 @@
     }
   }
 
+  function getHttpStatus(error: unknown) {
+    return Number((error as any)?.response?.status || (error as any)?.status || 0);
+  }
+
+  async function loadAssignedTemplateFromDashboard(dashboardId: string) {
+    const dashboard = await getDashboardById(dashboardId);
+    assignedTemplateRuntimeDeviceMap.value = {};
+    assignedTemplateState.value = normalizeMapTemplateState(dashboard.configuration?.[DASHBOARD_MAP_WIDGET_CONFIG_KEY]);
+    await refreshAssignedTemplatePointStatuses();
+  }
+
   async function refreshAssignedDashboardTemplate(dashboardId: string) {
     const normalizedDashboardId = String(dashboardId || '').trim();
     if (!normalizedDashboardId || templateReloading) return;
 
     templateReloading = true;
     try {
-      const dashboard = await getDashboardById(normalizedDashboardId);
-      assignedTemplateState.value = normalizeMapTemplateState(
-        dashboard.configuration?.[DASHBOARD_MAP_WIDGET_CONFIG_KEY],
-      );
-      await refreshAssignedTemplatePointStatuses();
+      if (isCustomerUserMap.value) {
+        if (mapTemplateRuntimeAvailable) {
+          try {
+            applyAssignedTemplateRuntime(await getAssignedMapTemplateRuntime(normalizedDashboardId));
+            return;
+          } catch (error) {
+            if (getHttpStatus(error) !== 404) {
+              throw error;
+            }
+            mapTemplateRuntimeAvailable = false;
+            stopMapTemplateUpdateSubscription();
+            console.warn('[MapHome] Map template runtime API is not available, fallback to dashboard config.');
+          }
+        }
+
+        await loadAssignedTemplateFromDashboard(normalizedDashboardId);
+        return;
+      }
+
+      await loadAssignedTemplateFromDashboard(normalizedDashboardId);
     } catch (error) {
       console.warn('[MapHome] Failed to refresh assigned dashboard template:', error);
     } finally {
       templateReloading = false;
     }
+  }
+
+  function stopMapTemplateUpdateSubscription() {
+    if (unsubscribeMapTemplateUpdates) {
+      unsubscribeMapTemplateUpdates();
+      unsubscribeMapTemplateUpdates = undefined;
+    }
+  }
+
+  function startMapTemplateUpdateSubscription(dashboardId: string) {
+    stopMapTemplateUpdateSubscription();
+    if (!isCustomerUserMap.value || !dashboardId || !mapTemplateRuntimeAvailable) return;
+
+    unsubscribeMapTemplateUpdates = subscribeAssignedMapTemplateRuntimeEvents(dashboardId, (event) => {
+      if (event.dashboardId !== currentAssignedTemplateDashboardId.value) return;
+      applyAssignedTemplateRuntimeEvent(event);
+    });
   }
 
   function reloadMapPoints() {
@@ -267,11 +432,13 @@
     if (!isCustomerUserMap.value) return;
 
     assignedTemplateState.value = null;
+    assignedTemplateRuntimeDeviceMap.value = {};
 
     const customerId = userStore.getUserInfo?.customerId?.id || '';
     const userId = userStore.getUserInfo?.id?.id || '';
     if (!customerId) {
       currentAssignedTemplateDashboardId.value = '';
+      stopMapTemplateUpdateSubscription();
       return;
     }
 
@@ -280,6 +447,7 @@
       if (!templates.length) {
         clearSelectedMapTemplateId(userId);
         currentAssignedTemplateDashboardId.value = '';
+        stopMapTemplateUpdateSubscription();
         return;
       }
 
@@ -294,6 +462,7 @@
 
       currentAssignedTemplateDashboardId.value = dashboardId;
       await refreshAssignedDashboardTemplate(dashboardId);
+      startMapTemplateUpdateSubscription(dashboardId);
     } catch (error) {
       console.warn('[MapHome] Failed to load assigned dashboard template:', error);
     }
@@ -331,13 +500,16 @@
   async function onCameraClick(camera: CameraMapPoint) {
     sensorPreviewVisible.value = false;
     selectedCameraRuntime.value = {
-      entityId: camera.entityId,
-      entityName: camera.entityName || camera.name,
-      cameraName: camera.name,
+      ...createCameraRuntimeFromTemplatePoint(camera),
     };
     cameraRuntimeLoading.value = true;
     cameraRuntimeError.value = '';
     cameraPopupVisible.value = true;
+
+    if (isCustomerUserMap.value) {
+      cameraRuntimeLoading.value = false;
+      return;
+    }
 
     const requestId = ++cameraRuntimeRequestId;
 
@@ -380,6 +552,52 @@
     cameraRuntimeRequestId += 1;
   }
 
+  function createCameraRuntimeFromTemplatePoint(camera: CameraMapPoint): CameraRuntimeInfo {
+    const point = camera as CameraMapPoint & Partial<CameraRuntimeInfo> & Record<string, any>;
+    return {
+      entityId: camera.entityId,
+      entityName: camera.entityName || camera.name,
+      cameraId: point.cameraId,
+      cameraCode: point.cameraCode,
+      cameraName: point.cameraName || camera.name,
+      cameraModel: point.cameraModel,
+      hlsUrl: point.hlsUrl,
+      streamUrl: point.streamUrl || point.streamUrlMain,
+      webRtcUrl: point.webRtcUrl,
+      rtspUrl: point.rtspUrl,
+      flvUrl: point.flvUrl,
+      streamType: point.streamType,
+      supportsLive: point.supportsLive,
+      supportsPlayback: point.supportsPlayback,
+      supportsPtz: point.supportsPtz,
+      supportsZoom: point.supportsZoom,
+      supportsPreset: point.supportsPreset,
+      supportsAudio: point.supportsAudio,
+      controlMode: point.controlMode || 'none',
+      supportedRpcMethods: point.supportedRpcMethods,
+      rpcTargetDeviceId: point.rpcTargetDeviceId,
+      rpcTargetDeviceName: point.rpcTargetDeviceName,
+      rpcTargetCameraId: point.rpcTargetCameraId,
+      rpcGatewayMethod: point.rpcGatewayMethod,
+      rpcTopic: point.rpcTopic,
+      rpcPayloadMode: point.rpcPayloadMode,
+      rpcTargetMode: point.rpcTargetMode,
+      rpcCallType: point.rpcCallType,
+      rpcTimeout: point.rpcTimeout,
+      online: point.online,
+      streamOnline: point.streamOnline,
+      fps: point.fps,
+      bitrate: point.bitrate,
+      delayMs: point.delayMs,
+      motion: point.motion,
+      alarm: point.alarm,
+      recording: point.recording,
+      videoLoss: point.videoLoss,
+      motionDetected: point.motionDetected,
+      tamperAlarm: point.tamperAlarm,
+    };
+  }
+
   function openHome() {
     router.push(homePath.value);
   }
@@ -399,6 +617,7 @@
       window.clearInterval(devicePointRefreshTimer);
       devicePointRefreshTimer = undefined;
     }
+    stopMapTemplateUpdateSubscription();
     currentAssignedTemplateDashboardId.value = '';
   });
 </script>
