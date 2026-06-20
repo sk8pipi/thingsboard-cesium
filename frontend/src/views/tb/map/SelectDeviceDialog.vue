@@ -20,19 +20,46 @@
               v-for="device in devices"
               :key="device.id?.id"
               class="sd-item"
-              :class="{ active: selectedId === device.id?.id }"
+              :class="{
+                active: selectedId === device.id?.id,
+                bound: isDeviceBound(device.id?.id),
+              }"
               type="button"
+              :aria-disabled="isDeviceBound(device.id?.id)"
               @click="selectDevice(device)"
             >
               <div class="sd-item-name">{{ device.name }}</div>
-              <div class="sd-item-sub">{{ device.type || '-' }}</div>
+              <div class="sd-item-meta">
+                <span class="sd-item-sub">{{ device.type || '-' }}</span>
+                <span v-if="isDeviceBound(device.id?.id)" class="sd-item-badge">
+                  已绑定 {{ deviceBindingsFor(device.id?.id).length }} 个点位
+                </span>
+              </div>
             </button>
           </div>
 
           <div class="sd-pager">
-            <button class="sd-btn" type="button" :disabled="page <= 0" @click="page -= 1; reload()">上一页</button>
+            <button
+              class="sd-btn"
+              type="button"
+              :disabled="page <= 0"
+              @click="
+                page -= 1;
+                reload();
+              "
+              >上一页</button
+            >
             <span class="sd-page">第 {{ page + 1 }} 页</span>
-            <button class="sd-btn" type="button" :disabled="!hasNext" @click="page += 1; reload()">下一页</button>
+            <button
+              class="sd-btn"
+              type="button"
+              :disabled="!hasNext"
+              @click="
+                page += 1;
+                reload();
+              "
+              >下一页</button
+            >
           </div>
         </div>
 
@@ -40,6 +67,32 @@
           <div class="sd-subtitle">{{ detailTitleText }}</div>
 
           <div v-if="!selectedId" class="sd-hint">请先在左侧选择一个 ThingsBoard Device。</div>
+
+          <template v-else-if="selectedBindings.length">
+            <div class="sd-bound-warning">该设备已绑定当前模板中的点位，不能再次用于新点位。</div>
+            <div class="sd-device-summary">
+              <div class="sd-device-row">
+                <span class="sd-label">设备名称</span>
+                <span class="sd-value">{{ selectedName || '-' }}</span>
+              </div>
+              <div class="sd-device-row">
+                <span class="sd-label">设备 ID</span>
+                <span class="sd-value sd-value--mono">{{ selectedId }}</span>
+              </div>
+              <div class="sd-binding-list">
+                <div v-for="binding in selectedBindings" :key="binding.pointId" class="sd-binding-card">
+                  <div class="sd-binding-head">
+                    <strong>{{ binding.pointName }}</strong>
+                    <span>{{ pointTypeText(binding.pointType) }}</span>
+                  </div>
+                  <div class="sd-device-row">
+                    <span class="sd-label">已绑定点位 ID</span>
+                    <span class="sd-value sd-value--mono">{{ binding.pointId }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
 
           <template v-else-if="requireKeys">
             <div v-if="keysLoading" class="sd-hint">正在加载设备可用的 timeseries keys...</div>
@@ -55,9 +108,7 @@
               <button class="sd-btn" type="button" :disabled="!keyInput.trim() || keysLoading" @click="addKey()">
                 添加
               </button>
-              <button class="sd-btn" type="button" :disabled="!selectedKeys.length" @click="clearKeys()">
-                清空
-              </button>
+              <button class="sd-btn" type="button" :disabled="!selectedKeys.length" @click="clearKeys()"> 清空 </button>
             </div>
 
             <div v-if="selectedKeys.length" class="sd-picked">
@@ -113,6 +164,7 @@
   import { getCustomerDeviceList, getTenantDeviceList, type Device } from '/@/api/tb/device';
   import { getTimeseriesKeys } from '/@/api/tb/telemetry';
   import { useUserStoreWithOut } from '/@/store/modules/user';
+  import type { DevicePointBindingInfo, MapPointType } from './types/mapPointTypes';
 
   const props = withDefaults(
     defineProps<{
@@ -122,6 +174,7 @@
       okText?: string;
       detailTitle?: string;
       detailHint?: string;
+      deviceBindings?: DevicePointBindingInfo[];
     }>(),
     {
       requireKeys: true,
@@ -129,6 +182,7 @@
       okText: '确定',
       detailTitle: '',
       detailHint: '绑定后将仅保存地图点位与 ThingsBoard Device 的关系。',
+      deviceBindings: () => [],
     },
   );
 
@@ -162,11 +216,35 @@
   const requireKeys = computed(() => props.requireKeys !== false);
   const titleText = computed(() => props.title || '选择设备');
   const okTextText = computed(() => props.okText || '确定');
-  const detailTitleText = computed(() =>
-    props.detailTitle || (requireKeys.value ? '遥测 Keys（手动输入并校验）' : '设备绑定信息'),
+  const detailTitleText = computed(
+    () => props.detailTitle || (requireKeys.value ? '遥测 Keys（手动输入并校验）' : '设备绑定信息'),
   );
   const detailHintText = computed(() => props.detailHint || '绑定后将仅保存地图点位与 ThingsBoard Device 的关系。');
-  const canOk = computed(() => !!selectedId.value && (!requireKeys.value || selectedKeys.value.length > 0));
+  const selectedBindings = computed(() => deviceBindingsFor(selectedId.value));
+  const canOk = computed(
+    () =>
+      !!selectedId.value &&
+      selectedBindings.value.length === 0 &&
+      (!requireKeys.value || selectedKeys.value.length > 0),
+  );
+
+  function normalizeDeviceId(value: unknown) {
+    return String(value || '').trim();
+  }
+
+  function deviceBindingsFor(deviceId: unknown) {
+    const normalizedId = normalizeDeviceId(deviceId);
+    if (!normalizedId) return [];
+    return props.deviceBindings.filter((binding) => normalizeDeviceId(binding.deviceId) === normalizedId);
+  }
+
+  function isDeviceBound(deviceId: unknown) {
+    return deviceBindingsFor(deviceId).length > 0;
+  }
+
+  function pointTypeText(pointType: MapPointType) {
+    return pointType === 'camera' ? '监控点位' : '传感器点位';
+  }
 
   function normalizeKey(value: string) {
     return value.trim();
@@ -286,6 +364,10 @@
     availableKeys.value = [];
     keysErr.value = '';
 
+    if (selectedBindings.value.length) {
+      return;
+    }
+
     if (!selectedId.value || !requireKeys.value) {
       return;
     }
@@ -301,6 +383,11 @@
     tip.value = '';
 
     if (!selectedId.value) return;
+
+    if (selectedBindings.value.length) {
+      err.value = '该设备已绑定当前模板中的点位，不能再次绑定。';
+      return;
+    }
 
     if (requireKeys.value && !selectedKeys.value.length) {
       setTip('请至少添加一个遥测 key', 2500);
@@ -436,6 +523,28 @@
     outline: 2px solid rgba(22, 100, 145, 0.9);
   }
 
+  .sd-item.bound {
+    border-color: rgba(245, 158, 11, 0.45);
+    background: rgba(120, 53, 15, 0.22);
+  }
+
+  .sd-item-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .sd-item-badge {
+    flex: 0 0 auto;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(245, 158, 11, 0.2);
+    color: #fcd34d;
+    font-size: 11px;
+  }
+
   .sd-item-name {
     font-weight: 600;
   }
@@ -543,9 +652,46 @@
     color: rgba(255, 255, 255, 0.72);
   }
 
+  .sd-bound-warning {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    border-radius: 10px;
+    background: rgba(120, 53, 15, 0.28);
+    color: #fde68a;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
   .sd-device-summary {
     display: grid;
     gap: 12px;
+  }
+
+  .sd-binding-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .sd-binding-card {
+    display: grid;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .sd-binding-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .sd-binding-head span {
+    color: #fcd34d;
+    font-size: 12px;
   }
 
   .sd-device-row {

@@ -11,6 +11,7 @@
     <SelectDeviceDialog
       :visible="sensorPointDialogVisible"
       :require-keys="false"
+      :device-bindings="pointDeviceBindings"
       title="配置传感器点位"
       ok-text="保存点位"
       detail-hint="新建点位只绑定 ThingsBoard Device，不需要选择 key。保存点位后可点击点位继续配置弹窗数据 key。"
@@ -21,6 +22,7 @@
     <SelectDeviceDialog
       :visible="cameraPointDialogVisible"
       :require-keys="false"
+      :device-bindings="pointDeviceBindings"
       title="绑定监控点位 Device"
       ok-text="保存点位"
       detail-hint="监控点位只绑定 ThingsBoard Device，播放地址和运行状态后续从 Device attributes / latest telemetry 读取。"
@@ -240,6 +242,7 @@
   import type {
     CameraMapPoint,
     CameraRuntimeInfo,
+    DevicePointBindingInfo,
     MapEditorMode,
     MapPoint,
     MapPointLocation,
@@ -381,6 +384,11 @@
   const controlSwitchSettingsModel = computed(() => currentWidget.value?.config?.settings as any);
   const activeMapPoints = computed(() =>
     editorMode.value === 'view' ? originalMapPoints.value : draftMapPoints.value,
+  );
+  const pointDeviceBindings = computed<DevicePointBindingInfo[]>(() =>
+    draftMapPoints.value
+      .map(toDevicePointBinding)
+      .filter((binding): binding is DevicePointBindingInfo => Boolean(binding)),
   );
   const sensorPoints = computed(() =>
     activeMapPoints.value.filter((point): point is SensorMapPoint => point.type === 'sensor'),
@@ -1122,6 +1130,48 @@
     grid.enableResize(true);
   }
 
+  function toDevicePointBinding(point: MapPoint): DevicePointBindingInfo | null {
+    const deviceId = String(point.entityId || '').trim();
+    if (!deviceId) return null;
+
+    return {
+      deviceId,
+      deviceName: point.entityName || point.name,
+      pointId: point.id,
+      pointName: point.name,
+      pointType: point.type,
+    };
+  }
+
+  function pointTypeLabel(pointType: MapPointType) {
+    return pointType === 'camera' ? '监控点位' : '传感器点位';
+  }
+
+  function findDraftDeviceBinding(deviceId: string) {
+    const normalizedId = String(deviceId || '').trim();
+    return pointDeviceBindings.value.find((binding) => binding.deviceId === normalizedId);
+  }
+
+  function ensureDeviceAvailableForNewPoint(deviceId: string) {
+    const binding = findDraftDeviceBinding(deviceId);
+    if (!binding) return true;
+
+    errorMsg.value = `设备已绑定${pointTypeLabel(binding.pointType)}“${binding.pointName}”（${binding.pointId}），不能再次绑定新点位。`;
+    return false;
+  }
+
+  function findDuplicateDeviceBindings(points: MapPoint[]) {
+    const bindingsByDevice = new Map<string, DevicePointBindingInfo[]>();
+
+    points.forEach((point) => {
+      const binding = toDevicePointBinding(point);
+      if (!binding) return;
+      bindingsByDevice.set(binding.deviceId, [...(bindingsByDevice.get(binding.deviceId) || []), binding]);
+    });
+
+    return Array.from(bindingsByDevice.values()).filter((bindings) => bindings.length > 1);
+  }
+
   function startPickingPoint() {
     if (editorMode.value !== 'editing') return;
     clearDragHint();
@@ -1204,6 +1254,9 @@
   }
 
   function onSensorPointConfigured(payload: { deviceId: string; deviceName: string; keys: string[]; pollMs: number }) {
+    if (!ensureDeviceAvailableForNewPoint(payload.deviceId)) return;
+    errorMsg.value = '';
+
     const point: SensorMapPoint = {
       ...createPointBase('sensor', payload.deviceId, payload.deviceName),
       type: 'sensor',
@@ -1236,6 +1289,9 @@
   }
 
   function onCameraPointConfigured(payload: { deviceId: string; deviceName: string }) {
+    if (!ensureDeviceAvailableForNewPoint(payload.deviceId)) return;
+    errorMsg.value = '';
+
     const point: CameraMapPoint = {
       ...createPointBase('camera', payload.deviceId, payload.deviceName),
       type: 'camera',
@@ -1297,6 +1353,15 @@
     if (!grid || !canSaveEdit.value) return;
     if (!canEditTemplate.value) return;
 
+    const duplicateBindings = findDuplicateDeviceBindings(draftMapPoints.value);
+    if (duplicateBindings.length) {
+      const duplicate = duplicateBindings[0];
+      const pointNames = duplicate.map((binding) => `“${binding.pointName}”`).join('、');
+      errorMsg.value = `同一模板中设备 ${duplicate[0].deviceName || duplicate[0].deviceId} 已绑定多个点位：${pointNames}。请删除重复点位后再保存。`;
+      return;
+    }
+
+    errorMsg.value = '';
     syncLayoutFromGrid();
     const state = getEditorState();
     await persistEditorState(state);

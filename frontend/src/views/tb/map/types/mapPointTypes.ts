@@ -62,6 +62,14 @@ export interface CameraMapPoint extends BaseMapPoint {
 
 export type MapPoint = SensorMapPoint | CameraMapPoint;
 
+export interface DevicePointBindingInfo {
+  deviceId: string;
+  deviceName?: string;
+  pointId: string;
+  pointName: string;
+  pointType: MapPointType;
+}
+
 export interface CameraRuntimeInfo {
   entityId: string;
   entityName: string;
