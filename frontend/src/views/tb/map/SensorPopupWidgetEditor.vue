@@ -101,15 +101,13 @@
 
       <div class="spwe-section-title">当前已绑定部件</div>
 
-      <div v-if="normalizedWidgets.length" class="spwe-list">
-        <div v-for="(item, index) in normalizedWidgets" :key="item.id" class="spwe-widget">
-          <div class="spwe-widget-title">{{ item.title }}</div>
-          <div class="spwe-widget-body">
-            <WidgetHost :widget="item" :runtime="datasourceRuntime" />
-          </div>
-          <button class="spwe-remove-btn" type="button" aria-label="删除部件" @click="removeWidget(index)">×</button>
-        </div>
-      </div>
+      <SensorPopupWidgetGrid
+        v-if="normalizedWidgets.length"
+        :widgets="normalizedWidgets"
+        :runtime="datasourceRuntime"
+        removable
+        @remove="removeWidget"
+      />
       <div v-else class="spwe-empty">当前传感器点位还没有绑定弹窗部件</div>
 
       <div class="spwe-section-title">添加部件</div>
@@ -131,8 +129,8 @@
   import { getTimeseriesKeys } from '/@/api/tb/telemetry';
   import { createDatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
   import type { DashboardWidget, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
-  import WidgetHost from '../dashboard/runtime/widgets/WidgetHost.vue';
   import { widgetRegistry } from '../dashboard/runtime/widgets/registry/widgetRegistry';
+  import SensorPopupWidgetGrid from './SensorPopupWidgetGrid.vue';
   import type { PopupWidgetConfig } from './sensorPopupWidgetStorage';
   import type { SensorDatasourceKey } from './types/mapPointTypes';
 
@@ -492,7 +490,7 @@
     top: 58px;
     right: 12px;
     z-index: 1700;
-    width: min(560px, calc(100% - 24px));
+    width: min(720px, calc(100% - 24px));
     max-height: calc(100% - 70px);
     overflow: auto;
     border-radius: 12px;
@@ -558,61 +556,6 @@
     font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .spwe-list {
-    display: grid;
-    gap: 12px;
-  }
-
-  .spwe-widget {
-    position: relative;
-    min-width: 0;
-    min-height: 228px;
-  }
-
-  .spwe-widget-title {
-    margin-bottom: 8px;
-    padding-right: 30px;
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .spwe-widget-body {
-    width: 100%;
-    height: 200px;
-    min-width: 0;
-    overflow: hidden;
-  }
-
-  .spwe-remove-btn {
-    position: absolute;
-    top: 7px;
-    right: 7px;
-    width: 22px;
-    height: 22px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid rgba(248, 113, 113, 0.45);
-    background: rgba(127, 29, 29, 0.82);
-    color: #fecaca;
-    border-radius: 999px;
-    cursor: pointer;
-    font-size: 16px;
-    line-height: 1;
-    opacity: 0;
-    transition:
-      opacity 0.14s ease,
-      background 0.14s ease;
-  }
-
-  .spwe-widget:hover .spwe-remove-btn {
-    opacity: 1;
-  }
-
-  .spwe-remove-btn:hover {
-    background: rgba(185, 28, 28, 0.96);
   }
 
   .spwe-empty {
