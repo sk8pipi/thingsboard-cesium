@@ -52,6 +52,7 @@
 
   const datasourceRuntime = createDatasourceRuntime({
     getExternalValues: (_entityType, entityId) => props.runtimeDevices?.[entityId],
+    externalValuesOnly: true,
   });
 
   function formatCoordinate(value: unknown) {

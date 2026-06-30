@@ -27,6 +27,7 @@ export type RuntimeWidgetLike = {
 
 export type DatasourceRuntimeOptions = {
   getExternalValues?: (entityType: string, entityId: string) => Record<string, unknown> | undefined | null;
+  externalValuesOnly?: boolean;
 };
 
 type DataKeyMeta = {
@@ -53,6 +54,16 @@ function toNumberMaybe(v: any): number | string | null {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : String(v);
+}
+function isExternalDeviceOffline(values: Record<string, unknown>) {
+  const rawStatus = values.online ?? values.statusText ?? values.status;
+  if (rawStatus === false || rawStatus === 0) return true;
+  if (rawStatus === true || rawStatus === 1) return false;
+
+  const normalized = String(rawStatus ?? '')
+    .trim()
+    .toLowerCase();
+  return ['false', '0', 'no', 'offline', 'inactive', 'disconnected'].includes(normalized);
 }
 
 function trimToWindow(points: Point[], startTs: number) {
@@ -311,7 +322,9 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
   const mountedWidgetMap = new Map<string, RuntimeWidgetLike>();
 
   function connect() {
-    wsClient.connect();
+    if (!options.externalValuesOnly) {
+      wsClient.connect();
+    }
   }
 
   function clearLatestPolling(d: WidgetRuntimeData) {
@@ -369,6 +382,13 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
     const externalValues = options.getExternalValues?.(ds.entityType, ds.entityId);
     if (!externalValues) {
       return false;
+    }
+    if (isExternalDeviceOffline(externalValues)) {
+      d.latestValues = {};
+      d.series = {};
+      d.updatedAt = Date.now();
+      d.error = undefined;
+      return true;
     }
 
     const latestValues = ds.keys.reduce<Record<string, number | string | null>>((result, key) => {
@@ -459,6 +479,12 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
       return d;
     }
 
+    if (options.externalValuesOnly) {
+      d.error = undefined;
+      d.updatedAt = Date.now();
+      return d;
+    }
+
     void fetchLatestOnce(widget);
 
     d.latestPollTimer = window.setInterval(() => {
@@ -488,6 +514,13 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
 
     if (applyExternalLatest(widget)) {
       unsubscribeTimeseries(d);
+      return d;
+    }
+
+    if (options.externalValuesOnly) {
+      unsubscribeTimeseries(d);
+      d.error = undefined;
+      d.updatedAt = Date.now();
       return d;
     }
 

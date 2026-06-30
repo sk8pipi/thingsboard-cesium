@@ -36,6 +36,7 @@
   const mountedApps = new Map<string, ReturnType<typeof createApp>>();
   const datasourceRuntime = createDatasourceRuntime({
     getExternalValues: (_entityType, entityId) => props.runtimeDevices?.[entityId],
+    externalValuesOnly: true,
   });
 
   let renderPatched = false;
@@ -120,17 +121,12 @@
   }
 
   function unmountAll() {
-    mountedApps.forEach((app) => {
-      try {
-        app.unmount();
-      } catch {}
-    });
-    mountedApps.clear();
+    Array.from(mountedApps.keys()).forEach(unmountWidget);
   }
 
   async function mountWidget(id: string, widget: WidgetData) {
     await nextTick();
-    const mountEl = document.getElementById(`mw-mount-${id}`);
+    const mountEl = gridEl.value?.querySelector<HTMLElement>(`#mw-mount-${CSS.escape(id)}`);
     if (!mountEl) return;
 
     unmountWidget(id);
@@ -153,7 +149,7 @@
     const { layout, widgets } = loadData();
 
     unmountAll();
-    grid.removeAll(false);
+    grid.removeAll(true);
 
     for (const it of layout) {
       const w = widgets[it.i];
@@ -216,12 +212,11 @@
   );
 
   watch(
-    () => props.data,
+    () => JSON.stringify([props.data?.layout || [], props.data?.widgets || {}]),
     async () => {
       await nextTick();
       await render();
     },
-    { deep: true },
   );
 
   watch(
@@ -249,15 +244,20 @@
     pointer-events: none;
   }
 
+  :deep(.grid-stack-item) {
+    pointer-events: auto;
+  }
+
   :deep(.grid-stack-item-content) {
     pointer-events: auto;
+    overflow: hidden;
   }
 
   :deep(.mw-widget) {
     height: 100%;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(18, 22, 30, 0.75);
+    background: rgba(18, 22, 30, 0.96);
     overflow: hidden;
     display: flex;
     flex-direction: column;

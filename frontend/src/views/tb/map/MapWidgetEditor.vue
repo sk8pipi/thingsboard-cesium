@@ -107,6 +107,7 @@
       :visible="sensorPreviewVisible"
       :sensor="selectedSensor"
       :widgets="selectedSensor ? getSensorPopupWidgetsForView(selectedSensor.id) : []"
+      :runtime-devices="templateRuntimeDevices"
       @close="sensorPreviewVisible = false"
     />
 
@@ -239,6 +240,12 @@
     type SensorPopupBinding,
   } from './sensorPopupWidgetStorage';
   import { loadCameraRuntimeInfo } from './services/cameraDeviceRuntimeService';
+  import {
+    getAssignedMapTemplateRuntime,
+    subscribeAssignedMapTemplateRuntimeEvents,
+    type MapTemplateRuntimeDevices,
+    type MapTemplateRuntimeEvent,
+  } from './services/mapTemplateRuntimeService';
   import type {
     CameraMapPoint,
     CameraRuntimeInfo,
@@ -348,7 +355,12 @@
   const draftSensorPopupBindings = ref<SensorPopupBinding>(cloneJson(originalSensorPopupBindings.value));
 
   const mountedApps = new Map<string, ReturnType<typeof createApp>>();
-  const datasourceRuntime = createDatasourceRuntime();
+  const templateRuntimeDevices = ref<MapTemplateRuntimeDevices>({});
+  let unsubscribeTemplateRuntimeUpdates: (() => void) | undefined;
+  const datasourceRuntime = createDatasourceRuntime({
+    getExternalValues: (_entityType, entityId) => templateRuntimeDevices.value[entityId],
+    externalValuesOnly: true,
+  });
   const pointEditor = useMapPointEditor({
     getViewer: () => cesiumMapRef.value?.getViewer() || null,
     getPoints: () => draftMapPoints.value,
@@ -672,6 +684,39 @@
       sensorPopupBindings: loadSensorPopupBindings(),
     });
   }
+  function applyTemplateRuntimeDevices(devices?: MapTemplateRuntimeDevices | null) {
+    templateRuntimeDevices.value = devices || {};
+    datasourceRuntime.refreshExternalValues();
+  }
+
+  async function refreshTemplateRuntime() {
+    if (!isDashboardTemplateMode.value || !dashboardId.value) {
+      applyTemplateRuntimeDevices({});
+      return;
+    }
+
+    try {
+      const runtime = await getAssignedMapTemplateRuntime(dashboardId.value);
+      applyTemplateRuntimeDevices(runtime.devices);
+    } catch (error) {
+      applyTemplateRuntimeDevices({});
+      console.warn('[MapWidgetEditor] Failed to load template runtime data:', error);
+    }
+  }
+
+  function startTemplateRuntimeSubscription() {
+    unsubscribeTemplateRuntimeUpdates?.();
+    unsubscribeTemplateRuntimeUpdates = undefined;
+    if (!isDashboardTemplateMode.value || !dashboardId.value) return;
+
+    unsubscribeTemplateRuntimeUpdates = subscribeAssignedMapTemplateRuntimeEvents(
+      dashboardId.value,
+      (event: MapTemplateRuntimeEvent) => {
+        if (event.dashboardId !== dashboardId.value) return;
+        applyTemplateRuntimeDevices(event.devices);
+      },
+    );
+  }
 
   async function persistEditorState(state = getEditorState()) {
     if (isDashboardTemplateMode.value) {
@@ -680,6 +725,7 @@
       latest.configuration[DASHBOARD_MAP_WIDGET_CONFIG_KEY] = state;
       await saveDashboard(latest);
       dashboardTemplate.value = latest;
+      await refreshTemplateRuntime();
       return;
     }
 
@@ -701,12 +747,7 @@
   }
 
   function unmountAllWidgets() {
-    mountedApps.forEach((app) => {
-      try {
-        app.unmount();
-      } catch {}
-    });
-    mountedApps.clear();
+    Array.from(mountedApps.keys()).forEach(unmountWidget);
   }
 
   async function mountWidget(id: string, key: LocalWidgetKey) {
@@ -1538,6 +1579,7 @@
     patchGridstackRenderOnce();
     try {
       await loadEditorState();
+      await refreshTemplateRuntime();
     } catch (error: any) {
       errorMsg.value = error?.message || '加载大屏模板失败';
     }
@@ -1566,6 +1608,7 @@
       syncLayoutFromGrid();
     });
 
+    startTemplateRuntimeSubscription();
     datasourceRuntime.connect();
     renderGrid();
     grid.setStatic(true);
@@ -1574,6 +1617,8 @@
   });
 
   onBeforeUnmount(() => {
+    unsubscribeTemplateRuntimeUpdates?.();
+    unsubscribeTemplateRuntimeUpdates = undefined;
     clearDragHint();
     pointEditor.destroy();
     gridEl.value?.removeEventListener('click', onGridClick, true);
@@ -1928,7 +1973,7 @@
     height: 100%;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(18, 22, 30, 0.75);
+    background: rgba(18, 22, 30, 0.96);
     overflow: hidden;
     display: flex;
     flex-direction: column;

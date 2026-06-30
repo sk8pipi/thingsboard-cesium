@@ -46,7 +46,11 @@
   const keys = computed<string[]>(() => {
     const k = ds.value?.keys;
     if (Array.isArray(k)) return k;
-    if (typeof k === 'string') return k.split(',').map((s: string) => s.trim()).filter(Boolean);
+    if (typeof k === 'string')
+      return k
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter(Boolean);
     return [];
   });
 
@@ -134,7 +138,9 @@
     }, 1000);
     if (chartEl.value) {
       ro = new ResizeObserver(() => {
-        try { chart?.resize(); } catch {}
+        try {
+          chart?.resize();
+        } catch {}
       });
       ro.observe(chartEl.value);
     }
@@ -145,12 +151,15 @@
       window.clearInterval(axisTimer);
       axisTimer = null;
     }
-    try { ro?.disconnect(); } catch {}
+    try {
+      ro?.disconnect();
+    } catch {}
     ro = null;
-    try { chart?.dispose(); } catch {}
+    try {
+      chart?.dispose();
+    } catch {}
     chart = null;
   });
-  console.log('TbTimeseriesLine props', props.config, props.data);
 </script>
 
 <style scoped>
@@ -162,6 +171,8 @@
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
+    /* border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(18, 22, 30, 0.96); */
     color: #fff;
   }
 
