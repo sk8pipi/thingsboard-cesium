@@ -27,6 +27,7 @@ export interface BaseMapPoint extends MapPointLocation {
   online?: boolean;
   statusText?: string;
   source?: 'manual' | 'device';
+  locationSource?: 'deviceInfo' | 'attribute' | 'telemetry' | 'manual';
   createdAt: number;
   updatedAt: number;
 }

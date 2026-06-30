@@ -6,7 +6,7 @@
   import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
   import * as Cesium from 'cesium';
   import type { CameraMapPoint, MapPointLocation, SensorMapPoint } from './types/mapPointTypes';
-  import { BASE_MODEL_ASSET_ID, BASE_MODEL_CENTER } from './mapSceneConfig';
+  import { BASE_MODEL_ASSET_ID, BASE_MODEL_CENTER, MODEL_AUTO_FLY_VIEW } from './mapSceneConfig';
   import type { MapSceneModel } from './mapTemplateConfig';
 
   type MapInteractionMode = 'default' | 'pickPoint';
@@ -234,12 +234,18 @@
     }
 
     if (visibleModels.length && sceneModelTilesets[0]) {
-      await viewer.flyTo(sceneModelTilesets[0], {
-        offset: new Cesium.HeadingPitchRange(
-          0,
-          Cesium.Math.toRadians(-35),
-          Math.max(100, sceneModelTilesets[0].boundingSphere.radius * 2),
+      await viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(
+          MODEL_AUTO_FLY_VIEW.longitude,
+          MODEL_AUTO_FLY_VIEW.latitude,
+          MODEL_AUTO_FLY_VIEW.height,
         ),
+        orientation: {
+          heading: Cesium.Math.toRadians(MODEL_AUTO_FLY_VIEW.heading),
+          pitch: Cesium.Math.toRadians(MODEL_AUTO_FLY_VIEW.pitch),
+          roll: Cesium.Math.toRadians(MODEL_AUTO_FLY_VIEW.roll),
+        },
+        duration: MODEL_AUTO_FLY_VIEW.duration,
       });
     }
   }

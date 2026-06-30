@@ -21,6 +21,9 @@ export default {
     assignCustomer: '分配客户',
     isGateway: '是否网关',
     overwriteActivityTime: '覆盖已连接设备的活动时间',
+    longitude: '经度',
+    latitude: '纬度',
+    altitude: '高度（米）',
     description: '描述信息',
   },
   action: {

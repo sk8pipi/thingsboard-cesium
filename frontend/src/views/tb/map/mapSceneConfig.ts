@@ -6,6 +6,16 @@ export const BASE_MODEL_CENTER = {
   heightOffset: 20,
 };
 
+export const MODEL_AUTO_FLY_VIEW = {
+  longitude: 114.015328,
+  latitude: 30.543057,
+  height: 2500,
+  heading: 135,
+  pitch: -60,
+  roll: 0,
+  duration: 1.5,
+};
+
 export const DEVICE_POINT_COMPACT_LAYOUT = {
   enabled: true,
   sensorSpacingMeters: 14,

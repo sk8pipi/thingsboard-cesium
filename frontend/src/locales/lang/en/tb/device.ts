@@ -21,6 +21,9 @@ export default {
     assignCustomer: 'Assign Customer',
     isGateway: 'Is Gateway',
     overwriteActivityTime: 'Overwrite activity time of connected devices',
+    longitude: 'Longitude',
+    latitude: 'Latitude',
+    altitude: 'Altitude (m)',
     description: 'Description',
   },
   action: {

@@ -96,7 +96,24 @@
 
           <template v-else-if="requireKeys">
             <div v-if="keysLoading" class="sd-hint">正在加载设备可用的 timeseries keys...</div>
-            <div v-if="keysErr" class="sd-err">{{ keysErr }}</div>
+            <div v-else-if="keysErr" class="sd-err">{{ keysErr }}</div>
+            <div v-else-if="availableKeys.length" class="sd-available">
+              <div class="sd-available-title">设备已有 Keys（{{ availableKeys.length }}）</div>
+              <div class="sd-available-list">
+                <button
+                  v-for="key in availableKeys"
+                  :key="key"
+                  class="sd-available-key"
+                  :class="{ active: selectedKeys.includes(key) }"
+                  type="button"
+                  :aria-pressed="selectedKeys.includes(key)"
+                  @click="toggleKey(key)"
+                >
+                  {{ key }}
+                </button>
+              </div>
+            </div>
+            <div v-else class="sd-hint">当前设备暂无可用的 timeseries keys。</div>
 
             <div class="sd-keybar">
               <input
@@ -217,7 +234,7 @@
   const titleText = computed(() => props.title || '选择设备');
   const okTextText = computed(() => props.okText || '确定');
   const detailTitleText = computed(
-    () => props.detailTitle || (requireKeys.value ? '遥测 Keys（手动输入并校验）' : '设备绑定信息'),
+    () => props.detailTitle || (requireKeys.value ? '设备已有遥测 Keys' : '设备绑定信息'),
   );
   const detailHintText = computed(() => props.detailHint || '绑定后将仅保存地图点位与 ThingsBoard Device 的关系。');
   const selectedBindings = computed(() => deviceBindingsFor(selectedId.value));
@@ -263,6 +280,15 @@
 
   function removeKey(key: string) {
     selectedKeys.value = selectedKeys.value.filter((item) => item !== key);
+  }
+
+  function toggleKey(key: string) {
+    if (selectedKeys.value.includes(key)) {
+      removeKey(key);
+      return;
+    }
+
+    selectedKeys.value = [...selectedKeys.value, key];
   }
 
   function clearKeys() {
@@ -610,6 +636,46 @@
 
   .sd-picked {
     margin-bottom: 12px;
+  }
+
+  .sd-available {
+    min-height: 0;
+    margin-bottom: 12px;
+  }
+
+  .sd-available-title {
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.78);
+  }
+
+  .sd-available-list {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 8px;
+    max-height: 180px;
+    overflow: auto;
+    padding: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .sd-available-key {
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    padding: 3px 9px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  .sd-available-key.active {
+    border-color: rgba(56, 189, 248, 0.85);
+    background: rgba(56, 189, 248, 0.22);
   }
 
   .sd-picked-title {

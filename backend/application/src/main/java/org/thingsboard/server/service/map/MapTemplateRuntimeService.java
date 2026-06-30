@@ -255,24 +255,66 @@ public class MapTemplateRuntimeService {
         Map<String, Object> values = new LinkedHashMap<>();
         DeviceId deviceId = new DeviceId(UUID.fromString(request.getDeviceId()));
 
-        putDeviceInfo(values, tenantId, deviceId);
+        JsonNode deviceAdditionalInfo = putDeviceInfo(values, tenantId, deviceId);
         putAttributes(values, tenantId, deviceId, request.getAttributeKeys());
         putTimeseries(values, tenantId, deviceId, request.getTelemetryKeys());
+        putDeviceLocation(values, deviceAdditionalInfo);
         applyDerivedStatus(values);
         return values;
     }
 
-    private void putDeviceInfo(Map<String, Object> values, TenantId tenantId, DeviceId deviceId) {
+    private JsonNode putDeviceInfo(Map<String, Object> values, TenantId tenantId, DeviceId deviceId) {
         try {
             DeviceInfo deviceInfo = deviceService.findDeviceInfoById(tenantId, deviceId);
             if (deviceInfo != null) {
                 values.put("deviceActive", deviceInfo.isActive());
                 values.put("active", deviceInfo.isActive());
                 values.put("entityName", deviceInfo.getName());
+                return deviceInfo.getAdditionalInfo();
             }
         } catch (Exception e) {
             log.debug("[{}] Failed to load map template runtime device info", deviceId, e);
         }
+        return null;
+    }
+
+    private void putDeviceLocation(Map<String, Object> values, JsonNode additionalInfo) {
+        if (additionalInfo == null || !additionalInfo.isObject()) {
+            return;
+        }
+
+        Double longitude = firstNumber(additionalInfo, List.of("longitude", "lon", "lng"));
+        Double latitude = firstNumber(additionalInfo, List.of("latitude", "lat"));
+        Double height = firstNumber(additionalInfo, List.of("altitude", "height", "alt"));
+        if (longitude == null || latitude == null ||
+                Math.abs(longitude) > 180D || Math.abs(latitude) > 90D) {
+            return;
+        }
+
+        values.put("longitude", longitude);
+        values.put("latitude", latitude);
+        if (height != null) {
+            values.put("height", height);
+        }
+        values.put("mapLocationSource", "deviceInfo");
+    }
+
+    private Double firstNumber(JsonNode source, List<String> keys) {
+        for (String key : keys) {
+            JsonNode value = source.get(key);
+            if (value == null || value.isNull()) {
+                continue;
+            }
+            try {
+                double number = value.isNumber() ? value.asDouble() : Double.parseDouble(value.asText());
+                if (Double.isFinite(number)) {
+                    return number;
+                }
+            } catch (NumberFormatException ignored) {
+                // Try the next supported location alias.
+            }
+        }
+        return null;
     }
 
     private void putAttributes(Map<String, Object> values, TenantId tenantId, DeviceId deviceId, Collection<String> keys) {
@@ -280,13 +322,18 @@ public class MapTemplateRuntimeService {
             return;
         }
 
-        try {
-            List<AttributeKvEntry> attributes = attributesService
-                    .find(tenantId, deviceId, AttributeScope.SERVER_SCOPE, keys)
-                    .get(DAO_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            putKvEntries(values, attributes);
-        } catch (Exception e) {
-            log.debug("[{}] Failed to load map template runtime attributes", deviceId, e);
+        for (AttributeScope scope : List.of(
+                AttributeScope.CLIENT_SCOPE,
+                AttributeScope.SHARED_SCOPE,
+                AttributeScope.SERVER_SCOPE)) {
+            try {
+                List<AttributeKvEntry> attributes = attributesService
+                        .find(tenantId, deviceId, scope, keys)
+                        .get(DAO_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                putKvEntries(values, attributes);
+            } catch (Exception e) {
+                log.debug("[{}] Failed to load map template runtime attributes from scope [{}]", deviceId, scope, e);
+            }
         }
     }
 

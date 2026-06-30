@@ -124,6 +124,40 @@
       ifShow: false,
       colProps: { lg: 12, md: 12 },
     },
+    {
+      label: t('tb.device.form.longitude'),
+      field: 'additionalInfo.longitude',
+      component: 'InputNumber',
+      componentProps: {
+        min: -180,
+        max: 180,
+        precision: 8,
+        style: { width: '100%' },
+      },
+      colProps: { lg: 8, md: 24 },
+    },
+    {
+      label: t('tb.device.form.latitude'),
+      field: 'additionalInfo.latitude',
+      component: 'InputNumber',
+      componentProps: {
+        min: -90,
+        max: 90,
+        precision: 8,
+        style: { width: '100%' },
+      },
+      colProps: { lg: 8, md: 24 },
+    },
+    {
+      label: t('tb.device.form.altitude'),
+      field: 'additionalInfo.altitude',
+      component: 'InputNumber',
+      componentProps: {
+        precision: 3,
+        style: { width: '100%' },
+      },
+      colProps: { lg: 8, md: 24 },
+    },
 
     {
       label: t('tb.device.form.description'),

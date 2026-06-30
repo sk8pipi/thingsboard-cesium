@@ -18,7 +18,14 @@ export interface Device extends BasicModel<EntityType.DEVICE> {
     transportConfiguration?: { type: TransportType };
     thingModelDefine: { properties?: []; services?: []; events?: [] };
   };
-  additionalInfo: { description?: string; gateway: boolean; overwriteActivityTime?: boolean };
+  additionalInfo: {
+    description?: string;
+    gateway: boolean;
+    overwriteActivityTime?: boolean;
+    longitude?: number;
+    latitude?: number;
+    altitude?: number;
+  };
 }
 
 export interface DeviceInfo extends Device {

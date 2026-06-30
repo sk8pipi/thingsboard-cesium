@@ -59,7 +59,6 @@
   import { getMapPointStorageKey, loadMapPoints } from './mapPointStorage';
   import { getSensorPopupWidgets } from './sensorPopupWidgetStorage';
   import { loadCameraRuntimeInfo } from './services/cameraDeviceRuntimeService';
-  import { applyCompactModelLayout } from './services/compactMapPointLayout';
   import {
     getAssignedMapTemplateRuntime,
     subscribeAssignedMapTemplateRuntimeEvents,
@@ -72,7 +71,6 @@
     loadDeviceMapPointStatuses,
     type DeviceMapPointStatus,
   } from './services/deviceMapPointService';
-  import { DEVICE_POINT_COMPACT_LAYOUT } from './mapSceneConfig';
   import type { CameraMapPoint, CameraRuntimeInfo, MapPoint, SensorMapPoint } from './types/mapPointTypes';
   import type { PopupWidgetConfig } from './sensorPopupWidgetStorage';
   import {
@@ -165,9 +163,27 @@
   }
 
   function mergeMapPoints(dynamicPoints: MapPoint[], manualPoints: MapPoint[]) {
+    const manualPointMap = new Map(manualPoints.map((point) => [point.entityId, point]));
+    const mergedDynamicPoints = dynamicPoints.map((dynamicPoint) => {
+      const manualPoint = manualPointMap.get(dynamicPoint.entityId);
+      if (!manualPoint) return dynamicPoint;
+
+      const useDeviceInfoLocation = dynamicPoint.locationSource === 'deviceInfo';
+      return {
+        ...dynamicPoint,
+        ...manualPoint,
+        longitude: useDeviceInfoLocation ? dynamicPoint.longitude : manualPoint.longitude,
+        latitude: useDeviceInfoLocation ? dynamicPoint.latitude : manualPoint.latitude,
+        height: useDeviceInfoLocation ? dynamicPoint.height : manualPoint.height,
+        locationSource: useDeviceInfoLocation ? 'deviceInfo' : 'manual',
+        online: dynamicPoint.online,
+        statusText: dynamicPoint.statusText,
+        color: dynamicPoint.color,
+      } as MapPoint;
+    });
     const dynamicEntityIds = new Set(dynamicPoints.map((point) => point.entityId).filter(Boolean));
     const manualOnlyPoints = manualPoints.filter((point) => !dynamicEntityIds.has(point.entityId));
-    return [...dynamicPoints, ...manualOnlyPoints];
+    return [...mergedDynamicPoints, ...manualOnlyPoints];
   }
 
   function applyAssignedTemplatePointStatuses(points: MapPoint[]) {
@@ -318,7 +334,7 @@
         fetchDevices: fetchAccessibleDeviceInfos,
         permissionFilter: applyMapPointPermissionFilter,
       });
-      deviceMapPoints.value = DEVICE_POINT_COMPACT_LAYOUT.enabled ? applyCompactModelLayout(points) : points;
+      deviceMapPoints.value = points;
     } catch (error) {
       console.warn('[MapHome] Failed to refresh device map points:', error);
     }

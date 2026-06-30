@@ -33,6 +33,11 @@ function normalizeMapPoint(point: unknown): MapPoint | null {
     online: rawPoint.online === undefined ? undefined : Boolean(rawPoint.online),
     statusText: rawPoint.statusText ? String(rawPoint.statusText) : undefined,
     source: rawPoint.source === 'device' ? 'device' : 'manual',
+    locationSource: ['deviceInfo', 'attribute', 'telemetry', 'manual'].includes(String(rawPoint.locationSource))
+      ? (String(rawPoint.locationSource) as MapPoint['locationSource'])
+      : rawPoint.source === 'device'
+        ? undefined
+        : 'manual',
     createdAt: Number(rawPoint.createdAt || Date.now()),
     updatedAt: Number(rawPoint.updatedAt || Date.now()),
   } as const;
@@ -103,7 +108,10 @@ export function loadMapPoints(): MapPoint[] {
       return [];
     }
 
-    return parsed.map(normalizeMapPoint).filter((point): point is MapPoint => Boolean(point)).filter(shouldKeepPoint);
+    return parsed
+      .map(normalizeMapPoint)
+      .filter((point): point is MapPoint => Boolean(point))
+      .filter(shouldKeepPoint);
   } catch {
     return [];
   }

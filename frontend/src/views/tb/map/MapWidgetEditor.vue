@@ -241,6 +241,11 @@
   } from './sensorPopupWidgetStorage';
   import { loadCameraRuntimeInfo } from './services/cameraDeviceRuntimeService';
   import {
+    applyDeviceInfoMapPointLocations,
+    loadDeviceMapPointLocation,
+    saveDeviceMapPointLocations,
+  } from './services/deviceMapPointService';
+  import {
     getAssignedMapTemplateRuntime,
     subscribeAssignedMapTemplateRuntimeEvents,
     type MapTemplateRuntimeDevices,
@@ -683,9 +688,35 @@
       mapPoints: loadMapPoints(),
       sensorPopupBindings: loadSensorPopupBindings(),
     });
+    originalMapPoints.value = await applyDeviceInfoMapPointLocations(originalMapPoints.value);
+    draftMapPoints.value = cloneJson(originalMapPoints.value);
   }
+  function applyDeviceInfoLocations(points: MapPoint[], devices: MapTemplateRuntimeDevices) {
+    return points.map((point) => {
+      const runtime = devices[point.entityId];
+      if (runtime?.mapLocationSource !== 'deviceInfo') return point;
+
+      const longitude = Number(runtime.longitude);
+      const latitude = Number(runtime.latitude);
+      const height = Number(runtime.height);
+      if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return point;
+
+      return {
+        ...point,
+        longitude,
+        latitude,
+        height: Number.isFinite(height) ? height : point.height,
+        locationSource: 'deviceInfo',
+      } as MapPoint;
+    });
+  }
+
   function applyTemplateRuntimeDevices(devices?: MapTemplateRuntimeDevices | null) {
     templateRuntimeDevices.value = devices || {};
+    if (isDashboardTemplateMode.value && editorMode.value === 'view') {
+      originalMapPoints.value = applyDeviceInfoLocations(originalMapPoints.value, templateRuntimeDevices.value);
+      draftMapPoints.value = cloneJson(originalMapPoints.value);
+    }
     datasourceRuntime.refreshExternalValues();
   }
 
@@ -1272,7 +1303,12 @@
     editorMode.value = 'editing';
   }
 
-  function createPointBase(type: MapPointType, deviceId: string, deviceName: string) {
+  function createPointBase(
+    type: MapPointType,
+    deviceId: string,
+    deviceName: string,
+    deviceLocation?: Awaited<ReturnType<typeof loadDeviceMapPointLocation>>,
+  ) {
     const now = Date.now();
     const location = pendingPointLocation.value;
     if (!location) {
@@ -1283,9 +1319,10 @@
       id: `${type}_${now}`,
       type,
       name: deviceName,
-      longitude: location.longitude,
-      latitude: location.latitude,
-      height: location.height,
+      longitude: deviceLocation?.longitude ?? location.longitude,
+      latitude: deviceLocation?.latitude ?? location.latitude,
+      height: deviceLocation?.height ?? location.height,
+      locationSource: (deviceLocation?.source || 'manual') as MapPoint['locationSource'],
       entityType: 'DEVICE' as const,
       entityId: deviceId,
       entityName: deviceName,
@@ -1294,12 +1331,18 @@
     };
   }
 
-  function onSensorPointConfigured(payload: { deviceId: string; deviceName: string; keys: string[]; pollMs: number }) {
+  async function onSensorPointConfigured(payload: {
+    deviceId: string;
+    deviceName: string;
+    keys: string[];
+    pollMs: number;
+  }) {
     if (!ensureDeviceAvailableForNewPoint(payload.deviceId)) return;
     errorMsg.value = '';
+    const deviceLocation = await loadDeviceMapPointLocation(payload.deviceId).catch(() => null);
 
     const point: SensorMapPoint = {
-      ...createPointBase('sensor', payload.deviceId, payload.deviceName),
+      ...createPointBase('sensor', payload.deviceId, payload.deviceName, deviceLocation),
       type: 'sensor',
       online: false,
       statusText: '离线',
@@ -1329,12 +1372,13 @@
     editorMode.value = 'editing';
   }
 
-  function onCameraPointConfigured(payload: { deviceId: string; deviceName: string }) {
+  async function onCameraPointConfigured(payload: { deviceId: string; deviceName: string }) {
     if (!ensureDeviceAvailableForNewPoint(payload.deviceId)) return;
     errorMsg.value = '';
+    const deviceLocation = await loadDeviceMapPointLocation(payload.deviceId).catch(() => null);
 
     const point: CameraMapPoint = {
-      ...createPointBase('camera', payload.deviceId, payload.deviceName),
+      ...createPointBase('camera', payload.deviceId, payload.deviceName, deviceLocation),
       type: 'camera',
       entityType: 'DEVICE',
       online: false,
@@ -1405,7 +1449,13 @@
     errorMsg.value = '';
     syncLayoutFromGrid();
     const state = getEditorState();
-    await persistEditorState(state);
+    try {
+      await saveDeviceMapPointLocations(state.mapPoints);
+      await persistEditorState(state);
+    } catch (error: any) {
+      errorMsg.value = error?.message || '点位保存失败，请检查设备位置信息后重试';
+      return;
+    }
 
     originalMapPoints.value = cloneJson(state.mapPoints);
     originalSensorPopupBindings.value = cloneJson(state.sensorPopupBindings);

@@ -1,5 +1,5 @@
 import { getAttributes, getLatestTimeseries, type TsKvEntity, type kvEntity } from '/@/api/tb/telemetry';
-import { getDeviceInfoById, type DeviceInfo } from '/@/api/tb/device';
+import { getDeviceById, getDeviceInfoById, saveDevice, type DeviceInfo } from '/@/api/tb/device';
 import { EntityType } from '/@/enums/entityTypeEnum';
 import type { CameraMapPoint, MapPoint, SensorMapPoint } from '../types/mapPointTypes';
 
@@ -24,6 +24,20 @@ export interface DeviceMapPointLoadOptions {
 }
 
 type DeviceTelemetryState = Record<string, unknown>;
+type DeviceLocationSource = 'deviceInfo' | 'attribute' | 'telemetry';
+
+export interface DeviceMapPointLocation {
+  longitude: number;
+  latitude: number;
+  height?: number;
+  source: DeviceLocationSource;
+}
+
+type LoadedDeviceState = {
+  values: DeviceTelemetryState;
+  attributeLocation: DeviceMapPointLocation | null;
+  telemetryLocation: DeviceMapPointLocation | null;
+};
 
 const DEFAULT_PAGE_SIZE = 500;
 const DEFAULT_MAX_PAGES = 200;
@@ -133,7 +147,7 @@ function resolveDeviceStatus(device: DeviceInfo, state: DeviceTelemetryState) {
   };
 }
 
-function resolveLocation(state: DeviceTelemetryState) {
+function resolveLocation(state: DeviceTelemetryState, source: DeviceLocationSource): DeviceMapPointLocation | null {
   const latitude = toNumber(readFirstValue(state, ['lat', 'latitude']));
   const longitude = toNumber(readFirstValue(state, ['lon', 'lng', 'longitude']));
   const height = toNumber(readFirstValue(state, ['height', 'alt', 'altitude']));
@@ -141,16 +155,24 @@ function resolveLocation(state: DeviceTelemetryState) {
   if (latitude === undefined || longitude === undefined) return null;
   if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
 
-  return { latitude, longitude, height };
+  return { latitude, longitude, height, source };
 }
 
-function toMapPoint(device: DeviceInfo, state: DeviceTelemetryState): MapPoint | null {
-  const location = resolveLocation(state);
+function resolveDeviceInfoLocation(device: DeviceInfo): DeviceMapPointLocation | null {
+  return resolveLocation((device.additionalInfo || {}) as DeviceTelemetryState, 'deviceInfo');
+}
+
+function resolveLoadedDeviceLocation(device: DeviceInfo, state: LoadedDeviceState) {
+  return resolveDeviceInfoLocation(device) || state.attributeLocation || state.telemetryLocation;
+}
+
+function toMapPoint(device: DeviceInfo, state: LoadedDeviceState): MapPoint | null {
+  const location = resolveLoadedDeviceLocation(device, state);
   if (!location || !device.id?.id) return null;
 
   const timestamp = Date.now();
-  const nodeKind = resolveNodeKind(device, state);
-  const status = resolveDeviceStatus(device, state);
+  const nodeKind = resolveNodeKind(device, state.values);
+  const status = resolveDeviceStatus(device, state.values);
   const base = {
     id: `device-${device.id.id}`,
     name: device.label || device.name || device.id.id,
@@ -163,6 +185,7 @@ function toMapPoint(device: DeviceInfo, state: DeviceTelemetryState): MapPoint |
     online: status.online,
     statusText: status.statusText,
     source: 'device' as const,
+    locationSource: location.source,
     createdAt: device.createdTime || timestamp,
     updatedAt: timestamp,
   };
@@ -249,10 +272,93 @@ async function loadDeviceState(device: DeviceInfo) {
     getLatestTimeseries(entityId, DEVICE_TELEMETRY_KEYS, true),
   ]);
 
+  const attributes = kvListToObject(attributesResult.status === 'fulfilled' ? attributesResult.value : []);
+  const telemetry = telemetryToObject(telemetryResult.status === 'fulfilled' ? telemetryResult.value : {});
+
   return {
-    ...kvListToObject(attributesResult.status === 'fulfilled' ? attributesResult.value : []),
-    ...telemetryToObject(telemetryResult.status === 'fulfilled' ? telemetryResult.value : {}),
-  };
+    values: {
+      ...attributes,
+      ...telemetry,
+    },
+    attributeLocation: resolveLocation(attributes, 'attribute'),
+    telemetryLocation: resolveLocation(telemetry, 'telemetry'),
+  } satisfies LoadedDeviceState;
+}
+
+export async function loadDeviceMapPointLocation(deviceId: string): Promise<DeviceMapPointLocation | null> {
+  const normalizedDeviceId = String(deviceId || '').trim();
+  if (!normalizedDeviceId) return null;
+
+  const device = await getDeviceInfoById(normalizedDeviceId);
+  const state = await loadDeviceState(device);
+  return resolveLoadedDeviceLocation(device, state);
+}
+
+export async function applyDeviceInfoMapPointLocations(
+  points: MapPoint[],
+  concurrency = DEFAULT_CONCURRENCY,
+): Promise<MapPoint[]> {
+  const deviceIds = uniqueBy(
+    points.filter((point) => point.entityType === 'DEVICE' && Boolean(point.entityId)),
+    (point) => point.entityId,
+  ).map((point) => point.entityId);
+
+  const locations = await mapWithConcurrency(deviceIds, concurrency, async (deviceId) => {
+    try {
+      const device = await getDeviceInfoById(deviceId);
+      return [deviceId, resolveDeviceInfoLocation(device)] as const;
+    } catch (error) {
+      console.warn('[deviceMapPointService] Failed to load device info location:', deviceId, error);
+      return [deviceId, null] as const;
+    }
+  });
+  const locationMap = new Map(locations);
+
+  return points.map((point) => {
+    const location = locationMap.get(point.entityId);
+    if (!location) return point;
+
+    return {
+      ...point,
+      longitude: location.longitude,
+      latitude: location.latitude,
+      height: location.height,
+      locationSource: 'deviceInfo',
+    } as MapPoint;
+  });
+}
+
+function sameLocation(
+  additionalInfo: DeviceInfo['additionalInfo'] | undefined,
+  point: Pick<MapPoint, 'longitude' | 'latitude' | 'height'>,
+) {
+  return (
+    toNumber(additionalInfo?.longitude) === point.longitude &&
+    toNumber(additionalInfo?.latitude) === point.latitude &&
+    toNumber(additionalInfo?.altitude) === (point.height ?? 0)
+  );
+}
+
+export async function saveDeviceMapPointLocations(points: MapPoint[], concurrency = DEFAULT_CONCURRENCY) {
+  const devicePoints = uniqueBy(
+    points.filter((point) => point.entityType === 'DEVICE' && Boolean(point.entityId)),
+    (point) => point.entityId,
+  );
+
+  await mapWithConcurrency(devicePoints, concurrency, async (point) => {
+    const device = await getDeviceById(point.entityId);
+    if (sameLocation(device.additionalInfo, point)) return;
+
+    await saveDevice({
+      ...device,
+      additionalInfo: {
+        ...(device.additionalInfo || {}),
+        longitude: point.longitude,
+        latitude: point.latitude,
+        altitude: point.height ?? 0,
+      },
+    });
+  });
 }
 
 export async function loadDeviceMapPoints(options: DeviceMapPointLoadOptions): Promise<MapPoint[]> {
@@ -281,7 +387,7 @@ export async function loadDeviceMapPointStatuses(deviceIds: string[], concurrenc
     try {
       const device = await getDeviceInfoById(deviceId);
       const state = await loadDeviceState(device);
-      const status = resolveDeviceStatus(device, state);
+      const status = resolveDeviceStatus(device, state.values);
       return {
         entityId: deviceId,
         online: status.online,
