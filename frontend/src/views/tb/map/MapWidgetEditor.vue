@@ -247,10 +247,7 @@
     loadDeviceMapPointLocation,
     saveDeviceMapPointLocations,
   } from './services/deviceMapPointService';
-  import {
-    getAssignedMapTemplateRuntime,
-    type MapTemplateRuntimeDevices,
-  } from './services/mapTemplateRuntimeService';
+  import { getAssignedMapTemplateRuntime, type MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
   import type {
     CameraMapPoint,
     CameraRuntimeInfo,
@@ -279,6 +276,7 @@
     type MapTemplateScene,
     type MapTemplateState,
   } from './mapTemplateConfig';
+  import { formatTemplateDeviceNames, inspectMapTemplateDeviceAccess } from './mapTemplateDeviceAccess';
 
   type WidgetData = DashboardWidget & {
     type: LocalWidgetKey;
@@ -361,7 +359,14 @@
 
   const mountedApps = new Map<string, ReturnType<typeof createApp>>();
   const templateRuntimeDevices = ref<MapTemplateRuntimeDevices>({});
-  const datasourceRuntime = createDatasourceRuntime();
+  const datasourceRuntime = createDatasourceRuntime({
+    getEntityName: (_entityType, entityId) =>
+      String(
+        templateRuntimeDevices.value[entityId]?.entityName ||
+          draftMapPoints.value.find((point) => point.entityId === entityId)?.entityName ||
+          '',
+      ) || undefined,
+  });
   const pointEditor = useMapPointEditor({
     getViewer: () => cesiumMapRef.value?.getViewer() || null,
     getPoints: () => draftMapPoints.value,
@@ -730,9 +735,14 @@
     }
   }
 
-
   async function persistEditorState(state = getEditorState()) {
     if (isDashboardTemplateMode.value) {
+      const deviceAccess = await inspectMapTemplateDeviceAccess(state);
+      const inaccessibleDevices = deviceAccess.filter((item) => !item.device);
+      if (inaccessibleDevices.length) {
+        throw new Error('模板包含不属于当前租户或已失效的设备：' + formatTemplateDeviceNames(inaccessibleDevices));
+      }
+
       const latest = await getDashboardById(dashboardId.value);
       latest.configuration = latest.configuration || {};
       latest.configuration[DASHBOARD_MAP_WIDGET_CONFIG_KEY] = state;
@@ -1026,6 +1036,7 @@
       type: 'device',
       entityType: 'DEVICE',
       entityId: payload.deviceId,
+      entityName: payload.deviceName,
       keys: payload.keys,
       dataKeys: payload.keys.map((name) => ({
         name,

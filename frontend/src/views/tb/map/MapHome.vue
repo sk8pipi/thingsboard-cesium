@@ -98,7 +98,14 @@
   const deviceMapPoints = ref<MapPoint[]>([]);
   const assignedTemplateDeviceStatuses = ref<DeviceMapPointStatus[]>([]);
   const assignedTemplateRuntimeDeviceMap = ref<MapTemplateRuntimeDevices>({});
-  const datasourceRuntime = createDatasourceRuntime();
+  const datasourceRuntime = createDatasourceRuntime({
+    getEntityName: (_entityType, entityId) =>
+      String(
+        assignedTemplateRuntimeDeviceMap.value[entityId]?.entityName ||
+          assignedTemplateState.value?.mapPoints.find((point) => point.entityId === entityId)?.entityName ||
+          '',
+      ) || undefined,
+  });
   const selectedSensor = ref<SensorMapPoint | null>(null);
   const sensorPreviewVisible = ref(false);
 
@@ -525,11 +532,6 @@
     cameraRuntimeLoading.value = true;
     cameraRuntimeError.value = '';
     cameraPopupVisible.value = true;
-
-    if (isCustomerUserMap.value) {
-      cameraRuntimeLoading.value = false;
-      return;
-    }
 
     const requestId = ++cameraRuntimeRequestId;
 

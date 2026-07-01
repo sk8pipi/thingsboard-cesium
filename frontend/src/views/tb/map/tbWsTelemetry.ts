@@ -179,9 +179,7 @@ export class TbWsTelemetryClient {
 
   private sendCommand(command: Record<string, any>) {
     const currentCommand =
-      Number(command.timeWindow) > 0
-        ? { ...command, startTs: Date.now() - Number(command.timeWindow) }
-        : command;
+      Number(command.timeWindow) > 0 ? { ...command, startTs: Date.now() - Number(command.timeWindow) } : command;
     this.sendRaw({ cmds: [currentCommand] });
   }
 

@@ -30,6 +30,7 @@ export type RuntimeWidgetLike = {
 
 export type DatasourceRuntimeOptions = {
   getExternalValues?: (entityType: string, entityId: string) => Record<string, unknown> | undefined | null;
+  getEntityName?: (entityType: string, entityId: string) => string | undefined;
   externalValuesOnly?: boolean;
 };
 
@@ -42,6 +43,7 @@ type DataKeyMeta = {
 type NormalizedDatasource = {
   entityType: string;
   entityId: string;
+  entityName?: string;
   keys: string[];
   dataKeys: DataKeyMeta[];
   pollMs: number;
@@ -133,10 +135,22 @@ function normalizeDatasource(cfg: any): NormalizedDatasource | null {
   return {
     entityType: String(entityType),
     entityId: String(entityId),
+    entityName: String(ds.entityName || ds.name || '').trim() || undefined,
     keys: keys as string[],
     dataKeys,
     pollMs,
   };
+}
+
+function formatTelemetryError(rawError: unknown, datasource: NormalizedDatasource, options: DatasourceRuntimeOptions) {
+  if (!rawError) return undefined;
+  const message = String(rawError);
+  const entityName =
+    datasource.entityName || options.getEntityName?.(datasource.entityType, datasource.entityId) || datasource.entityId;
+  if (/failed to fetch data|permission|unauthorized|access denied/i.test(message)) {
+    return `设备“${entityName}”无遥测读取权限，请将该设备分配给当前客户后重试。`;
+  }
+  return `设备“${entityName}”：${message}`;
 }
 
 function extractLastValue(input: any): any {
@@ -493,7 +507,7 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
       entityId: ds.entityId,
       keys: ds.keys,
       onData: (message: any) => {
-        d.error = message?.errorMsg || message?.error || undefined;
+        d.error = formatTelemetryError(message?.errorMsg || message?.error, ds, options);
         if (!d.error) appendRealtime(d, ds.keys, message?.data ?? message);
       },
     });
@@ -551,7 +565,7 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
       limit: 1000,
       agg: 'NONE',
       onData: (message: any) => {
-        d.error = message?.errorMsg || message?.error || undefined;
+        d.error = formatTelemetryError(message?.errorMsg || message?.error, ds, options);
         if (!d.error) mergeHistory(d, ds.keys, message?.data ?? message);
       },
     });
