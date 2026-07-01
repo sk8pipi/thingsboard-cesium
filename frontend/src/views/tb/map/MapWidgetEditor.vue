@@ -95,6 +95,7 @@
     </div>
 
     <SensorPopupWidgetEditor
+      :runtime="datasourceRuntime"
       :visible="sensorConfigVisible"
       :sensor="selectedSensor"
       :widgets="selectedSensor ? getSensorPopupWidgetsForEditor(selectedSensor.id) : []"
@@ -104,6 +105,7 @@
     />
 
     <SensorWidgetPopup
+      :runtime="datasourceRuntime"
       :visible="sensorPreviewVisible"
       :sensor="selectedSensor"
       :widgets="selectedSensor ? getSensorPopupWidgetsForView(selectedSensor.id) : []"
@@ -247,9 +249,7 @@
   } from './services/deviceMapPointService';
   import {
     getAssignedMapTemplateRuntime,
-    subscribeAssignedMapTemplateRuntimeEvents,
     type MapTemplateRuntimeDevices,
-    type MapTemplateRuntimeEvent,
   } from './services/mapTemplateRuntimeService';
   import type {
     CameraMapPoint,
@@ -361,11 +361,7 @@
 
   const mountedApps = new Map<string, ReturnType<typeof createApp>>();
   const templateRuntimeDevices = ref<MapTemplateRuntimeDevices>({});
-  let unsubscribeTemplateRuntimeUpdates: (() => void) | undefined;
-  const datasourceRuntime = createDatasourceRuntime({
-    getExternalValues: (_entityType, entityId) => templateRuntimeDevices.value[entityId],
-    externalValuesOnly: true,
-  });
+  const datasourceRuntime = createDatasourceRuntime();
   const pointEditor = useMapPointEditor({
     getViewer: () => cesiumMapRef.value?.getViewer() || null,
     getPoints: () => draftMapPoints.value,
@@ -717,7 +713,6 @@
       originalMapPoints.value = applyDeviceInfoLocations(originalMapPoints.value, templateRuntimeDevices.value);
       draftMapPoints.value = cloneJson(originalMapPoints.value);
     }
-    datasourceRuntime.refreshExternalValues();
   }
 
   async function refreshTemplateRuntime() {
@@ -735,19 +730,6 @@
     }
   }
 
-  function startTemplateRuntimeSubscription() {
-    unsubscribeTemplateRuntimeUpdates?.();
-    unsubscribeTemplateRuntimeUpdates = undefined;
-    if (!isDashboardTemplateMode.value || !dashboardId.value) return;
-
-    unsubscribeTemplateRuntimeUpdates = subscribeAssignedMapTemplateRuntimeEvents(
-      dashboardId.value,
-      (event: MapTemplateRuntimeEvent) => {
-        if (event.dashboardId !== dashboardId.value) return;
-        applyTemplateRuntimeDevices(event.devices);
-      },
-    );
-  }
 
   async function persistEditorState(state = getEditorState()) {
     if (isDashboardTemplateMode.value) {
@@ -1629,7 +1611,7 @@
     patchGridstackRenderOnce();
     try {
       await loadEditorState();
-      await refreshTemplateRuntime();
+      void refreshTemplateRuntime();
     } catch (error: any) {
       errorMsg.value = error?.message || '加载大屏模板失败';
     }
@@ -1658,7 +1640,6 @@
       syncLayoutFromGrid();
     });
 
-    startTemplateRuntimeSubscription();
     datasourceRuntime.connect();
     renderGrid();
     grid.setStatic(true);
@@ -1667,8 +1648,6 @@
   });
 
   onBeforeUnmount(() => {
-    unsubscribeTemplateRuntimeUpdates?.();
-    unsubscribeTemplateRuntimeUpdates = undefined;
     clearDragHint();
     pointEditor.destroy();
     gridEl.value?.removeEventListener('click', onGridClick, true);

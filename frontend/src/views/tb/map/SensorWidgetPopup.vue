@@ -27,8 +27,8 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, onMounted, onBeforeUnmount, watch } from 'vue';
-  import { createDatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
+  import { computed, onMounted, onBeforeUnmount } from 'vue';
+  import { createDatasourceRuntime, type DatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
   import type { DashboardWidget, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
   import { widgetRegistry } from '../dashboard/runtime/widgets/registry/widgetRegistry';
   import SensorPopupWidgetGrid from './SensorPopupWidgetGrid.vue';
@@ -44,16 +44,15 @@
     sensor?: any;
     widgets: SensorPopupWidgetInput[];
     runtimeDevices?: MapTemplateRuntimeDevices | null;
+    runtime?: DatasourceRuntime;
   }>();
 
   defineEmits<{
     (e: 'close'): void;
   }>();
 
-  const datasourceRuntime = createDatasourceRuntime({
-    getExternalValues: (_entityType, entityId) => props.runtimeDevices?.[entityId],
-    externalValuesOnly: true,
-  });
+  const ownedDatasourceRuntime = props.runtime ? null : createDatasourceRuntime();
+  const datasourceRuntime = props.runtime || ownedDatasourceRuntime!;
 
   function formatCoordinate(value: unknown) {
     const coordinate = Number(value);
@@ -97,20 +96,12 @@
       .filter(Boolean) as WidgetData[];
   });
 
-  watch(
-    () => [props.sensor, props.runtimeDevices],
-    () => {
-      datasourceRuntime.refreshExternalValues();
-    },
-    { deep: true },
-  );
-
   onMounted(() => {
     datasourceRuntime.connect();
   });
 
   onBeforeUnmount(() => {
-    datasourceRuntime.close();
+    ownedDatasourceRuntime?.close();
   });
 </script>
 

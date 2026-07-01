@@ -1,120 +1,110 @@
-// E:\things\thingsboard-ui-vue3\src\views\tb\map\tbWsTelemetry.ts
-type LatestCb = (payload: any) => void;
+type TelemetryCallback = (payload: any) => void;
 
+type SubscriptionRecord = {
+  command: Record<string, any>;
+  onData: TelemetryCallback;
+  resubscribe: boolean;
+};
+
+const RECONNECT_MIN_MS = 1000;
+const RECONNECT_MAX_MS = 15000;
+
+/** One ThingsBoard telemetry connection shared by all widgets on a page. */
 export class TbWsTelemetryClient {
   private ws: WebSocket | null = null;
-  private token: string;
   private cmdId = 10;
   private opened = false;
+  private manuallyClosed = false;
+  private reconnectDelayMs = RECONNECT_MIN_MS;
+  private reconnectTimer?: number;
+  private readonly subscriptions = new Map<number, SubscriptionRecord>();
 
-  private pending: any[] = [];
-  private subs = new Map<number, LatestCb>(); // cmdId/subscriptionId -> callback
+  private readonly getToken: () => string;
 
-  constructor(token: string) {
-    this.token = token;
+  constructor(tokenOrProvider: string | (() => string)) {
+    this.getToken = typeof tokenOrProvider === 'function' ? tokenOrProvider : () => tokenOrProvider;
   }
 
   connect() {
+    this.manuallyClosed = false;
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
 
-    const wsUrl = this.buildWsUrl();
-    this.ws = new WebSocket(wsUrl);
+    this.clearReconnectTimer();
+    const socket = new WebSocket(this.buildWsUrl());
+    this.ws = socket;
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
+      if (this.ws !== socket) return;
       this.opened = true;
-
-      // 先鉴权
-      this.send({
-        authCmd: { cmdId: 0, token: this.token },
+      this.reconnectDelayMs = RECONNECT_MIN_MS;
+      this.sendRaw({ authCmd: { cmdId: 0, token: this.getToken() } });
+      this.subscriptions.forEach((subscription) => {
+        if (subscription.resubscribe) this.sendCommand(subscription.command);
       });
-
-      // 再发送积压命令
-      if (this.pending.length) {
-        this.pending.forEach((m) => this.send(m));
-        this.pending = [];
-      }
     };
 
-    this.ws.onmessage = (evt) => {
+    socket.onmessage = (event) => {
       try {
-        const msg = JSON.parse(evt.data);
-        //console.log('[WS] recv', msg);
-
-        // 兼容：有的返回 cmdId，有的返回 subscriptionId
-        const id = Number(msg?.cmdId ?? msg?.subscriptionId);
+        const message = JSON.parse(event.data);
+        const id = Number(message?.cmdId ?? message?.subscriptionId);
         if (!Number.isFinite(id)) return;
 
-        const cb = this.subs.get(id);
-        if (!cb) return;
-        cb(msg);
-      } catch {
-        // ignore
+        const subscription = this.subscriptions.get(id);
+        if (!subscription) return;
+        subscription.onData(message);
+        if (!subscription.resubscribe) this.subscriptions.delete(id);
+      } catch (error) {
+        console.warn('[TbWsTelemetryClient] Failed to process telemetry message:', error);
       }
     };
 
-    this.ws.onclose = () => {
+    socket.onclose = () => {
+      if (this.ws !== socket) return;
+      this.ws = null;
       this.opened = false;
+      if (!this.manuallyClosed && this.hasActiveSubscriptions()) this.scheduleReconnect();
     };
 
-    this.ws.onerror = () => {
-      // ignore
+    socket.onerror = () => {
+      if (this.ws === socket) socket.close();
     };
   }
 
   close() {
-    try {
-      this.ws?.close();
-    } catch {}
-    this.ws = null;
+    this.manuallyClosed = true;
+    this.clearReconnectTimer();
+    this.subscriptions.clear();
     this.opened = false;
-    this.pending = [];
-    this.subs.clear();
+    const socket = this.ws;
+    this.ws = null;
+    try {
+      socket?.close();
+    } catch {}
   }
 
   unsubscribe(cmdId: number) {
-    this.subs.delete(cmdId);
+    const subscription = this.subscriptions.get(cmdId);
+    if (!subscription) return;
+    if (subscription.resubscribe && this.opened) {
+      this.sendCommand({ ...subscription.command, unsubscribe: true });
+    }
+    this.subscriptions.delete(cmdId);
   }
 
-  private send(obj: any) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    //console.log('[WS] send', obj);
-    this.ws.send(JSON.stringify(obj));
+  subscribeLatest(opts: { entityType: string; entityId: string; keys: string[]; onData: TelemetryCallback }): number {
+    return this.register(
+      {
+        entityType: String(opts.entityType).toUpperCase(),
+        entityId: opts.entityId,
+        scope: 'LATEST_TELEMETRY',
+        type: 'TIMESERIES',
+        keys: opts.keys.join(','),
+      },
+      opts.onData,
+      true,
+    );
   }
 
-  private buildWsUrl() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${location.host}/api/ws`;
-  }
-
-  // -----------------------------
-  // ✅ 你原来的最新值订阅（cmds）
-  // -----------------------------
-  subscribeLatest(opts: { entityType: string; entityId: string; keys: string[]; onData: LatestCb }): number {
-    const cmdId = ++this.cmdId;
-    this.subs.set(cmdId, opts.onData);
-
-    const cmd = {
-      cmds: [
-        {
-          entityType: String(opts.entityType).toUpperCase(),
-          entityId: opts.entityId,
-          scope: 'LATEST_TELEMETRY',
-          type: 'TIMESERIES',
-          keys: opts.keys.join(','),
-          cmdId,
-        },
-      ],
-    };
-
-    if (this.opened) this.send(cmd);
-    else this.pending.push(cmd);
-
-    return cmdId;
-  }
-
-  // -------------------------------------------
-  // ✅ 用 cmds 拉历史窗口（更兼容你当前 TB）
-  // -------------------------------------------
   requestHistoryByCmds(opts: {
     entityType: string;
     entityId: string;
@@ -124,37 +114,26 @@ export class TbWsTelemetryClient {
     interval?: number;
     limit?: number;
     agg?: 'NONE' | 'MIN' | 'MAX' | 'AVG' | 'SUM' | 'COUNT';
-    onData: LatestCb;
+    onData: TelemetryCallback;
   }): number {
-    const cmdId = ++this.cmdId;
-    this.subs.set(cmdId, opts.onData);
-
-    const c0: any = {
-      cmdId,
-      type: 'TIMESERIES',
-      scope: 'LATEST_TELEMETRY',
-      entityType: String(opts.entityType).toUpperCase(),
-      entityId: opts.entityId,
-      keys: opts.keys.join(','),
-      startTs: opts.startTs,
-      endTs: opts.endTs,
-    };
-
-    if (opts.interval != null) c0.interval = opts.interval;
-    if (opts.limit != null) c0.limit = opts.limit;
-    if (opts.agg != null) c0.agg = opts.agg;
-
-    const cmd = { cmds: [c0] };
-
-    if (this.opened) this.send(cmd);
-    else this.pending.push(cmd);
-
-    return cmdId;
+    return this.register(
+      this.withQueryOptions(
+        {
+          type: 'TIMESERIES',
+          scope: 'LATEST_TELEMETRY',
+          entityType: String(opts.entityType).toUpperCase(),
+          entityId: opts.entityId,
+          keys: opts.keys.join(','),
+          startTs: opts.startTs,
+          endTs: opts.endTs,
+        },
+        opts,
+      ),
+      opts.onData,
+      false,
+    );
   }
 
-  // -------------------------------------------
-  // ✅ 用 cmds 订阅窗口时序（timeWindow）
-  // -------------------------------------------
   subscribeTimeseriesByCmds(opts: {
     entityType: string;
     entityId: string;
@@ -163,30 +142,76 @@ export class TbWsTelemetryClient {
     interval?: number;
     limit?: number;
     agg?: 'NONE' | 'MIN' | 'MAX' | 'AVG' | 'SUM' | 'COUNT';
-    onData: LatestCb;
+    onData: TelemetryCallback;
   }): number {
+    return this.register(
+      this.withQueryOptions(
+        {
+          type: 'TIMESERIES',
+          scope: 'LATEST_TELEMETRY',
+          entityType: String(opts.entityType).toUpperCase(),
+          entityId: opts.entityId,
+          keys: opts.keys.join(','),
+          timeWindow: opts.timeWindowMs,
+        },
+        opts,
+      ),
+      opts.onData,
+      true,
+    );
+  }
+
+  private register(commandWithoutId: Record<string, any>, onData: TelemetryCallback, resubscribe: boolean): number {
     const cmdId = ++this.cmdId;
-    this.subs.set(cmdId, opts.onData);
-
-    const c0: any = {
-      cmdId,
-      type: 'TIMESERIES',
-      scope: 'LATEST_TELEMETRY',
-      entityType: String(opts.entityType).toUpperCase(),
-      entityId: opts.entityId,
-      keys: opts.keys.join(','),
-      timeWindow: opts.timeWindowMs,
-    };
-
-    if (opts.interval != null) c0.interval = opts.interval;
-    if (opts.limit != null) c0.limit = opts.limit;
-    if (opts.agg != null) c0.agg = opts.agg;
-
-    const cmd = { cmds: [c0] };
-
-    if (this.opened) this.send(cmd);
-    else this.pending.push(cmd);
-
+    const command = { ...commandWithoutId, cmdId };
+    this.subscriptions.set(cmdId, { command, onData, resubscribe });
+    if (this.opened) this.sendCommand(command);
+    else this.connect();
     return cmdId;
+  }
+
+  private withQueryOptions(command: Record<string, any>, opts: Record<string, any>) {
+    if (opts.interval != null) command.interval = opts.interval;
+    if (opts.limit != null) command.limit = opts.limit;
+    if (opts.agg != null) command.agg = opts.agg;
+    return command;
+  }
+
+  private sendCommand(command: Record<string, any>) {
+    const currentCommand =
+      Number(command.timeWindow) > 0
+        ? { ...command, startTs: Date.now() - Number(command.timeWindow) }
+        : command;
+    this.sendRaw({ cmds: [currentCommand] });
+  }
+
+  private sendRaw(message: Record<string, any>) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(JSON.stringify(message));
+  }
+
+  private hasActiveSubscriptions() {
+    return Array.from(this.subscriptions.values()).some((subscription) => subscription.resubscribe);
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer || this.manuallyClosed) return;
+    const delay = this.reconnectDelayMs;
+    this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, RECONNECT_MAX_MS);
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = undefined;
+      this.connect();
+    }, delay);
+  }
+
+  private clearReconnectTimer() {
+    if (!this.reconnectTimer) return;
+    window.clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+  }
+
+  private buildWsUrl() {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${location.host}/api/ws`;
   }
 }

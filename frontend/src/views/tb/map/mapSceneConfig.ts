@@ -7,11 +7,11 @@ export const BASE_MODEL_CENTER = {
 };
 
 export const MODEL_AUTO_FLY_VIEW = {
-  longitude: 114.015328,
-  latitude: 30.543057,
-  height: 2500,
+  longitude: 114.017221,
+  latitude: 30.539560,
+  height: 500,
   heading: 135,
-  pitch: -60,
+  pitch: -30,
   roll: 0,
   duration: 1.5,
 };

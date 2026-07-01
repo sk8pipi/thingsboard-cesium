@@ -5,6 +5,8 @@ import { TbWsTelemetryClient } from '../../map/tbWsTelemetry';
 
 export type Point = { ts: number; value: number | string | null };
 
+const MAX_POINTS_PER_KEY = 2000;
+
 export type WidgetRuntimeData = {
   timeWindowMs?: number;
   series: Record<string, Point[]>;
@@ -13,6 +15,7 @@ export type WidgetRuntimeData = {
   error?: string;
   wsHistoryCmdId?: number;
   wsTsSubCmdId?: number;
+  wsLatestCmdId?: number;
   latestPollTimer?: number;
   setTimeWindow?: (ms: number) => void;
 };
@@ -70,6 +73,9 @@ function trimToWindow(points: Point[], startTs: number) {
   let idx = 0;
   while (idx < points.length && points[idx].ts < startTs) idx++;
   if (idx > 0) points.splice(0, idx);
+  if (points.length > MAX_POINTS_PER_KEY) {
+    points.splice(0, points.length - MAX_POINTS_PER_KEY);
+  }
 }
 
 function normalizeDatasource(cfg: any): NormalizedDatasource | null {
@@ -315,8 +321,7 @@ function appendRealtime(d: WidgetRuntimeData, keys: string[], payload: any) {
 }
 
 export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) {
-  const token = localStorage.getItem('jwt_token') || '';
-  const wsClient = new TbWsTelemetryClient(token);
+  const wsClient = new TbWsTelemetryClient(() => localStorage.getItem('jwt_token') || '');
 
   const runtimeDataMap = new Map<string, WidgetRuntimeData>();
   const mountedWidgetMap = new Map<string, RuntimeWidgetLike>();
@@ -355,6 +360,7 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
         error: undefined,
         wsHistoryCmdId: undefined,
         wsTsSubCmdId: undefined,
+        wsLatestCmdId: undefined,
         latestPollTimer: undefined,
         setTimeWindow: undefined,
       }) as WidgetRuntimeData;
@@ -367,8 +373,10 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
   function unsubscribeTimeseries(d: WidgetRuntimeData) {
     if (d.wsHistoryCmdId) wsClient.unsubscribe(d.wsHistoryCmdId);
     if (d.wsTsSubCmdId) wsClient.unsubscribe(d.wsTsSubCmdId);
+    if (d.wsLatestCmdId) wsClient.unsubscribe(d.wsLatestCmdId);
     d.wsHistoryCmdId = undefined;
     d.wsTsSubCmdId = undefined;
+    d.wsLatestCmdId = undefined;
   }
 
   function applyExternalLatest(widget: RuntimeWidgetLike) {
@@ -382,13 +390,6 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
     const externalValues = options.getExternalValues?.(ds.entityType, ds.entityId);
     if (!externalValues) {
       return false;
-    }
-    if (isExternalDeviceOffline(externalValues)) {
-      d.latestValues = {};
-      d.series = {};
-      d.updatedAt = Date.now();
-      d.error = undefined;
-      return true;
     }
 
     const latestValues = ds.keys.reduce<Record<string, number | string | null>>((result, key) => {
@@ -485,11 +486,17 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
       return d;
     }
 
-    void fetchLatestOnce(widget);
-
-    d.latestPollTimer = window.setInterval(() => {
-      void fetchLatestOnce(widget);
-    }, ds.pollMs);
+    unsubscribeTimeseries(d);
+    d.error = undefined;
+    d.wsLatestCmdId = wsClient.subscribeLatest({
+      entityType: ds.entityType,
+      entityId: ds.entityId,
+      keys: ds.keys,
+      onData: (message: any) => {
+        d.error = message?.errorMsg || message?.error || undefined;
+        if (!d.error) appendRealtime(d, ds.keys, message?.data ?? message);
+      },
+    });
 
     return d;
   }
@@ -536,26 +543,16 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
 
     d.error = undefined;
 
-    d.wsHistoryCmdId = wsClient.requestHistoryByCmds({
-      entityType: String(ds.entityType).toUpperCase(),
-      entityId: ds.entityId,
-      keys: ds.keys,
-      startTs,
-      endTs,
-      onData: (msg: any) => {
-        d.error = msg?.errorMsg || msg?.error || undefined;
-        mergeHistory(d, ds.keys, msg?.data ?? msg);
-      },
-    });
-
     d.wsTsSubCmdId = wsClient.subscribeTimeseriesByCmds({
       entityType: String(ds.entityType).toUpperCase(),
       entityId: ds.entityId,
       keys: ds.keys,
-      timeWindowMs: d.timeWindowMs,
-      onData: (msg: any) => {
-        d.error = msg?.errorMsg || msg?.error || undefined;
-        appendRealtime(d, ds.keys, msg?.data ?? msg);
+      timeWindowMs: d.timeWindowMs || 300000,
+      limit: 1000,
+      agg: 'NONE',
+      onData: (message: any) => {
+        d.error = message?.errorMsg || message?.error || undefined;
+        if (!d.error) mergeHistory(d, ds.keys, message?.data ?? message);
       },
     });
 
@@ -568,6 +565,10 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
     mountedWidgetMap.set(widget.id, widget);
 
     if (category === 'timeseries') {
+      const configuredWindow = Number(widget.config?.timewindow?.intervalMs);
+      if (Number.isFinite(configuredWindow) && !Object.keys(d.series).length) {
+        d.timeWindowMs = Math.max(60_000, configuredWindow);
+      }
       return subscribeTimeseries(widget);
     }
 
@@ -587,7 +588,6 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
     if (!d) return;
     clearLatestPolling(d);
     unsubscribeTimeseries(d);
-    runtimeDataMap.delete(widgetId);
     mountedWidgetMap.delete(widgetId);
   }
 
@@ -606,3 +606,5 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
     refreshExternalValues,
   };
 }
+
+export type DatasourceRuntime = ReturnType<typeof createDatasourceRuntime>;

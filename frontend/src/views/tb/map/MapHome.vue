@@ -18,6 +18,7 @@
       :storage-key="storageKey"
       :data="assignedTemplateState"
       :runtime-devices="assignedTemplateRuntimeDevices"
+      :runtime="datasourceRuntime"
     />
 
     <SensorWidgetPopup
@@ -26,6 +27,7 @@
       :sensor="selectedSensor"
       :widgets="selectedSensor ? getSensorPopupWidgetsForView(selectedSensor.id) : []"
       :runtime-devices="assignedTemplateRuntimeDevices"
+      :runtime="datasourceRuntime"
       @close="sensorPreviewVisible = false"
     />
 
@@ -53,6 +55,7 @@
   import { getCustomerDeviceInfoList, getTenantDeviceInfoList, type DeviceInfo } from '/@/api/tb/device';
   import CesiumMap from './CesiumMap.vue';
   import MapWidgetLayer from './MapWidgetLayer.vue';
+  import { createDatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
   import SensorWidgetPopup from './SensorWidgetPopup.vue';
   import CameraMonitorPopup from './components/CameraMonitorPopup.vue';
   import { getMapWidgetStorageKey } from './mapWidgetStorage';
@@ -61,11 +64,11 @@
   import { loadCameraRuntimeInfo } from './services/cameraDeviceRuntimeService';
   import {
     getAssignedMapTemplateRuntime,
-    subscribeAssignedMapTemplateRuntimeEvents,
     type MapTemplateRuntimeDevices,
     type MapTemplateRuntimeEvent,
     type MapTemplateRuntimeResponse,
   } from './services/mapTemplateRuntimeService';
+  import { subscribeAssignedMapTemplateUpdates } from './services/mapTemplateEventService';
   import {
     loadDeviceMapPoints,
     loadDeviceMapPointStatuses,
@@ -95,6 +98,7 @@
   const deviceMapPoints = ref<MapPoint[]>([]);
   const assignedTemplateDeviceStatuses = ref<DeviceMapPointStatus[]>([]);
   const assignedTemplateRuntimeDeviceMap = ref<MapTemplateRuntimeDevices>({});
+  const datasourceRuntime = createDatasourceRuntime();
   const selectedSensor = ref<SensorMapPoint | null>(null);
   const sensorPreviewVisible = ref(false);
 
@@ -324,10 +328,7 @@
       return;
     }
 
-    if (isCustomerUserMap.value) {
-      await refreshAssignedDashboardTemplate(currentAssignedTemplateDashboardId.value);
-      return;
-    }
+    if (isCustomerUserMap.value) return;
 
     try {
       const points = await loadDeviceMapPoints({
@@ -368,7 +369,6 @@
 
   async function loadAssignedTemplateFromDashboard(dashboardId: string) {
     const dashboard = await getDashboardById(dashboardId);
-    assignedTemplateRuntimeDeviceMap.value = {};
     assignedTemplateState.value = normalizeMapTemplateState(dashboard.configuration?.[DASHBOARD_MAP_WIDGET_CONFIG_KEY]);
     await refreshAssignedTemplatePointStatuses();
   }
@@ -379,30 +379,34 @@
 
     templateReloading = true;
     try {
-      if (isCustomerUserMap.value) {
-        if (mapTemplateRuntimeAvailable) {
-          try {
-            applyAssignedTemplateRuntime(await getAssignedMapTemplateRuntime(normalizedDashboardId));
-            return;
-          } catch (error) {
-            if (getHttpStatus(error) !== 404) {
-              throw error;
-            }
-            mapTemplateRuntimeAvailable = false;
-            stopMapTemplateUpdateSubscription();
-            console.warn('[MapHome] Map template runtime API is not available, fallback to dashboard config.');
-          }
-        }
-
-        await loadAssignedTemplateFromDashboard(normalizedDashboardId);
-        return;
-      }
-
       await loadAssignedTemplateFromDashboard(normalizedDashboardId);
+      if (isCustomerUserMap.value && mapTemplateRuntimeAvailable) {
+        void refreshAssignedRuntimeDevices(normalizedDashboardId);
+      }
     } catch (error) {
       console.warn('[MapHome] Failed to refresh assigned dashboard template:', error);
     } finally {
       templateReloading = false;
+    }
+  }
+
+  async function refreshAssignedRuntimeDevices(dashboardId: string) {
+    try {
+      const runtime = await getAssignedMapTemplateRuntime(dashboardId);
+      if (dashboardId !== currentAssignedTemplateDashboardId.value || !assignedTemplateState.value) return;
+
+      assignedTemplateRuntimeDeviceMap.value = runtime.devices || {};
+      assignedTemplateState.value = mergeRuntimeIntoTemplateState(
+        assignedTemplateState.value,
+        assignedTemplateRuntimeDeviceMap.value,
+      );
+      syncOpenPopupsFromAssignedTemplate(assignedTemplateRuntimeDeviceMap.value);
+    } catch (error) {
+      if (getHttpStatus(error) === 404) {
+        mapTemplateRuntimeAvailable = false;
+        return;
+      }
+      console.warn('[MapHome] Failed to load optional map point runtime data:', error);
     }
   }
 
@@ -415,11 +419,11 @@
 
   function startMapTemplateUpdateSubscription(dashboardId: string) {
     stopMapTemplateUpdateSubscription();
-    if (!isCustomerUserMap.value || !dashboardId || !mapTemplateRuntimeAvailable) return;
+    if (!isCustomerUserMap.value || !dashboardId) return;
 
-    unsubscribeMapTemplateUpdates = subscribeAssignedMapTemplateRuntimeEvents(dashboardId, (event) => {
+    unsubscribeMapTemplateUpdates = subscribeAssignedMapTemplateUpdates(dashboardId, (event) => {
       if (event.dashboardId !== currentAssignedTemplateDashboardId.value) return;
-      applyAssignedTemplateRuntimeEvent(event);
+      void refreshAssignedDashboardTemplate(dashboardId);
     });
   }
 
@@ -620,8 +624,9 @@
 
   onMounted(async () => {
     window.addEventListener('storage', onStorage);
+    datasourceRuntime.connect();
     await loadAssignedCustomerTemplate();
-    if (!isSysAdminMap.value) {
+    if (!isSysAdminMap.value && !isCustomerUserMap.value) {
       void refreshDeviceMapPoints();
       devicePointRefreshTimer = window.setInterval(refreshDeviceMapPoints, DEVICE_POINT_REFRESH_MS);
     }
@@ -635,6 +640,7 @@
     }
     stopMapTemplateUpdateSubscription();
     currentAssignedTemplateDashboardId.value = '';
+    datasourceRuntime.close();
   });
 </script>
 

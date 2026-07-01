@@ -127,7 +127,7 @@
 <script setup lang="ts">
   import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
   import { getTimeseriesKeys } from '/@/api/tb/telemetry';
-  import { createDatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
+  import { createDatasourceRuntime, type DatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
   import type { DashboardWidget, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
   import { widgetRegistry } from '../dashboard/runtime/widgets/registry/widgetRegistry';
   import SensorPopupWidgetGrid from './SensorPopupWidgetGrid.vue';
@@ -165,6 +165,7 @@
     visible: boolean;
     sensor: SensorPoint | null;
     widgets?: PopupWidgetConfig[];
+    runtime?: DatasourceRuntime;
   }>();
 
   const emit = defineEmits<{
@@ -181,7 +182,8 @@
   const selectedKeys = ref<string[]>([]);
   const keysLoading = ref(false);
   const keysError = ref('');
-  const datasourceRuntime = createDatasourceRuntime();
+  const ownedDatasourceRuntime = props.runtime ? null : createDatasourceRuntime();
+  const datasourceRuntime = props.runtime || ownedDatasourceRuntime!;
 
   const normalizedWidgets = computed<WidgetData[]>(() => {
     return localWidgets.value
@@ -480,7 +482,7 @@
   });
 
   onBeforeUnmount(() => {
-    datasourceRuntime.close();
+    ownedDatasourceRuntime?.close();
   });
 </script>
 

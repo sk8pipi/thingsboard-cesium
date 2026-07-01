@@ -9,7 +9,7 @@
   import 'gridstack/dist/gridstack.min.css';
 
   import WidgetHost from '../dashboard/runtime/widgets/WidgetHost.vue';
-  import { createDatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
+  import { createDatasourceRuntime, type DatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
   import { widgetRegistry } from '../dashboard/runtime/widgets/registry/widgetRegistry';
   import type { DashboardWidget, GridItem, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
   import type { MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
@@ -28,16 +28,15 @@
     storageKey: string;
     data?: WidgetLayerData | null;
     runtimeDevices?: MapTemplateRuntimeDevices | null;
+    runtime?: DatasourceRuntime;
   }>();
 
   const gridEl = ref<HTMLDivElement | null>(null);
   let grid: any = null;
 
   const mountedApps = new Map<string, ReturnType<typeof createApp>>();
-  const datasourceRuntime = createDatasourceRuntime({
-    getExternalValues: (_entityType, entityId) => props.runtimeDevices?.[entityId],
-    externalValuesOnly: true,
-  });
+  const ownedDatasourceRuntime = props.runtime ? null : createDatasourceRuntime();
+  const datasourceRuntime = props.runtime || ownedDatasourceRuntime!;
 
   let renderPatched = false;
   function patchGridstackRenderOnce() {
@@ -219,20 +218,12 @@
     },
   );
 
-  watch(
-    () => props.runtimeDevices,
-    () => {
-      datasourceRuntime.refreshExternalValues();
-    },
-    { deep: true },
-  );
-
   onBeforeUnmount(() => {
     window.removeEventListener('storage', onStorage);
     grid?.destroy(false);
     grid = null;
     unmountAll();
-    datasourceRuntime.close();
+    ownedDatasourceRuntime?.close();
   });
 </script>
 
