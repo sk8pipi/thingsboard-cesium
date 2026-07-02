@@ -1,5 +1,5 @@
 <template>
-  <div class="map-home">
+  <div class="map-home" :style="mapAppearanceStyle">
     <CesiumMap
       class="map-canvas"
       :sensor-points="visibleSensorPoints"
@@ -78,6 +78,7 @@
   import type { PopupWidgetConfig } from './sensorPopupWidgetStorage';
   import {
     DASHBOARD_MAP_WIDGET_CONFIG_KEY,
+    mapTemplateAppearanceStyle,
     normalizeMapTemplateState,
     type MapTemplateState,
   } from './mapTemplateConfig';
@@ -125,6 +126,7 @@
   const isSysAdminMap = computed(() => userStore.getAuthority === Authority.SYS_ADMIN);
   const isCustomerUserMap = computed(() => userStore.getAuthority === Authority.CUSTOMER_USER);
   const assignedTemplateState = ref<AssignedTemplateState | null>(null);
+  const mapAppearanceStyle = computed(() => mapTemplateAppearanceStyle(assignedTemplateState.value?.appearance));
   const currentAssignedTemplateDashboardId = ref('');
   const storageKey = computed(() => getMapWidgetStorageKey());
   const assignedTemplateMapPoints = computed(() => assignedTemplateState.value?.mapPoints || []);

@@ -81,6 +81,7 @@
 
   function itemStyle(widget: DashboardWidget): CSSProperties {
     return {
+      ...widgetAppearanceStyle(widgetKey(widget), widget.appearance),
       '--sensor-popup-widget-height': `${widgetHeight(widget)}px`,
     } as CSSProperties;
   }

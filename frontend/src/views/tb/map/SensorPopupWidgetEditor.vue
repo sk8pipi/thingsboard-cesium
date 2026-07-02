@@ -1,5 +1,5 @@
 <template>
-  <div v-if="visible && sensor" class="spwe-panel">
+  <div v-if="visible && sensor" class="spwe-panel tb-widget-surface">
     <Teleport to="body">
       <div v-if="widgetLibraryVisible" class="spwe-lib-mask" @click.self="widgetLibraryVisible = false">
         <div class="spwe-lib">
@@ -135,6 +135,7 @@
     listWidgetDefinitions,
     normalizeWidgetList,
   } from '../dashboard/runtime/widgets/core/widgetInstance';
+  import '../dashboard/runtime/widgets/core/widgetSurface.css';
   import SensorPopupWidgetGrid from './SensorPopupWidgetGrid.vue';
   import type { PopupWidgetConfig } from './sensorPopupWidgetStorage';
   import type { SensorDatasourceKey } from './types/mapPointTypes';
@@ -425,10 +426,8 @@
     overflow: auto;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(25, 30, 40, 0.94);
     color: #fff;
     padding: 12px;
-    backdrop-filter: blur(10px);
   }
 
   .spwe-header {

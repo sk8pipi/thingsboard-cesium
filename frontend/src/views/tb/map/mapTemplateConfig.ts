@@ -1,4 +1,5 @@
-import type { GridItem } from '../dashboard/runtime/types';
+import type { CSSProperties } from 'vue';
+import type { GridItem, WidgetAppearance } from '../dashboard/runtime/types';
 import type { SensorPopupBinding } from './sensorPopupWidgetStorage';
 import type { MapPoint } from './types/mapPointTypes';
 
@@ -28,6 +29,35 @@ export type MapSceneModel = {
   visible?: boolean;
 };
 
+export type MapTemplateAppearance = Pick<WidgetAppearance, 'backgroundOpacity' | 'blurPx'>;
+
+export const DEFAULT_MAP_TEMPLATE_APPEARANCE: Required<MapTemplateAppearance> = {
+  backgroundOpacity: 0.04,
+  blurPx: 0,
+};
+
+function clamp(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
+}
+
+export function mapTemplateAppearanceStyle(appearance?: MapTemplateAppearance | null): CSSProperties {
+  return {
+    '--tb-template-widget-surface-opacity': clamp(
+      appearance?.backgroundOpacity,
+      DEFAULT_MAP_TEMPLATE_APPEARANCE.backgroundOpacity,
+      0,
+      1,
+    ),
+    '--tb-template-widget-surface-blur': `${clamp(
+      appearance?.blurPx,
+      DEFAULT_MAP_TEMPLATE_APPEARANCE.blurPx,
+      0,
+      40,
+    )}px`,
+  } as CSSProperties;
+}
+
 export type MapTemplateState = {
   version: number;
   updatedTime?: number;
@@ -36,11 +66,12 @@ export type MapTemplateState = {
   widgets: Record<string, any>;
   mapPoints: MapPoint[];
   sensorPopupBindings: SensorPopupBinding;
+  appearance: MapTemplateAppearance;
 };
 
 export function createDefaultMapTemplateState(): MapTemplateState {
   return {
-    version: 2,
+    version: 3,
     scene: {
       globeOnly: true,
       models: [],
@@ -50,6 +81,7 @@ export function createDefaultMapTemplateState(): MapTemplateState {
     widgets: {},
     mapPoints: [],
     sensorPopupBindings: {},
+    appearance: { ...DEFAULT_MAP_TEMPLATE_APPEARANCE },
   };
 }
 
@@ -61,7 +93,7 @@ export function normalizeMapTemplateState(state?: Partial<MapTemplateState> | nu
   return {
     ...fallback,
     ...(state || {}),
-    version: sourceVersion < 2 ? 2 : sourceVersion,
+    version: sourceVersion < 3 ? 3 : sourceVersion,
     scene: {
       ...fallback.scene,
       ...scene,
@@ -73,5 +105,9 @@ export function normalizeMapTemplateState(state?: Partial<MapTemplateState> | nu
     mapPoints: Array.isArray(state?.mapPoints) ? state.mapPoints : [],
     sensorPopupBindings:
       state?.sensorPopupBindings && typeof state.sensorPopupBindings === 'object' ? state.sensorPopupBindings : {},
+    appearance: {
+      ...fallback.appearance,
+      ...(state?.appearance || {}),
+    },
   };
 }

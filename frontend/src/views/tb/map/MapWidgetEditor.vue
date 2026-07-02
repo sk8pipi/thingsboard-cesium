@@ -1,5 +1,5 @@
 <template>
-  <div class="mw-editor">
+  <div class="mw-editor" :style="templateAppearanceCssVars">
     <SelectDeviceDialog
       :visible="widgetDeviceDialogVisible"
       title="选择部件数据设备"
@@ -67,6 +67,15 @@
           <button class="mw-btn" type="button" :disabled="editorMode !== 'editing'" @click="openAddPanel">
             添加部件
           </button>
+          <button
+            class="mw-btn"
+            :class="{ active: appearancePanelVisible }"
+            type="button"
+            :disabled="editorMode !== 'editing'"
+            @click="toggleAppearancePanel"
+          >
+            外观
+          </button>
           <button class="mw-btn" type="button" @click="cancelEdit">取消</button>
           <button class="mw-btn primary" type="button" :disabled="!canSaveEdit" @click="saveEdit"> 保存 </button>
         </template>
@@ -76,6 +85,25 @@
     <div v-if="editorMode === 'pickingPoint'" class="mw-mode-banner">
       <div class="mw-mode-banner__text">请在地图上点击选择点位，也可以拖动已有点位调整位置</div>
       <button class="mw-btn" type="button" @click="cancelPickingPoint">取消选点</button>
+    </div>
+
+    <div v-if="editorMode === 'editing' && appearancePanelVisible" class="mw-appearance-panel">
+      <div class="mw-appearance-panel__header">
+        <strong>部件玻璃外观</strong>
+        <span>普通部件与点位详情同步</span>
+      </div>
+
+      <label class="mw-appearance-control">
+        <span>透明度</span>
+        <input v-model.number="templateBackgroundTransparency" type="range" min="0" max="100" step="1" />
+        <output>{{ templateBackgroundTransparency }}%</output>
+      </label>
+
+      <label class="mw-appearance-control">
+        <span>模糊度</span>
+        <input v-model.number="templateAppearance.blurPx" type="range" min="0" max="40" step="1" />
+        <output>{{ templateAppearance.blurPx || 0 }}px</output>
+      </label>
     </div>
 
     <div v-if="pointTypeDialogVisible" class="mw-dialog-mask" @click.self="cancelPointTypeSelection">
@@ -268,7 +296,13 @@
     widgetAppearanceStyleText,
   } from '../dashboard/runtime/widgets/core/widgetInstance';
   import '../dashboard/runtime/widgets/core/widgetSurface.css';
-  import type { DashboardWidget, GridItem, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
+  import type {
+    DashboardWidget,
+    GridItem,
+    LocalWidgetKey,
+    TbWidgetConfig,
+    WidgetAppearance,
+  } from '../dashboard/runtime/types';
   import { importThingsboardJson } from './widgetLibrary/importThingsboardWidget';
   import { loadWidgetLibrary, removeWidget, upsertWidget } from './widgetLibrary/libraryStorage';
   import type { CustomWidgetDefinition } from './widgetLibrary/types';
@@ -281,7 +315,9 @@
   import {
     DASHBOARD_MAP_WIDGET_CONFIG_KEY,
     createDefaultMapTemplateState,
+    mapTemplateAppearanceStyle,
     normalizeMapTemplateState,
+    type MapTemplateAppearance,
     type MapTemplateScene,
     type MapTemplateState,
   } from './mapTemplateConfig';
@@ -295,6 +331,7 @@
   type WidgetSnapshot = {
     layout: GridItem[];
     widgets: Record<string, WidgetData>;
+    appearance: WidgetAppearance;
   };
 
   type MapWidgetEditorState = MapTemplateState;
@@ -360,6 +397,16 @@
   let widgetSnapshot: WidgetSnapshot | null = null;
   const dashboardTemplate = ref<Dashboard | null>(null);
   const templateScene = ref<MapTemplateScene>(createDefaultMapTemplateState().scene);
+  const templateAppearance = ref<MapTemplateAppearance>({ ...createDefaultMapTemplateState().appearance });
+  const appearancePanelVisible = ref(false);
+  const templateAppearanceCssVars = computed(() => mapTemplateAppearanceStyle(templateAppearance.value));
+  const templateBackgroundTransparency = computed({
+    get: () => Math.round((1 - Number(templateAppearance.value.backgroundOpacity ?? 0.04)) * 100),
+    set: (value: number) => {
+      const transparency = Math.min(100, Math.max(0, Number(value) || 0));
+      templateAppearance.value.backgroundOpacity = 1 - transparency / 100;
+    },
+  });
 
   const originalMapPoints = ref<MapPoint[]>(loadMapPoints());
   const draftMapPoints = ref<MapPoint[]>(cloneJson(originalMapPoints.value));
@@ -622,6 +669,7 @@
   function applyEditorState(state?: Partial<MapWidgetEditorState> | null) {
     const normalized = normalizeMapTemplateState(state);
     templateScene.value = cloneJson(normalized.scene);
+    templateAppearance.value = cloneJson(normalized.appearance);
     layout.value = normalized.layout;
     widgets.value = normalizeWidgetState(normalized.widgets);
     originalMapPoints.value = cloneJson(normalized.mapPoints);
@@ -634,6 +682,7 @@
     return {
       ...createDefaultMapTemplateState(),
       scene: cloneJson(templateScene.value),
+      appearance: cloneJson(templateAppearance.value),
       layout: cloneJson(layout.value),
       widgets: cloneJson(widgets.value),
       mapPoints: cloneJson(draftMapPoints.value),
@@ -1091,6 +1140,7 @@
     widgetSnapshot = {
       layout: cloneJson(layout.value),
       widgets: cloneJson(widgets.value),
+      appearance: cloneJson(templateAppearance.value),
     };
     draftMapPoints.value = cloneJson(originalMapPoints.value);
     draftSensorPopupBindings.value = cloneJson(originalSensorPopupBindings.value);
@@ -1300,13 +1350,21 @@
 
   function openAddPanel() {
     if (editorMode.value !== 'editing') return;
+    appearancePanelVisible.value = false;
     addPanelVisible.value = !addPanelVisible.value;
+  }
+
+  function toggleAppearancePanel() {
+    if (editorMode.value !== 'editing') return;
+    addPanelVisible.value = false;
+    appearancePanelVisible.value = !appearancePanelVisible.value;
   }
 
   function restoreWidgetSnapshot() {
     if (!widgetSnapshot) return;
     layout.value = cloneJson(widgetSnapshot.layout);
     widgets.value = cloneJson(widgetSnapshot.widgets);
+    templateAppearance.value = cloneJson(widgetSnapshot.appearance);
     renderGrid();
   }
 
@@ -1316,6 +1374,7 @@
     clearDragHint();
     editorMode.value = 'view';
     addPanelVisible.value = false;
+    appearancePanelVisible.value = false;
     pendingPointLocation.value = null;
     selectedWidgetId.value = '';
     closeAllOverlays();
@@ -1365,6 +1424,7 @@
     widgetSnapshot = {
       layout: cloneJson(state.layout),
       widgets: cloneJson(state.widgets),
+      appearance: cloneJson(state.appearance),
     };
 
     leaveEditMode();
@@ -1637,6 +1697,60 @@
   .mw-btn:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+  }
+
+  .mw-appearance-panel {
+    position: absolute;
+    top: 58px;
+    left: 12px;
+    z-index: 28;
+    width: min(380px, calc(100vw - 24px));
+    box-sizing: border-box;
+    display: grid;
+    gap: 14px;
+    padding: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    background: rgba(8, 20, 34, 0.78);
+    box-shadow: 0 16px 42px rgba(0, 7, 18, 0.28);
+    color: #fff;
+    backdrop-filter: blur(8px);
+  }
+
+  .mw-appearance-panel__header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .mw-appearance-panel__header strong {
+    font-size: 14px;
+  }
+
+  .mw-appearance-panel__header span {
+    color: rgba(255, 255, 255, 0.66);
+    font-size: 11px;
+  }
+
+  .mw-appearance-control {
+    display: grid;
+    grid-template-columns: 54px minmax(0, 1fr) 48px;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+  }
+
+  .mw-appearance-control input {
+    width: 100%;
+    accent-color: #38bdf8;
+    cursor: pointer;
+  }
+
+  .mw-appearance-control output {
+    color: #bae6fd;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
   }
 
   .mw-mode-banner {

@@ -15,13 +15,13 @@
   border-radius: var(--tb-widget-surface-radius);
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.08), transparent 34%),
-    rgba(8, 26, 45, var(--tb-widget-surface-opacity));
+    rgba(8, 26, 45, var(--tb-template-widget-surface-opacity, var(--tb-widget-surface-opacity)));
   box-shadow:
     0 14px 38px rgba(0, 7, 18, var(--tb-widget-surface-shadow-strength)),
     inset 0 1px 0 rgba(255, 255, 255, 0.25),
     inset 0 -1px 0 rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(var(--tb-widget-surface-blur)) saturate(115%);
-  -webkit-backdrop-filter: blur(var(--tb-widget-surface-blur)) saturate(115%);
+  backdrop-filter: blur(var(--tb-template-widget-surface-blur, var(--tb-widget-surface-blur))) saturate(115%);
+  -webkit-backdrop-filter: blur(var(--tb-template-widget-surface-blur, var(--tb-widget-surface-blur))) saturate(115%);
 }
 
 .tb-widget-surface::before {
