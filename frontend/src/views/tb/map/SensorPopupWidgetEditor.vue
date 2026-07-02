@@ -129,7 +129,12 @@
   import { getTimeseriesKeys } from '/@/api/tb/telemetry';
   import { createDatasourceRuntime, type DatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
   import type { DashboardWidget, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
-  import { widgetRegistry } from '../dashboard/runtime/widgets/registry/widgetRegistry';
+  import {
+    createWidgetInstance,
+    getWidgetDefinition,
+    listWidgetDefinitions,
+    normalizeWidgetList,
+  } from '../dashboard/runtime/widgets/core/widgetInstance';
   import SensorPopupWidgetGrid from './SensorPopupWidgetGrid.vue';
   import type { PopupWidgetConfig } from './sensorPopupWidgetStorage';
   import type { SensorDatasourceKey } from './types/mapPointTypes';
@@ -185,39 +190,18 @@
   const ownedDatasourceRuntime = props.runtime ? null : createDatasourceRuntime();
   const datasourceRuntime = props.runtime || ownedDatasourceRuntime!;
 
-  const normalizedWidgets = computed<WidgetData[]>(() => {
-    return localWidgets.value
-      .map((item) => {
-        const widgetKey = item.type as LocalWidgetKey;
-        const def = widgetRegistry[widgetKey];
-        if (!def) return null;
-
-        return {
-          id: item.id,
-          category: def.category,
-          widgetKey,
-          type: widgetKey,
-          typeFullFqn: def.typeFullFqn,
-          title: item.title || def.title,
-          config: {
-            ...def.defaultConfig,
-            ...(item.config || {}),
-          },
-        } as WidgetData;
-      })
-      .filter(Boolean) as WidgetData[];
-  });
+  const normalizedWidgets = computed<WidgetData[]>(() => normalizeWidgetList(localWidgets.value) as WidgetData[]);
 
   const popupWidgetLibrary = computed(
     () =>
-      Object.values(widgetRegistry)
+      listWidgetDefinitions('point-detail')
         .filter((def) => def.key !== 'cesium3d')
         .map((def) => {
           return {
             key: def.key,
             title: def.title,
             category: getCategoryLabel(def.category),
-            previewKind: getPreviewKind(def.key),
+            previewKind: def.previewKind,
           };
         })
         .filter(Boolean) as Array<{ key: LocalWidgetKey; title: string; category: string; previewKind: string }>,
@@ -229,20 +213,20 @@
   }
 
   const infoRows = computed(() => {
-    const current = props.sensor || {};
+    const current = props.sensor;
     return [
-      { label: '设备', value: current.entityName || current.name || '-' },
+      { label: '设备', value: current?.entityName || current?.name || '-' },
       {
         label: '状态',
-        value: current.statusText || (current.online === true ? '在线' : current.online === false ? '离线' : '-'),
+        value: current?.statusText || (current?.online === true ? '在线' : current?.online === false ? '离线' : '-'),
       },
-      { label: '类型', value: current.description || current.entityType || '-' },
-      { label: '经度', value: formatCoordinate(current.longitude) },
-      { label: '纬度', value: formatCoordinate(current.latitude) },
+      { label: '类型', value: current?.description || current?.entityType || '-' },
+      { label: '经度', value: formatCoordinate(current?.longitude) },
+      { label: '纬度', value: formatCoordinate(current?.latitude) },
     ];
   });
 
-  const selectedWidgetDef = computed(() => (selectedWidgetKey.value ? widgetRegistry[selectedWidgetKey.value] : null));
+  const selectedWidgetDef = computed(() => getWidgetDefinition(selectedWidgetKey.value));
 
   const selectedWidgetTitle = computed(() => selectedWidgetDef.value?.title || '添加部件');
 
@@ -269,77 +253,30 @@
     return map[category] || '部件';
   }
 
-  function getPreviewKind(key: LocalWidgetKey) {
-    const map: Partial<Record<LocalWidgetKey, string>> = {
-      timeseriesLine: 'line',
-      timeseriesScatter: 'scatter',
-      timeseriesBarWithLabels: 'bar',
-      latestBar: 'bar',
-      latestPie: 'pie',
-      latestRadar: 'radar',
-      latestPolarArea: 'pie',
-      ledIndicator: 'led',
-      stateChart: 'state',
-      rangeChart: 'range',
-      staticHtml: 'static',
-      alarmTable: 'table',
-      alarmCard: 'card',
-      controlSwitch: 'switch',
+  function toPopupWidgetConfig(widget: DashboardWidget): PopupWidgetConfig {
+    return {
+      id: widget.id,
+      type: widget.widgetKey,
+      widgetKey: widget.widgetKey,
+      definitionVersion: widget.definitionVersion,
+      title: widget.title,
+      config: widget.config,
+      appearance: widget.appearance,
     };
-    return map[key] || 'card';
   }
 
   function buildDefaultWidget(
     type: LocalWidgetKey,
     payload: { deviceId: string; deviceName: string; keys: string[]; pollMs: number },
   ): PopupWidgetConfig {
-    const baseId = `popup_${type}_${Date.now()}`;
-    const def = widgetRegistry[type];
-    const datasource = {
-      type: 'device',
-      entityType: 'DEVICE',
-      entityId: payload.deviceId,
-      keys: payload.keys,
-      dataKeys: payload.keys.map((name) => ({
-        name,
-        type: 'timeseries',
-      })),
-      pollMs: payload.pollMs,
-    };
-    const config: Record<string, any> = {
-      ...(def?.defaultConfig || {}),
-      title: `${payload.deviceName}-${def?.title || '部件'}`,
-      datasource,
-      datasources: [datasource],
-    };
-
-    if (type === 'latestBar') {
-      config.tbBar = {
-        ...(config.tbBar || {}),
-        keys: payload.keys,
-      };
-    }
-
-    if (type === 'latestPie') {
-      config.tbPie = {
-        ...(config.tbPie || {}),
-        keys: payload.keys,
-      };
-    }
-
-    if (type === 'ledIndicator') {
-      config.settings = {
-        ...(config.settings || {}),
-        key: payload.keys[0] || 'value',
-      };
-    }
-
-    return {
-      id: baseId,
-      type,
-      title: config.title,
-      config,
-    };
+    const definition = getWidgetDefinition(type);
+    const widget = createWidgetInstance(type, {
+      id: `popup_${type}_${Date.now()}`,
+      title: `${payload.deviceName}-${definition?.title || '部件'}`,
+      binding: payload,
+    });
+    if (!widget) throw new Error(`未找到部件定义：${type}`);
+    return toPopupWidgetConfig(widget);
   }
 
   function openWidgetLibrary() {
@@ -349,25 +286,16 @@
   function selectWidgetFromLibrary(type: LocalWidgetKey) {
     widgetLibraryVisible.value = false;
 
-    const def = widgetRegistry[type];
+    const def = getWidgetDefinition(type);
     if (!def) return;
 
     openKeyDialog(type);
   }
 
   function buildWidgetWithoutDatasource(type: LocalWidgetKey): PopupWidgetConfig {
-    const def = widgetRegistry[type];
-    const title = def?.title || '部件';
-
-    return {
-      id: `popup_${type}_${Date.now()}`,
-      type,
-      title,
-      config: {
-        ...(def?.defaultConfig || {}),
-        title,
-      },
-    };
+    const widget = createWidgetInstance(type, { id: `popup_${type}_${Date.now()}` });
+    if (!widget) throw new Error(`未找到部件定义：${type}`);
+    return toPopupWidgetConfig(widget);
   }
 
   async function openKeyDialog(type: LocalWidgetKey) {
@@ -377,7 +305,7 @@
     availableKeys.value = getPointSeedKeys();
     keyDialogVisible.value = true;
 
-    if (!widgetRegistry[type]?.allowedKeyTypes?.length) {
+    if (!getWidgetDefinition(type)?.allowedKeyTypes?.length) {
       return;
     }
 

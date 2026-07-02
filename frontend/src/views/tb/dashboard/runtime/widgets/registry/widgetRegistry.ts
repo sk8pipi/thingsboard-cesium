@@ -15,23 +15,12 @@ import TbRangeChart from '../timeseries/TbRangeChart.vue';
 import TbAlarmTableWidget from '../alarm/widgets/TbAlarmTableWidget.vue';
 import TbAlarmCardWidget from '../alarm/widgets/TbAlarmCardWidget.vue';
 
-import type { WidgetCategory, LocalWidgetKey, TbDataKeyType } from '../../types';
+import type { LocalWidgetKey } from '../../types';
+export type { LocalWidgetKey } from '../../types';
+import { createWidgetCatalog } from '../core/widgetDefinition';
+import type { WidgetDefinition } from '../core/widgetDefinition';
 
-export type EditorType = 'timeseries' | 'latest' | 'static' | 'alarm' | 'control';
-
-export interface WidgetRegistryItem {
-  key: LocalWidgetKey;
-  typeFullFqn: string;
-  category: WidgetCategory;
-  title: string;
-  component: any;
-  editor: EditorType;
-  supportsTimewindow: boolean;
-  allowedKeyTypes: TbDataKeyType[];
-  defaultConfig: Record<string, any>;
-}
-
-export const widgetRegistry: Record<LocalWidgetKey, WidgetRegistryItem> = {
+const builtinWidgetRegistry: Record<string, WidgetDefinition> = {
   cesium3d: {
     key: 'cesium3d',
     typeFullFqn: 'system.cesium3d',
@@ -366,6 +355,109 @@ export const widgetRegistry: Record<LocalWidgetKey, WidgetRegistryItem> = {
   },
 };
 
+const builtinWidgetMetadata: Record<string, Partial<WidgetDefinition>> = {
+  cesium3d: {
+    hosts: ['dashboard', 'editor'],
+    previewKind: 'map',
+  },
+  timeseriesLine: { previewKind: 'line' },
+  timeseriesScatter: { previewKind: 'scatter' },
+  timeseriesBarWithLabels: { previewKind: 'bar' },
+  rangeChart: { previewKind: 'range' },
+  stateChart: { previewKind: 'state' },
+  latestPie: {
+    previewKind: 'pie',
+    buildConfig: ({ config, binding }) => ({
+      ...config,
+      tbPie: { ...(config.tbPie || {}), ...(binding ? { keys: binding.keys } : {}) },
+    }),
+  },
+  latestBar: {
+    previewKind: 'bar',
+    buildConfig: ({ config, binding }) => ({
+      ...config,
+      tbBar: { ...(config.tbBar || {}), ...(binding ? { keys: binding.keys } : {}) },
+    }),
+  },
+  latestRadar: { previewKind: 'radar' },
+  latestPolarArea: { previewKind: 'pie' },
+  ledIndicator: {
+    previewKind: 'led',
+    pointDetailPlacement: { columnSpan: 6, height: 150 },
+    buildConfig: ({ config, binding, title }) => ({
+      ...config,
+      settings: {
+        ...(config.settings || {}),
+        title,
+        ...(binding ? { key: binding.keys[0] || 'value' } : {}),
+      },
+    }),
+  },
+  staticHtml: {
+    previewKind: 'static',
+    pointDetailPlacement: { columnSpan: 12, height: 220 },
+  },
+  alarmTable: {
+    previewKind: 'table',
+    pointDetailPlacement: { columnSpan: 12, height: 420 },
+  },
+  alarmCard: {
+    previewKind: 'card',
+    pointDetailPlacement: { columnSpan: 12, height: 360 },
+  },
+  controlSwitch: {
+    previewKind: 'switch',
+    pointDetailPlacement: { columnSpan: 6, height: 150 },
+    buildConfig: ({ config, binding, title }) => {
+      if (!binding) return config;
+      const stateKey = binding.keys[0] || 'value';
+      const settings = config.settings || {};
+      return {
+        ...config,
+        datasource: {
+          ...(config.datasource || {}),
+          keys: [stateKey],
+          dataKeys: [{ name: stateKey, type: 'timeseries' }],
+        },
+        datasources: [
+          {
+            ...(config.datasource || {}),
+            keys: [stateKey],
+            dataKeys: [{ name: stateKey, type: 'timeseries' }],
+          },
+        ],
+        settings: {
+          ...settings,
+          title,
+          targetDeviceId: binding.deviceId,
+          getValue: { ...(settings.getValue || {}), key: stateKey },
+          setValue: { ...(settings.setValue || {}), key: stateKey },
+          valueSettings: { ...(settings.valueSettings || {}) },
+        },
+      };
+    },
+  },
+};
+
+type WidgetManifestModule = {
+  default?: WidgetDefinition | WidgetDefinition[];
+  widgets?: WidgetDefinition[];
+};
+
+const manifestModules = import.meta.glob('../manifests/*.ts', { eager: true }) as Record<string, WidgetManifestModule>;
+const discoveredWidgetDefinitions = Object.entries(manifestModules).flatMap(([path, module]) => {
+  if (path.endsWith('/index.ts')) return [];
+  if (Array.isArray(module.widgets)) return module.widgets;
+  if (Array.isArray(module.default)) return module.default;
+  return module.default ? [module.default] : [];
+});
+
+const builtinWidgetDefinitions = Object.values(builtinWidgetRegistry).map((definition) => ({
+  ...definition,
+  ...(builtinWidgetMetadata[definition.key] || {}),
+}));
+
+export const widgetRegistry = createWidgetCatalog([...builtinWidgetDefinitions, ...discoveredWidgetDefinitions]);
 export function getWidgetRegistryItem(key: LocalWidgetKey) {
   return widgetRegistry[key];
 }

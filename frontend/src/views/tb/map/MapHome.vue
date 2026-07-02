@@ -45,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+  import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
   import { useRouter } from 'vue-router';
   import { useUserStore } from '/@/store/modules/user';
   import { PageEnum } from '/@/enums/pageEnum';
@@ -99,6 +99,7 @@
   const assignedTemplateDeviceStatuses = ref<DeviceMapPointStatus[]>([]);
   const assignedTemplateRuntimeDeviceMap = ref<MapTemplateRuntimeDevices>({});
   const datasourceRuntime = createDatasourceRuntime({
+    getExternalValues: (_entityType, entityId) => assignedTemplateRuntimeDeviceMap.value[entityId],
     getEntityName: (_entityType, entityId) =>
       String(
         assignedTemplateRuntimeDeviceMap.value[entityId]?.entityName ||
@@ -106,6 +107,8 @@
           '',
       ) || undefined,
   });
+  watch(assignedTemplateRuntimeDeviceMap, () => datasourceRuntime.refreshExternalValues());
+
   const selectedSensor = ref<SensorMapPoint | null>(null);
   const sensorPreviewVisible = ref(false);
 

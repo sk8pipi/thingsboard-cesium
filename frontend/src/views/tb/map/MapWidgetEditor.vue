@@ -259,6 +259,15 @@
     SensorMapPoint,
   } from './types/mapPointTypes';
   import { widgetRegistry } from '../dashboard/runtime/widgets/registry/widgetRegistry';
+  import {
+    buildWidgetConfig,
+    createWidgetInstance,
+    listWidgetDefinitions,
+    normalizeWidgetRecord,
+    resolveWidgetDefinitionKey,
+    widgetAppearanceStyleText,
+  } from '../dashboard/runtime/widgets/core/widgetInstance';
+  import '../dashboard/runtime/widgets/core/widgetSurface.css';
   import type { DashboardWidget, GridItem, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
   import { importThingsboardJson } from './widgetLibrary/importThingsboardWidget';
   import { loadWidgetLibrary, removeWidget, upsertWidget } from './widgetLibrary/libraryStorage';
@@ -360,6 +369,7 @@
   const mountedApps = new Map<string, ReturnType<typeof createApp>>();
   const templateRuntimeDevices = ref<MapTemplateRuntimeDevices>({});
   const datasourceRuntime = createDatasourceRuntime({
+    getExternalValues: (_entityType, entityId) => templateRuntimeDevices.value[entityId],
     getEntityName: (_entityType, entityId) =>
       String(
         templateRuntimeDevices.value[entityId]?.entityName ||
@@ -394,7 +404,9 @@
 
   let renderPatched = false;
 
-  const builtInWidgetDefs = computed(() => Object.values(widgetRegistry).filter((item) => item.key !== 'cesium3d'));
+  const builtInWidgetDefs = computed(() =>
+    listWidgetDefinitions('dashboard').filter((item) => item.key !== 'cesium3d'),
+  );
   const currentWidget = computed(() => {
     if (!selectedWidgetId.value) return null;
     return widgets.value[selectedWidgetId.value] || null;
@@ -604,29 +616,7 @@
   }
 
   function normalizeWidgetState(rawWidgets: unknown): Record<string, WidgetData> {
-    const normalized: Record<string, WidgetData> = {};
-    const source = rawWidgets && typeof rawWidgets === 'object' ? rawWidgets : {};
-
-    Object.entries(source).forEach(([id, widget]: any) => {
-      const widgetKey = widget?.widgetKey || widget?.type;
-      const def = widgetKey ? widgetRegistry[widgetKey as LocalWidgetKey] : null;
-      if (!def) return;
-
-      normalized[id] = {
-        id,
-        category: widget?.category || def.category,
-        widgetKey,
-        type: widgetKey,
-        typeFullFqn: widget?.typeFullFqn || def.typeFullFqn,
-        title: widget?.title || def.title,
-        config: {
-          ...def.defaultConfig,
-          ...(widget?.config || {}),
-        },
-      } as WidgetData;
-    });
-
-    return normalized;
+    return normalizeWidgetRecord(rawWidgets) as Record<string, WidgetData>;
   }
 
   function applyEditorState(state?: Partial<MapWidgetEditorState> | null) {
@@ -714,6 +704,7 @@
 
   function applyTemplateRuntimeDevices(devices?: MapTemplateRuntimeDevices | null) {
     templateRuntimeDevices.value = devices || {};
+    datasourceRuntime.refreshExternalValues();
     if (isDashboardTemplateMode.value && editorMode.value === 'view') {
       originalMapPoints.value = applyDeviceInfoLocations(originalMapPoints.value, templateRuntimeDevices.value);
       draftMapPoints.value = cloneJson(originalMapPoints.value);
@@ -788,6 +779,11 @@
         h(WidgetHost, {
           widget,
           runtime: datasourceRuntime,
+          context: {
+            host: 'editor',
+            readonly: editorMode.value === 'view',
+            runtimeDevices: templateRuntimeDevices.value,
+          },
         }),
     });
 
@@ -796,8 +792,10 @@
   }
 
   function widgetHtml(id: string, title: string) {
+    const widget = widgets.value[id];
+    const surfaceStyle = widgetAppearanceStyleText(widget?.widgetKey || widget?.type || '', widget?.appearance);
     return `
-      <div class="mw-widget" data-widget-id="${id}">
+      <div class="mw-widget tb-widget-surface" data-widget-id="${id}" style="${surfaceStyle}">
         <button class="mw-del" data-id="${id}" title="删除">×</button>
         <div class="mw-title" data-widget-id="${id}">${title}</div>
         <div class="mw-body">
@@ -898,23 +896,15 @@
     if (!def) return;
 
     const id = `mw_${Date.now()}`;
-    widgets.value[id] = {
-      id,
-      category: def.category,
-      widgetKey: key,
-      type: key,
-      typeFullFqn: def.typeFullFqn,
-      title,
-      config: {
-        ...def.defaultConfig,
-        ...config,
-      },
-    } as WidgetData;
+    const instance = createWidgetInstance(key, { id, title, config });
+    if (!instance) return;
+
+    widgets.value[id] = { ...instance, type: key } as WidgetData;
 
     grid.addWidget({
       id,
-      w: 5,
-      h: 4,
+      w: def.dashboardPlacement.width,
+      h: def.dashboardPlacement.height,
       content: widgetHtml(id, title),
     } as any);
 
@@ -982,15 +972,11 @@
   }
 
   function mapImportedKindToLocalKey(def: CustomWidgetDefinition): LocalWidgetKey | '' {
-    if ((def as any).typeFullFqn) {
-      const found = Object.values(widgetRegistry).find((item) => item.typeFullFqn === (def as any).typeFullFqn);
-      if (found) return found.key;
-    }
-
-    if (def.kind === 'chart') return 'timeseriesLine';
-    if (def.kind === 'bar') return 'latestBar';
-    if (def.kind === 'pie') return 'latestPie';
-    return '';
+    return resolveWidgetDefinitionKey({
+      localWidgetKey: def.localWidgetKey,
+      typeFullFqn: def.typeFullFqn,
+      kind: def.kind,
+    });
   }
 
   function addFromLibrary(def: CustomWidgetDefinition) {
@@ -1032,88 +1018,12 @@
     const imported = pendingImportedConfig.value || {};
     widgetDeviceDialogVisible.value = false;
 
-    const baseDatasource = {
-      type: 'device',
-      entityType: 'DEVICE',
-      entityId: payload.deviceId,
-      entityName: payload.deviceName,
+    const config = buildWidgetConfig(def, title, imported, {
+      deviceId: payload.deviceId,
+      deviceName: payload.deviceName,
       keys: payload.keys,
-      dataKeys: payload.keys.map((name) => ({
-        name,
-        type: 'timeseries',
-      })),
       pollMs: payload.pollMs,
-    };
-
-    const mergedDatasource = {
-      ...(imported as any).datasource,
-      ...baseDatasource,
-    };
-
-    const config: any = {
-      ...def.defaultConfig,
-      ...imported,
-      datasource: mergedDatasource,
-      datasources: [mergedDatasource],
-    };
-
-    if (key === 'ledIndicator') {
-      const stateKey = payload.keys?.[0] || 'value';
-      config.settings = {
-        ...(def.defaultConfig?.settings || {}),
-        ...((imported as any).settings || {}),
-        title,
-        key: stateKey,
-      };
-    }
-
-    if (key === 'latestPie') {
-      config.tbPie = { ...(imported as any).tbPie, keys: payload.keys };
-    }
-
-    if (key === 'latestBar') {
-      config.tbBar = { ...(imported as any).tbBar, keys: payload.keys };
-    }
-
-    if (key === 'controlSwitch') {
-      const stateKey = payload.keys?.[0] || 'value';
-      config.settings = {
-        ...(def.defaultConfig?.settings || {}),
-        ...((imported as any).settings || {}),
-        title,
-        targetDeviceId: payload.deviceId,
-        getValue: {
-          ...(def.defaultConfig?.settings?.getValue || {}),
-          ...((imported as any).settings?.getValue || {}),
-          key: stateKey,
-        },
-        setValue: {
-          ...(def.defaultConfig?.settings?.setValue || {}),
-          ...((imported as any).settings?.setValue || {}),
-          key: stateKey,
-        },
-        valueSettings: {
-          ...(def.defaultConfig?.settings?.valueSettings || {}),
-          ...((imported as any).settings?.valueSettings || {}),
-        },
-      };
-
-      config.datasource = {
-        type: 'device',
-        entityType: 'DEVICE',
-        entityId: payload.deviceId,
-        keys: [stateKey],
-        dataKeys: [
-          {
-            name: stateKey,
-            type: 'timeseries',
-          },
-        ],
-        pollMs: payload.pollMs,
-      };
-
-      config.datasources = [config.datasource];
-    }
+    });
 
     createWidgetAndAddToGrid(key, title, config);
     closeWidgetDeviceDialog();
@@ -1742,7 +1652,6 @@
     background: rgba(15, 23, 42, 0.88);
     border: 1px solid rgba(148, 163, 184, 0.18);
     color: #fff;
-    backdrop-filter: blur(8px);
   }
 
   .mw-mode-banner__text {
@@ -1992,7 +1901,6 @@
     font-size: 12px;
     line-height: 1.4;
     box-shadow: 0 10px 30px rgba(2, 6, 23, 0.28);
-    backdrop-filter: blur(8px);
     pointer-events: none;
   }
 
@@ -2013,11 +1921,9 @@
     height: 100%;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(18, 22, 30, 0.96);
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    backdrop-filter: blur(8px);
     position: relative;
   }
 

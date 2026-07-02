@@ -40,7 +40,7 @@ export type MapTemplateState = {
 
 export function createDefaultMapTemplateState(): MapTemplateState {
   return {
-    version: 1,
+    version: 2,
     scene: {
       globeOnly: true,
       models: [],
@@ -56,10 +56,12 @@ export function createDefaultMapTemplateState(): MapTemplateState {
 export function normalizeMapTemplateState(state?: Partial<MapTemplateState> | null): MapTemplateState {
   const fallback = createDefaultMapTemplateState();
   const scene: Partial<MapTemplateScene> = state?.scene || {};
+  const sourceVersion = Number(state?.version || 1);
 
   return {
     ...fallback,
     ...(state || {}),
+    version: sourceVersion < 2 ? 2 : sourceVersion,
     scene: {
       ...fallback.scene,
       ...scene,

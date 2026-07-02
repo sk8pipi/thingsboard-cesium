@@ -1,5 +1,5 @@
 <template>
-  <div v-if="visible" class="sensor-widget-popup">
+  <div v-if="visible" class="sensor-widget-popup tb-widget-surface">
     <div class="sensor-widget-popup__header">
       <div>
         <div class="sensor-widget-popup__title">
@@ -22,7 +22,12 @@
 
     <div v-if="!normalizedWidgets.length" class="sensor-widget-popup__empty"> 暂无部件 </div>
 
-    <SensorPopupWidgetGrid v-else :widgets="normalizedWidgets" :runtime="datasourceRuntime" />
+    <SensorPopupWidgetGrid
+      v-else
+      :widgets="normalizedWidgets"
+      :runtime="datasourceRuntime"
+      :context="{ host: 'point-detail', readonly: true, entity: sensor, runtimeDevices }"
+    />
   </div>
 </template>
 
@@ -30,7 +35,8 @@
   import { computed, onMounted, onBeforeUnmount } from 'vue';
   import { createDatasourceRuntime, type DatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
   import type { DashboardWidget, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
-  import { widgetRegistry } from '../dashboard/runtime/widgets/registry/widgetRegistry';
+  import { normalizeWidgetList } from '../dashboard/runtime/widgets/core/widgetInstance';
+  import '../dashboard/runtime/widgets/core/widgetSurface.css';
   import SensorPopupWidgetGrid from './SensorPopupWidgetGrid.vue';
   import type { PopupWidgetConfig } from './sensorPopupWidgetStorage';
   import type { MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
@@ -73,28 +79,7 @@
     ];
   });
 
-  const normalizedWidgets = computed<WidgetData[]>(() => {
-    return (props.widgets || [])
-      .map((w: any) => {
-        const widgetKey = w?.widgetKey || w?.type;
-        const def = widgetKey ? widgetRegistry[widgetKey as LocalWidgetKey] : null;
-        if (!def) return null;
-
-        return {
-          id: String(w?.id || ''),
-          category: w?.category || def.category,
-          widgetKey,
-          type: widgetKey,
-          typeFullFqn: w?.typeFullFqn || def.typeFullFqn,
-          title: w?.title || def.title,
-          config: {
-            ...def.defaultConfig,
-            ...(w?.config || {}),
-          },
-        } as WidgetData;
-      })
-      .filter(Boolean) as WidgetData[];
-  });
+  const normalizedWidgets = computed<WidgetData[]>(() => normalizeWidgetList(props.widgets) as WidgetData[]);
 
   onMounted(() => {
     datasourceRuntime.connect();
@@ -117,10 +102,8 @@
     overflow: auto;
     padding: 16px;
     border-radius: 12px;
-    background: rgba(18, 22, 30, 0.96);
     color: #fff;
     border: 1px solid rgba(255, 255, 255, 0.16);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
   }
 
   .sensor-widget-popup__header {
@@ -162,7 +145,7 @@
     min-width: 0;
     padding: 8px 10px;
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.03);
   }
 
   .sensor-widget-popup__info-row span {

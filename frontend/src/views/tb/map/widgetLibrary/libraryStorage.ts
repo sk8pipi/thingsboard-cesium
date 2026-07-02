@@ -1,6 +1,25 @@
+import { useUserStoreWithOut } from '/@/store/modules/user';
 import type { CustomWidgetDefinition } from './types';
 
-const KEY = 'tb_cesium_widget_library_v1';
+const LEGACY_KEY = 'tb_cesium_widget_library_v1';
+
+function getWidgetLibraryStorageKey() {
+  const userStore = useUserStoreWithOut();
+  const authority = String(userStore.getAuthority || 'UNKNOWN');
+  const tenantId = userStore.getPageCacheByKey('tenantId', 'noTenant');
+  const customerId = userStore.getPageCacheByKey('customerId', 'noCustomer');
+  return `${LEGACY_KEY}::${authority}::${tenantId}::${customerId}`;
+}
+
+function loadStoredLibraryRaw() {
+  const key = getWidgetLibraryStorageKey();
+  const scoped = localStorage.getItem(key);
+  if (scoped) return scoped;
+
+  const legacy = localStorage.getItem(LEGACY_KEY);
+  if (legacy) localStorage.setItem(key, legacy);
+  return legacy;
+}
 
 function nowTs() {
   return Date.now();
@@ -41,7 +60,7 @@ function dedupKey(def: CustomWidgetDefinition) {
 
 export function loadWidgetLibrary(): CustomWidgetDefinition[] {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = loadStoredLibraryRaw();
     if (!raw) return [];
 
     const arr = JSON.parse(raw);
@@ -73,7 +92,7 @@ export function saveWidgetLibrary(defs: CustomWidgetDefinition[]) {
     (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0),
   );
 
-  localStorage.setItem(KEY, JSON.stringify(finalDefs));
+  localStorage.setItem(getWidgetLibraryStorageKey(), JSON.stringify(finalDefs));
 }
 
 export function upsertWidget(def: CustomWidgetDefinition) {
@@ -117,5 +136,5 @@ export function removeWidget(defId: string) {
 }
 
 export function clearWidgetLibrary() {
-  localStorage.removeItem(KEY);
+  localStorage.removeItem(getWidgetLibraryStorageKey());
 }

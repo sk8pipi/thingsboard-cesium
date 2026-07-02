@@ -1,0 +1,42 @@
+:root {
+  --tb-widget-surface-opacity: 0.04;
+  --tb-widget-surface-blur: 0px;
+  --tb-widget-surface-border-opacity: 0.18;
+  --tb-widget-surface-radius: 12px;
+  --tb-widget-surface-accent: 108, 233, 255;
+  --tb-widget-surface-shadow-strength: 0.2;
+}
+
+.tb-widget-surface {
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  border-color: rgba(255, 255, 255, var(--tb-widget-surface-border-opacity));
+  border-radius: var(--tb-widget-surface-radius);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), transparent 34%),
+    rgba(8, 26, 45, var(--tb-widget-surface-opacity));
+  box-shadow:
+    0 14px 38px rgba(0, 7, 18, var(--tb-widget-surface-shadow-strength)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(var(--tb-widget-surface-blur)) saturate(115%);
+  -webkit-backdrop-filter: blur(var(--tb-widget-surface-blur)) saturate(115%);
+}
+
+.tb-widget-surface::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(240px 86px at 8% -6%, rgba(255, 255, 255, 0.18), transparent 68%),
+    radial-gradient(180px 80px at 100% 105%, rgba(var(--tb-widget-surface-accent), 0.07), transparent 72%);
+  content: '';
+  pointer-events: none;
+}
+
+.tb-widget-surface--nested {
+  --tb-widget-surface-opacity: 0.025;
+  --tb-widget-surface-shadow-strength: 0.08;
+}

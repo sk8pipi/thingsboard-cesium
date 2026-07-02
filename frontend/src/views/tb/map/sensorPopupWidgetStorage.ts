@@ -1,10 +1,14 @@
+import type { WidgetAppearance } from '../dashboard/runtime/types';
 import { getMapWidgetStorageKey } from './mapWidgetStorage';
 
 export type PopupWidgetConfig = {
   id: string;
   type: string;
+  widgetKey?: string;
+  definitionVersion?: number;
   title: string;
   config: Record<string, any>;
+  appearance?: WidgetAppearance;
 };
 
 export type SensorPopupBinding = Record<string, PopupWidgetConfig[]>;

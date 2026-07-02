@@ -1,21 +1,32 @@
 export type WidgetCategory = 'timeseries' | 'latest' | 'control' | 'alarm' | 'static';
 
-export type LocalWidgetKey =
-  | 'cesium3d'
-  | 'timeseriesLine'
-  | 'latestPie'
-  | 'latestBar'
-  | 'staticHtml'
-  | 'alarmTable'
-  | 'alarmCard'
-  | 'controlSwitch'
-  | 'ledIndicator'
-  | 'timeseriesScatter'
-  | 'latestRadar'
-  | 'latestPolarArea'
-  | 'stateChart'
-  | 'timeseriesBarWithLabels'
-  | 'rangeChart';
+/**
+ * Built-in and extension widgets share the same string key space.
+ * Runtime validation is handled by the widget catalog so adding a manifest
+ * does not require expanding a central union type.
+ */
+export type LocalWidgetKey = string;
+export type WidgetType = LocalWidgetKey;
+
+export type WidgetHostKind = 'dashboard' | 'point-detail' | 'editor';
+
+export type WidgetDataProviderKey =
+  | 'telemetry-timeseries'
+  | 'telemetry-latest'
+  | 'alarm'
+  | 'control'
+  | 'static'
+  | 'custom';
+
+export interface WidgetAppearance {
+  surface?: 'clear-glass' | 'none';
+  backgroundOpacity?: number;
+  blurPx?: number;
+  borderOpacity?: number;
+  accentColor?: string;
+  radiusPx?: number;
+  shadowStrength?: number;
+}
 
 export type TbDataKeyType = 'timeseries' | 'attribute' | 'entityField' | 'alarmField';
 
@@ -64,7 +75,10 @@ export interface DashboardWidget {
   id: string;
   category: WidgetCategory;
   widgetKey: LocalWidgetKey;
+  type?: LocalWidgetKey;
+  definitionVersion?: number;
   typeFullFqn?: string;
   title: string;
   config: TbWidgetConfig;
+  appearance?: WidgetAppearance;
 }

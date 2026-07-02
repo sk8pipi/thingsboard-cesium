@@ -5,16 +5,18 @@
     :widget-id="widget.id"
     :config="widget.config"
     :data="runtimeData"
+    :widget="widget"
+    :datasource="datasource"
+    :ctx="hostContext"
+    :timewindow="runtimeTimewindow"
   />
-  <div v-else class="tb-host-error">
-    未找到部件组件：{{ widget.widgetKey || widget.typeFullFqn || widget.id }}
-  </div>
+  <div v-else class="tb-host-error"> 未找到部件组件：{{ widget.widgetKey || widget.typeFullFqn || widget.id }} </div>
 </template>
 
 <script setup lang="ts">
   import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
   import { widgetRegistry } from './registry/widgetRegistry';
-  import type { DashboardWidget, LocalWidgetKey, TbWidgetConfig } from '../types';
+  import type { DashboardWidget, LocalWidgetKey, TbWidgetConfig, WidgetHostKind } from '../types';
   import type { WidgetRuntimeData } from '../datasourceRuntime';
 
   const props = defineProps<{
@@ -26,6 +28,12 @@
       mountWidgetRuntime: (widget: any) => WidgetRuntimeData;
       unmountWidgetRuntime: (widgetId: string) => void;
     };
+    context?: {
+      host: WidgetHostKind;
+      readonly?: boolean;
+      entity?: Record<string, any> | null;
+      runtimeDevices?: Record<string, Record<string, unknown>> | null;
+    };
   }>();
 
   const widgetKey = computed(() => (props.widget.widgetKey || props.widget.type) as LocalWidgetKey);
@@ -33,11 +41,25 @@
   const resolvedComponent = computed(() => definition.value?.component || null);
 
   const runtimeData = ref<WidgetRuntimeData | null>(null);
+  const datasource = computed(() => props.widget.config?.datasource || props.widget.config?.datasources?.[0] || null);
+  const runtimeTimewindow = computed(() => {
+    const endTs = Date.now();
+    const intervalMs = runtimeData.value?.timeWindowMs || props.widget.config?.timewindow?.intervalMs || 300000;
+    return { startTs: endTs - intervalMs, endTs };
+  });
+  const hostContext = computed(() => ({
+    host: props.context?.host || ('dashboard' as WidgetHostKind),
+    readonly: props.context?.readonly ?? true,
+    entity: props.context?.entity || null,
+    runtimeDevices: props.context?.runtimeDevices || null,
+    data: runtimeData.value,
+  }));
 
   onMounted(() => {
     runtimeData.value = props.runtime.mountWidgetRuntime({
       ...props.widget,
       category: props.widget.category || definition.value?.category,
+      dataProvider: definition.value?.dataProvider,
     });
   });
 

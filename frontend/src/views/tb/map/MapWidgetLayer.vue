@@ -10,7 +10,8 @@
 
   import WidgetHost from '../dashboard/runtime/widgets/WidgetHost.vue';
   import { createDatasourceRuntime, type DatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
-  import { widgetRegistry } from '../dashboard/runtime/widgets/registry/widgetRegistry';
+  import { normalizeWidgetRecord, widgetAppearanceStyleText } from '../dashboard/runtime/widgets/core/widgetInstance';
+  import '../dashboard/runtime/widgets/core/widgetSurface.css';
   import type { DashboardWidget, GridItem, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
   import type { MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
 
@@ -48,9 +49,10 @@
     };
   }
 
-  function widgetHtml(id: string, title: string) {
+  function widgetHtml(id: string, title: string, widget: WidgetData) {
+    const surfaceStyle = widgetAppearanceStyleText(widget.widgetKey, widget.appearance);
     return `
-      <div class="mw-widget">
+      <div class="mw-widget tb-widget-surface" style="${surfaceStyle}">
         <div class="mw-title">${title}</div>
         <div class="mw-body">
           <div id="mw-mount-${id}" class="mw-mount"></div>
@@ -60,29 +62,7 @@
   }
 
   function normalizeWidgets(rawWidgets: any): Record<string, WidgetData> {
-    const normalized: Record<string, WidgetData> = {};
-    const source = rawWidgets && typeof rawWidgets === 'object' ? rawWidgets : {};
-
-    Object.entries(source).forEach(([id, w]: any) => {
-      const widgetKey = w?.widgetKey || w?.type;
-      const def = widgetKey ? widgetRegistry[widgetKey as LocalWidgetKey] : null;
-      if (!def) return;
-
-      normalized[id] = {
-        id,
-        category: w?.category || def.category,
-        widgetKey,
-        type: widgetKey,
-        typeFullFqn: w?.typeFullFqn || def.typeFullFqn,
-        title: w?.title || def.title,
-        config: {
-          ...def.defaultConfig,
-          ...(w?.config || {}),
-        },
-      } as WidgetData;
-    });
-
-    return normalized;
+    return normalizeWidgetRecord(rawWidgets) as Record<string, WidgetData>;
   }
 
   function loadData(): { layout: GridItem[]; widgets: Record<string, WidgetData> } {
@@ -135,6 +115,7 @@
         h(WidgetHost, {
           widget,
           runtime: datasourceRuntime,
+          context: { host: 'dashboard', readonly: true, runtimeDevices: props.runtimeDevices },
         }),
     });
 
@@ -162,7 +143,7 @@
         y: it.y,
         w: it.w,
         h: it.h,
-        content: widgetHtml(it.i, title),
+        content: widgetHtml(it.i, title, w),
       } as any);
 
       await mountWidget(it.i, w);
@@ -248,11 +229,9 @@
     height: 100%;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(18, 22, 30, 0.96);
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    backdrop-filter: blur(8px);
   }
 
   :deep(.mw-title) {

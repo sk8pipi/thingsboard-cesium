@@ -4,7 +4,7 @@
       v-for="(widget, index) in widgets"
       :key="widgetRenderKey(widget)"
       :aria-label="widget.title"
-      class="sensor-popup-widget-grid__item"
+      class="sensor-popup-widget-grid__item tb-widget-surface tb-widget-surface--nested"
       :class="itemClass(widget)"
       :style="itemStyle(widget)"
     >
@@ -19,7 +19,7 @@
       </button>
 
       <div class="sensor-popup-widget-grid__body">
-        <WidgetHost :widget="widget" :runtime="runtime" />
+        <WidgetHost :widget="widget" :runtime="runtime" :context="context" />
       </div>
     </section>
   </div>
@@ -27,8 +27,10 @@
 
 <script setup lang="ts">
   import type { CSSProperties } from 'vue';
-  import type { DashboardWidget, LocalWidgetKey } from '../dashboard/runtime/types';
+  import type { DashboardWidget, WidgetHostKind } from '../dashboard/runtime/types';
   import WidgetHost from '../dashboard/runtime/widgets/WidgetHost.vue';
+  import { getWidgetDefinition, widgetAppearanceStyle } from '../dashboard/runtime/widgets/core/widgetInstance';
+  import '../dashboard/runtime/widgets/core/widgetSurface.css';
 
   type WidgetRuntime = {
     mountWidgetRuntime: (widget: DashboardWidget) => any;
@@ -40,6 +42,12 @@
       widgets: DashboardWidget[];
       runtime: WidgetRuntime;
       removable?: boolean;
+      context?: {
+        host: WidgetHostKind;
+        readonly?: boolean;
+        entity?: Record<string, any> | null;
+        runtimeDevices?: Record<string, Record<string, unknown>> | null;
+      };
     }>(),
     {
       removable: false,
@@ -49,8 +57,6 @@
   const emit = defineEmits<{
     (e: 'remove', index: number): void;
   }>();
-
-  const compactWidgetKeys = new Set<LocalWidgetKey>(['ledIndicator', 'controlSwitch']);
 
   function widgetKey(widget: DashboardWidget) {
     return widget.widgetKey;
@@ -63,25 +69,14 @@
   function itemClass(widget: DashboardWidget) {
     const key = widgetKey(widget);
     return {
-      'sensor-popup-widget-grid__item--compact': compactWidgetKeys.has(key),
+      'sensor-popup-widget-grid__item--compact':
+        (getWidgetDefinition(key)?.pointDetailPlacement.columnSpan || 12) === 6,
       'sensor-popup-widget-grid__item--removable': props.removable,
     };
   }
 
   function widgetHeight(widget: DashboardWidget) {
-    switch (widgetKey(widget)) {
-      case 'ledIndicator':
-      case 'controlSwitch':
-        return 150;
-      case 'staticHtml':
-        return 220;
-      case 'alarmTable':
-        return 420;
-      case 'alarmCard':
-        return 360;
-      default:
-        return 320;
-    }
+    return getWidgetDefinition(widgetKey(widget))?.pointDetailPlacement.height || 320;
   }
 
   function itemStyle(widget: DashboardWidget): CSSProperties {
@@ -109,7 +104,6 @@
     padding: 10px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 10px;
-    background: rgba(255, 255, 255, 0.05);
   }
 
   .sensor-popup-widget-grid__item--compact {

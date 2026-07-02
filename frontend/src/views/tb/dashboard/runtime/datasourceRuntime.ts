@@ -25,10 +25,21 @@ export type RuntimeWidgetLike = {
   widgetKey?: string;
   type?: string;
   category?: string;
+  dataProvider?: string;
   config?: Record<string, any>;
 };
 
+export type WidgetRuntimeProviderContext = {
+  widget: RuntimeWidgetLike;
+  data: WidgetRuntimeData;
+};
+
+export type WidgetRuntimeProvider = (
+  context: WidgetRuntimeProviderContext,
+) => void | (() => void) | Promise<void | (() => void)>;
+
 export type DatasourceRuntimeOptions = {
+  dataProviders?: Record<string, WidgetRuntimeProvider>;
   getExternalValues?: (entityType: string, entityId: string) => Record<string, unknown> | undefined | null;
   getEntityName?: (entityType: string, entityId: string) => string | undefined;
   externalValuesOnly?: boolean;
@@ -339,6 +350,19 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
 
   const runtimeDataMap = new Map<string, WidgetRuntimeData>();
   const mountedWidgetMap = new Map<string, RuntimeWidgetLike>();
+  const providerCleanupMap = new Map<string, () => void>();
+
+  function clearProvider(widgetId: string) {
+    const cleanup = providerCleanupMap.get(widgetId);
+    if (cleanup) {
+      try {
+        cleanup();
+      } catch (error) {
+        console.warn('[widget-runtime] provider cleanup failed:', error);
+      }
+      providerCleanupMap.delete(widgetId);
+    }
+  }
 
   function connect() {
     if (!options.externalValuesOnly) {
@@ -358,6 +382,7 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
       unsubscribeTimeseries(d);
       clearLatestPolling(d);
     });
+    providerCleanupMap.forEach((_cleanup, widgetId) => clearProvider(widgetId));
     runtimeDataMap.clear();
     mountedWidgetMap.clear();
     wsClient.close();
@@ -406,21 +431,22 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
       return false;
     }
 
-    const latestValues = ds.keys.reduce<Record<string, number | string | null>>((result, key) => {
-      const value = externalValues[key];
-      if (value !== undefined) {
-        result[key] = toNumberMaybe(value);
-      }
+    const matchedKeys = ds.keys.filter((key) => externalValues[key] !== undefined);
+    if (!matchedKeys.length) {
+      return false;
+    }
+
+    const latestValues = matchedKeys.reduce<Record<string, number | string | null>>((result, key) => {
+      result[key] = toNumberMaybe(externalValues[key]);
       return result;
     }, {});
 
-    d.latestValues = latestValues;
+    d.latestValues = { ...d.latestValues, ...latestValues };
     applyLatestValuesToSeries(d, latestValues);
     d.updatedAt = Date.now();
     d.error = undefined;
-    return true;
+    return matchedKeys.length === ds.keys.length;
   }
-
   async function fetchLatestOnce(widget: RuntimeWidgetLike) {
     const d = ensureRuntimeData(widget.id);
     const ds = normalizeDatasource(widget.config);
@@ -533,10 +559,7 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
       return d;
     }
 
-    if (applyExternalLatest(widget)) {
-      unsubscribeTimeseries(d);
-      return d;
-    }
+    applyExternalLatest(widget);
 
     if (options.externalValuesOnly) {
       unsubscribeTimeseries(d);
@@ -575,10 +598,11 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
 
   function mountWidgetRuntime(widget: RuntimeWidgetLike) {
     const d = ensureRuntimeData(widget.id);
-    const category = widget.category;
+    const providerKey = widget.dataProvider || widget.category || 'static';
     mountedWidgetMap.set(widget.id, widget);
+    clearProvider(widget.id);
 
-    if (category === 'timeseries') {
+    if (providerKey === 'telemetry-timeseries' || providerKey === 'timeseries') {
       const configuredWindow = Number(widget.config?.timewindow?.intervalMs);
       if (Number.isFinite(configuredWindow) && !Object.keys(d.series).length) {
         d.timeWindowMs = Math.max(60_000, configuredWindow);
@@ -586,8 +610,26 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
       return subscribeTimeseries(widget);
     }
 
-    if (category === 'latest' || category === 'control') {
+    if (providerKey === 'telemetry-latest' || providerKey === 'latest' || providerKey === 'control') {
       return startLatestPolling(widget);
+    }
+
+    const customProvider = options.dataProviders?.[providerKey];
+    if (customProvider) {
+      clearLatestPolling(d);
+      unsubscribeTimeseries(d);
+      d.error = undefined;
+      Promise.resolve(customProvider({ widget, data: d }))
+        .then((cleanup) => {
+          if (typeof cleanup === 'function' && mountedWidgetMap.has(widget.id)) {
+            providerCleanupMap.set(widget.id, cleanup);
+          }
+        })
+        .catch((error) => {
+          d.error = error?.message || String(error);
+          d.updatedAt = Date.now();
+        });
+      return d;
     }
 
     clearLatestPolling(d);
@@ -598,6 +640,7 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
   }
 
   function unmountWidgetRuntime(widgetId: string) {
+    clearProvider(widgetId);
     const d = runtimeDataMap.get(widgetId);
     if (!d) return;
     clearLatestPolling(d);
