@@ -106,6 +106,61 @@
       </label>
     </div>
 
+    <div v-if="aggregateConfigVisible" class="mw-dialog-mask" @click.self="cancelAggregateWidgetConfig">
+      <div class="mw-dialog-card mw-aggregate-dialog">
+        <div class="mw-dialog-title">配置{{ pendingWidgetTitle }}</div>
+        <div class="mw-dialog-sub">该 Key 将在模板全部设备中进行聚合，未包含此 Key 的设备会自动忽略。</div>
+
+        <label class="mw-aggregate-field">
+          <span>搜索模板 Key</span>
+          <input v-model.trim="aggregateKeySearch" type="search" placeholder="输入 Key 名称筛选" />
+        </label>
+
+        <div v-if="aggregateKeysLoading" class="mw-aggregate-key-state">正在读取模板全部设备的 timeseries keys...</div>
+        <div v-else-if="aggregateKeysError && !aggregateAvailableKeys.length" class="mw-aggregate-key-state is-error">
+          {{ aggregateKeysError }}
+        </div>
+        <div v-else class="mw-aggregate-key-picker">
+          <div class="mw-aggregate-key-picker__title">
+            <span>模板已有 Keys（{{ aggregateAvailableKeys.length }}）</span>
+            <span>已选：{{ aggregateKey || '未选择' }}</span>
+          </div>
+          <div v-if="filteredAggregateKeys.length" class="mw-aggregate-key-list">
+            <button
+              v-for="key in filteredAggregateKeys"
+              :key="key"
+              class="mw-aggregate-key-chip"
+              :class="{ active: aggregateKey === key }"
+              type="button"
+              :aria-pressed="aggregateKey === key"
+              @click="aggregateKey = key"
+            >
+              {{ key }}
+            </button>
+          </div>
+          <div v-else class="mw-aggregate-key-state">没有匹配的 Key</div>
+          <div v-if="aggregateKeysError" class="mw-aggregate-key-warning">{{ aggregateKeysError }}</div>
+        </div>
+
+        <label v-if="pendingWidgetKey === 'templateKeyTrend'" class="mw-aggregate-field">
+          <span>趋势时间范围</span>
+          <select v-model.number="aggregateTimeWindowMs">
+            <option :value="900000">最近 15 分钟</option>
+            <option :value="3600000">最近 1 小时</option>
+            <option :value="21600000">最近 6 小时</option>
+            <option :value="86400000">最近 24 小时</option>
+          </select>
+        </label>
+
+        <div class="mw-dialog-actions">
+          <button class="mw-btn" type="button" @click="cancelAggregateWidgetConfig">取消</button>
+          <button class="mw-btn primary" type="button" :disabled="!aggregateKey" @click="confirmAggregateWidgetConfig">
+            添加部件
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="pointTypeDialogVisible" class="mw-dialog-mask" @click.self="cancelPointTypeSelection">
       <div class="mw-dialog-card">
         <div class="mw-dialog-title">选择点位类型</div>
@@ -250,6 +305,7 @@
 
 <script setup lang="ts">
   import { computed, createApp, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+  import { getTimeseriesKeys } from '/@/api/tb/telemetry';
   import type * as Cesium from 'cesium';
   import { useRoute, useRouter } from 'vue-router';
   import { GridStack } from 'gridstack';
@@ -321,7 +377,11 @@
     type MapTemplateScene,
     type MapTemplateState,
   } from './mapTemplateConfig';
-  import { formatTemplateDeviceNames, inspectMapTemplateDeviceAccess } from './mapTemplateDeviceAccess';
+  import {
+    collectMapTemplateDeviceRefs,
+    formatTemplateDeviceNames,
+    inspectMapTemplateDeviceAccess,
+  } from './mapTemplateDeviceAccess';
 
   type WidgetData = DashboardWidget & {
     type: LocalWidgetKey;
@@ -364,6 +424,19 @@
   const widgetDeviceDialogVisible = ref(false);
   const sensorPointDialogVisible = ref(false);
   const cameraPointDialogVisible = ref(false);
+  const aggregateConfigVisible = ref(false);
+  const aggregateKey = ref('');
+  const aggregateKeySearch = ref('');
+  const aggregateAvailableKeys = ref<string[]>([]);
+  const aggregateKeysLoading = ref(false);
+  const aggregateKeysError = ref('');
+  const aggregateTimeWindowMs = ref(3600000);
+  let aggregateKeysRequestId = 0;
+  const filteredAggregateKeys = computed(() => {
+    const search = aggregateKeySearch.value.trim().toLowerCase();
+    if (!search) return aggregateAvailableKeys.value;
+    return aggregateAvailableKeys.value.filter((key) => key.toLowerCase().includes(search));
+  });
   const cesiumMapRef = ref<CesiumMapExpose | null>(null);
 
   const gridEl = ref<HTMLDivElement | null>(null);
@@ -505,6 +578,11 @@
     alarmTable: createWidgetPreviewSvg('告警表格', 'table', '#dc2626', '#f97316'),
     alarmCard: createWidgetPreviewSvg('告警卡片', 'card', '#dc2626', '#f59e0b'),
     controlSwitch: createWidgetPreviewSvg('开关控制', 'switch', '#0284c7', '#22c55e'),
+    templateDeviceOverview: createWidgetPreviewSvg('设备概览', 'card', '#0284c7', '#22c55e'),
+    templateAlarmOverview: createWidgetPreviewSvg('报警概览', 'card', '#dc2626', '#f59e0b'),
+    templateKeyAggregate: createWidgetPreviewSvg('Key 聚合', 'card', '#0e7490', '#38bdf8'),
+    templateKeyTrend: createWidgetPreviewSvg('Key 趋势', 'line', '#2563eb', '#22c55e'),
+    templateStatusDistribution: createWidgetPreviewSvg('状态分布', 'pie', '#16a34a', '#ef4444'),
   };
 
   function getBuiltInPreview(key: LocalWidgetKey) {
@@ -519,6 +597,7 @@
       timeseries: '时序部件',
       latest: '最新值部件',
       alarm: '告警部件',
+      aggregate: '宏观部件',
       control: '控制部件',
       static: '静态部件',
     };
@@ -962,6 +1041,75 @@
     addPanelVisible.value = false;
   }
 
+  async function loadAggregateAvailableKeys() {
+    const requestId = ++aggregateKeysRequestId;
+    const deviceRefs = collectMapTemplateDeviceRefs(getEditorState());
+    aggregateAvailableKeys.value = [];
+    aggregateKeysError.value = '';
+    aggregateKeysLoading.value = false;
+
+    if (!deviceRefs.length) {
+      aggregateKeysError.value = '当前模板还没有绑定设备，无法读取可用 Key。';
+      return;
+    }
+
+    aggregateKeysLoading.value = true;
+    const results = await Promise.allSettled(
+      deviceRefs.map((device) => getTimeseriesKeys({ entityType: 'DEVICE', id: device.deviceId } as any)),
+    );
+    if (requestId !== aggregateKeysRequestId) return;
+
+    const keySet = new Set<string>();
+    results.forEach((result) => {
+      if (result.status !== 'fulfilled') return;
+      (Array.isArray(result.value) ? result.value : []).forEach((key) => {
+        const normalized = String(key || '').trim();
+        if (normalized) keySet.add(normalized);
+      });
+    });
+
+    aggregateAvailableKeys.value = Array.from(keySet).sort((left, right) => left.localeCompare(right));
+    const failedCount = results.filter((result) => result.status === 'rejected').length;
+    if (failedCount === results.length) {
+      aggregateKeysError.value = '模板设备的 Key 全部读取失败，请检查设备权限或稍后重试。';
+    } else if (failedCount) {
+      aggregateKeysError.value = `${failedCount} 台设备的 Key 读取失败，当前列表来自其余设备。`;
+    } else if (!aggregateAvailableKeys.value.length) {
+      aggregateKeysError.value = '模板设备暂时没有可用的 timeseries Key。';
+    }
+
+    if (!aggregateAvailableKeys.value.includes(aggregateKey.value)) {
+      aggregateKey.value = aggregateAvailableKeys.value[0] || '';
+    }
+    aggregateKeysLoading.value = false;
+  }
+
+  function cancelAggregateWidgetConfig() {
+    aggregateKeysRequestId += 1;
+    aggregateKeysLoading.value = false;
+    aggregateConfigVisible.value = false;
+    pendingWidgetKey.value = '';
+    pendingWidgetTitle.value = '';
+  }
+
+  function confirmAggregateWidgetConfig() {
+    const key = pendingWidgetKey.value;
+    const definition = key ? widgetRegistry[key] : null;
+    const telemetryKey = aggregateKey.value.trim();
+    if (!key || !definition || !telemetryKey) return;
+
+    const config = cloneJson(definition.defaultConfig || {});
+    config.settings = { ...(config.settings || {}), key: telemetryKey };
+    if (key === 'templateKeyTrend') {
+      config.timewindow = { ...(config.timewindow || {}), intervalMs: aggregateTimeWindowMs.value, realtime: true };
+    }
+
+    createWidgetAndAddToGrid(key, pendingWidgetTitle.value || definition.title, config);
+    aggregateConfigVisible.value = false;
+    pendingWidgetKey.value = '';
+    pendingWidgetTitle.value = '';
+  }
+
   function addWidgetByKey(key: LocalWidgetKey) {
     if (!grid || editorMode.value !== 'editing') return;
 
@@ -972,6 +1120,18 @@
     }
 
     const title = def.title;
+
+    if (def.editor === 'aggregate') {
+      pendingWidgetKey.value = key;
+      pendingWidgetTitle.value = title;
+      aggregateKey.value = '';
+      aggregateKeySearch.value = '';
+      aggregateTimeWindowMs.value = Number(def.defaultConfig?.timewindow?.intervalMs || 3600000);
+      addPanelVisible.value = false;
+      aggregateConfigVisible.value = true;
+      void loadAggregateAvailableKeys();
+      return;
+    }
 
     if (def.editor === 'timeseries' || def.editor === 'latest' || def.editor === 'control') {
       pendingWidgetKey.value = key;
@@ -1080,6 +1240,7 @@
 
   function closeAllOverlays() {
     addPanelVisible.value = false;
+    aggregateConfigVisible.value = false;
     sensorPreviewVisible.value = false;
     sensorConfigVisible.value = false;
     selectedSensor.value = null;
@@ -1802,6 +1963,92 @@
     margin-top: 8px;
     font-size: 12px;
     color: rgba(255, 255, 255, 0.72);
+  }
+
+  .mw-aggregate-dialog {
+    display: grid;
+    gap: 14px;
+  }
+
+  .mw-aggregate-key-picker {
+    display: grid;
+    gap: 9px;
+  }
+
+  .mw-aggregate-key-picker__title {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 12px;
+  }
+
+  .mw-aggregate-key-list {
+    display: flex;
+    max-height: 190px;
+    flex-wrap: wrap;
+    gap: 8px;
+    overflow-y: auto;
+    padding: 2px;
+  }
+
+  .mw-aggregate-key-chip {
+    border: 1px solid rgba(125, 211, 252, 0.26);
+    border-radius: 999px;
+    background: rgba(8, 47, 73, 0.42);
+    color: rgba(224, 242, 254, 0.82);
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  .mw-aggregate-key-chip:hover,
+  .mw-aggregate-key-chip.active {
+    border-color: rgba(56, 189, 248, 0.9);
+    background: rgba(14, 116, 144, 0.72);
+    color: #fff;
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.12);
+  }
+
+  .mw-aggregate-key-state,
+  .mw-aggregate-key-warning {
+    padding: 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(224, 242, 254, 0.68);
+    font-size: 12px;
+  }
+
+  .mw-aggregate-key-state.is-error,
+  .mw-aggregate-key-warning {
+    border: 1px solid rgba(251, 146, 60, 0.24);
+    color: #fdba74;
+  }
+
+  .mw-aggregate-field {
+    display: grid;
+    gap: 6px;
+    color: rgba(255, 255, 255, 0.74);
+    font-size: 12px;
+  }
+
+  .mw-aggregate-field input,
+  .mw-aggregate-field select {
+    width: 100%;
+    height: 38px;
+    box-sizing: border-box;
+    border: 1px solid rgba(125, 211, 252, 0.28);
+    border-radius: 8px;
+    outline: none;
+    background: rgba(8, 20, 34, 0.72);
+    color: #e0f2fe;
+    padding: 0 10px;
+  }
+
+  .mw-aggregate-field input:focus,
+  .mw-aggregate-field select:focus {
+    border-color: rgba(56, 189, 248, 0.8);
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.12);
   }
 
   .mw-dialog-actions {

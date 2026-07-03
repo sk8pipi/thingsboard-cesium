@@ -55,7 +55,7 @@ export interface WidgetDefinition {
   category: WidgetCategory;
   title: string;
   component: Component;
-  editor: 'timeseries' | 'latest' | 'static' | 'alarm' | 'control';
+  editor: 'timeseries' | 'latest' | 'static' | 'alarm' | 'control' | 'aggregate';
   supportsTimewindow: boolean;
   allowedKeyTypes: TbDataKeyType[];
   defaultConfig: Record<string, any>;

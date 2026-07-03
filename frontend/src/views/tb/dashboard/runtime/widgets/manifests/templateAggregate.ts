@@ -1,0 +1,90 @@
+import TbTemplateDeviceOverview from '../aggregate/TbTemplateDeviceOverview.vue';
+import TbTemplateAlarmOverview from '../aggregate/TbTemplateAlarmOverview.vue';
+import TbTemplateKeyAggregate from '../aggregate/TbTemplateKeyAggregate.vue';
+import TbTemplateKeyTrend from '../aggregate/TbTemplateKeyTrend.vue';
+import TbTemplateStatusDistribution from '../aggregate/TbTemplateStatusDistribution.vue';
+import type { WidgetDefinition } from '../core/widgetDefinition';
+
+export const widgets: WidgetDefinition[] = [
+  {
+    key: 'templateDeviceOverview',
+    typeFullFqn: 'system.template_device_overview',
+    category: 'aggregate',
+    title: '设备概览卡',
+    component: TbTemplateDeviceOverview,
+    editor: 'static',
+    supportsTimewindow: false,
+    allowedKeyTypes: [],
+    hosts: ['dashboard', 'editor'],
+    dataProvider: 'static',
+    previewKind: 'card',
+    defaultConfig: { showTitle: true, settings: {} },
+    dashboardPlacement: { width: 4, height: 3 },
+  },
+  {
+    key: 'templateAlarmOverview',
+    typeFullFqn: 'system.template_alarm_overview',
+    category: 'aggregate',
+    title: '报警概览卡',
+    component: TbTemplateAlarmOverview,
+    editor: 'static',
+    supportsTimewindow: false,
+    allowedKeyTypes: [],
+    hosts: ['dashboard', 'editor'],
+    dataProvider: 'static',
+    previewKind: 'card',
+    defaultConfig: { showTitle: true, settings: { pollMs: 30000 } },
+    dashboardPlacement: { width: 4, height: 3 },
+  },
+  {
+    key: 'templateKeyAggregate',
+    typeFullFqn: 'system.template_key_aggregate',
+    category: 'aggregate',
+    title: 'Key 聚合指标卡',
+    component: TbTemplateKeyAggregate,
+    editor: 'aggregate',
+    supportsTimewindow: false,
+    allowedKeyTypes: ['timeseries'],
+    hosts: ['dashboard', 'editor'],
+    dataProvider: 'static',
+    previewKind: 'card',
+    defaultConfig: { showTitle: true, settings: { key: 'temperature', decimals: 1 } },
+    dashboardPlacement: { width: 4, height: 3 },
+  },
+  {
+    key: 'templateKeyTrend',
+    typeFullFqn: 'system.template_key_trend',
+    category: 'aggregate',
+    title: 'Key 总量趋势图',
+    component: TbTemplateKeyTrend,
+    editor: 'aggregate',
+    supportsTimewindow: true,
+    allowedKeyTypes: ['timeseries'],
+    hosts: ['dashboard', 'editor'],
+    dataProvider: 'static',
+    previewKind: 'line',
+    defaultConfig: {
+      showTitle: true,
+      timewindow: { intervalMs: 3600000, realtime: true },
+      settings: { key: 'temperature', decimals: 1 },
+    },
+    dashboardPlacement: { width: 6, height: 4 },
+  },
+  {
+    key: 'templateStatusDistribution',
+    typeFullFqn: 'system.template_status_distribution',
+    category: 'aggregate',
+    title: '设备状态分布图',
+    component: TbTemplateStatusDistribution,
+    editor: 'static',
+    supportsTimewindow: false,
+    allowedKeyTypes: [],
+    hosts: ['dashboard', 'editor'],
+    dataProvider: 'static',
+    previewKind: 'pie',
+    defaultConfig: { showTitle: true, settings: {} },
+    dashboardPlacement: { width: 4, height: 4 },
+  },
+];
+
+export default widgets;

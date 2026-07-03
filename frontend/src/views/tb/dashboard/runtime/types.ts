@@ -1,4 +1,4 @@
-export type WidgetCategory = 'timeseries' | 'latest' | 'control' | 'alarm' | 'static';
+export type WidgetCategory = 'timeseries' | 'latest' | 'control' | 'alarm' | 'aggregate' | 'static';
 
 /**
  * Built-in and extension widgets share the same string key space.
