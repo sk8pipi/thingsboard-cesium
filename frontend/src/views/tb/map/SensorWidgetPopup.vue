@@ -10,6 +10,9 @@
         </div>
       </div>
 
+      <button v-if="exportEnabled" class="sensor-widget-popup__export" type="button" @click="exportVisible = true"
+        >&#23548;&#20986;&#25968;&#25454;</button
+      >
       <button class="sensor-widget-popup__close" type="button" @click="$emit('close')"> 关闭 </button>
     </div>
 
@@ -28,15 +31,23 @@
       :runtime="datasourceRuntime"
       :context="{ host: 'point-detail', readonly: true, entity: sensor, runtimeDevices }"
     />
+
+    <PointDataExportModal
+      :visible="exportVisible"
+      :sensor="sensor"
+      :widgets="normalizedWidgets"
+      @close="exportVisible = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-  import { computed, onMounted, onBeforeUnmount } from 'vue';
+  import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
   import { createDatasourceRuntime, type DatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
   import type { DashboardWidget, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
   import { normalizeWidgetList } from '../dashboard/runtime/widgets/core/widgetInstance';
   import '../dashboard/runtime/widgets/core/widgetSurface.css';
+  import PointDataExportModal from './PointDataExportModal.vue';
   import SensorPopupWidgetGrid from './SensorPopupWidgetGrid.vue';
   import type { PopupWidgetConfig } from './sensorPopupWidgetStorage';
   import type { MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
@@ -49,6 +60,7 @@
     visible: boolean;
     sensor?: any;
     widgets: SensorPopupWidgetInput[];
+    exportEnabled?: boolean;
     runtimeDevices?: MapTemplateRuntimeDevices | null;
     runtime?: DatasourceRuntime;
   }>();
@@ -59,6 +71,7 @@
 
   const ownedDatasourceRuntime = props.runtime ? null : createDatasourceRuntime();
   const datasourceRuntime = props.runtime || ownedDatasourceRuntime!;
+  const exportVisible = ref(false);
 
   function formatCoordinate(value: unknown) {
     const coordinate = Number(value);
@@ -80,6 +93,13 @@
   });
 
   const normalizedWidgets = computed<WidgetData[]>(() => normalizeWidgetList(props.widgets) as WidgetData[]);
+
+  watch(
+    () => props.visible,
+    (visible) => {
+      if (!visible) exportVisible.value = false;
+    },
+  );
 
   onMounted(() => {
     datasourceRuntime.connect();
@@ -134,6 +154,15 @@
     cursor: pointer;
   }
 
+  .sensor-widget-popup__export {
+    margin-left: auto;
+    border: 1px solid rgba(56, 189, 248, 0.55);
+    background: rgba(14, 116, 144, 0.88);
+    color: #fff;
+    border-radius: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+  }
   .sensor-widget-popup__info {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

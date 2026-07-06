@@ -26,6 +26,7 @@
       :visible="sensorPreviewVisible"
       :sensor="selectedSensor"
       :widgets="selectedSensor ? getSensorPopupWidgetsForView(selectedSensor.id) : []"
+      :export-enabled="isCustomerUserMap"
       :runtime-devices="assignedTemplateRuntimeDevices"
       :runtime="datasourceRuntime"
       @close="sensorPreviewVisible = false"
@@ -60,7 +61,6 @@
   import CameraMonitorPopup from './components/CameraMonitorPopup.vue';
   import { getMapWidgetStorageKey } from './mapWidgetStorage';
   import { getMapPointStorageKey, loadMapPoints } from './mapPointStorage';
-  import { getSensorPopupWidgets } from './sensorPopupWidgetStorage';
   import { loadCameraRuntimeInfo } from './services/cameraDeviceRuntimeService';
   import {
     getAssignedMapTemplateRuntime,
@@ -163,9 +163,7 @@
     }
     return false;
   });
-  const showWidgetLayer = computed(
-    () => !showDefaultGlobeOnly.value && (!isCustomerUserMap.value || hasAssignedTemplate.value),
-  );
+  const showWidgetLayer = computed(() => isCustomerUserMap.value && hasAssignedTemplate.value);
   const visibleSensorPoints = computed(() => (showDefaultGlobeOnly.value ? [] : sensorPoints.value));
   const visibleCameraPoints = computed(() => (showDefaultGlobeOnly.value ? [] : cameraPoints.value));
 
@@ -452,12 +450,9 @@
   }
 
   function getSensorPopupWidgetsForView(sensorId: string): PopupWidgetConfig[] {
-    if (isCustomerUserMap.value) {
-      const bindings = assignedTemplateState.value?.sensorPopupBindings || {};
-      return Array.isArray(bindings[sensorId]) ? bindings[sensorId] : [];
-    }
-
-    return getSensorPopupWidgets(sensorId);
+    if (!isCustomerUserMap.value) return [];
+    const bindings = assignedTemplateState.value?.sensorPopupBindings || {};
+    return Array.isArray(bindings[sensorId]) ? bindings[sensorId] : [];
   }
 
   async function loadAssignedCustomerTemplate() {
