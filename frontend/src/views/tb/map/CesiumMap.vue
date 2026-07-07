@@ -49,6 +49,8 @@
   let sensorDataSource: Cesium.CustomDataSource | undefined;
   let cameraDataSource: Cesium.CustomDataSource | undefined;
   let clickHandler: Cesium.ScreenSpaceEventHandler | undefined;
+  let hoverHandler: Cesium.ScreenSpaceEventHandler | undefined;
+  let hoveredOverlayEntity: Cesium.Entity | null = null;
   let sensorRenderVersion = 0;
   let cameraRenderVersion = 0;
   const sensorLabelDistanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 1200);
@@ -320,6 +322,52 @@
     return Array.from(pointMap.values());
   }
 
+  function getPointLabelText(point: SensorMapPoint | CameraMapPoint) {
+    return point.entityName || point.name;
+  }
+
+  function setEntityLabelVisible(entity: Cesium.Entity | null, visible: boolean) {
+    if (!entity?.label) return;
+    entity.label.show = new Cesium.ConstantProperty(visible);
+  }
+
+  function clearOverlayHover() {
+    setEntityLabelVisible(hoveredOverlayEntity, false);
+    hoveredOverlayEntity = null;
+
+    if (viewer) {
+      (viewer.container as HTMLElement).style.cursor = '';
+    }
+  }
+
+  function isEditableOverlayEntity(entity: Cesium.Entity | null) {
+    if (!entity) return false;
+    if (String(entity.id) === '__editable_map_point_delete__') return true;
+    return Boolean(entity.properties?.editablePoint?.getValue?.());
+  }
+
+  function resolveBaseOverlayEntity(position: Cesium.Cartesian2) {
+    if (!viewer) return null;
+
+    const topPicked = viewer.scene.pick(position);
+    const topEntity = topPicked?.id ? (topPicked.id as Cesium.Entity) : null;
+    if (isEditableOverlayEntity(topEntity)) {
+      return null;
+    }
+
+    const pickedObjects = viewer.scene.drillPick(position, 8);
+    const pickedEntities = pickedObjects
+      .map((picked) => (picked?.id ? (picked.id as Cesium.Entity) : null))
+      .filter((entity): entity is Cesium.Entity => Boolean(entity));
+
+    return (
+      pickedEntities.find((entity) => {
+        const entityId = String(entity.id);
+        return Boolean(sensorDataSource?.entities.getById(entityId) || cameraDataSource?.entities.getById(entityId));
+      }) || null
+    );
+  }
+
   async function renderSensorPoints(points: SensorMapPoint[]) {
     if (!sensorDataSource) return;
 
@@ -343,8 +391,9 @@
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         label: {
-          text: point.name,
+          text: getPointLabelText(point),
           font: '11px sans-serif',
+          show: false,
           fillColor: Cesium.Color.WHITE,
           showBackground: true,
           backgroundColor: Cesium.Color.fromCssColorString('rgba(0, 0, 0, 0.6)'),
@@ -397,8 +446,9 @@
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         label: {
-          text: point.name,
+          text: getPointLabelText(point),
           font: '14px sans-serif',
+          show: false,
           fillColor: Cesium.Color.WHITE,
           showBackground: true,
           backgroundColor: Cesium.Color.fromCssColorString('rgba(15, 23, 42, 0.85)'),
@@ -579,6 +629,31 @@
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
   }
 
+  function bindOverlayHover() {
+    if (!viewer) return;
+
+    hoverHandler?.destroy();
+    hoverHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    hoverHandler.setInputAction((movement: { endPosition: Cesium.Cartesian2 }) => {
+      const entity = resolveBaseOverlayEntity(movement.endPosition);
+      if (!entity) {
+        clearOverlayHover();
+        return;
+      }
+
+      if (hoveredOverlayEntity && hoveredOverlayEntity !== entity) {
+        setEntityLabelVisible(hoveredOverlayEntity, false);
+      }
+
+      hoveredOverlayEntity = entity;
+      setEntityLabelVisible(entity, true);
+
+      if (viewer) {
+        (viewer.container as HTMLElement).style.cursor = 'pointer';
+      }
+    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+  }
+
   defineExpose({
     renderSensorPoints,
     renderCameraPoints,
@@ -603,6 +678,7 @@
     }
 
     bindOverlayClick();
+    bindOverlayHover();
   });
 
   watch(
@@ -651,6 +727,8 @@
   onBeforeUnmount(() => {
     clickHandler?.destroy();
     clickHandler = undefined;
+    hoverHandler?.destroy();
+    hoverHandler = undefined;
     clearSceneModels();
 
     if (viewer && !viewer.isDestroyed()) {

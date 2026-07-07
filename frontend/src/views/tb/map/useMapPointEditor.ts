@@ -81,6 +81,10 @@ function createPointPosition(point: MapPoint) {
   return Cesium.Cartesian3.fromDegrees(point.longitude, point.latitude, point.height ?? 0);
 }
 
+function getPointLabelText(point: MapPoint) {
+  return point.entityName || point.name;
+}
+
 export function setEntityPointMeta(entity: Cesium.Entity, point: MapPoint) {
   entity.properties = new Cesium.PropertyBag({
     editablePoint: true,
@@ -144,6 +148,7 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
     if (!entity?.billboard) return;
     entity.billboard.scale = new Cesium.ConstantProperty(1);
     if (entity.label) {
+      entity.label.show = new Cesium.ConstantProperty(false);
       entity.label.scale = new Cesium.ConstantProperty(1);
       entity.label.backgroundColor = new Cesium.ConstantProperty(
         Cesium.Color.fromCssColorString('rgba(15, 23, 42, 0.85)'),
@@ -155,6 +160,7 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
     if (!entity?.billboard) return;
     entity.billboard.scale = new Cesium.ConstantProperty(1.28);
     if (entity.label) {
+      entity.label.show = new Cesium.ConstantProperty(true);
       entity.label.scale = new Cesium.ConstantProperty(1.08);
       entity.label.backgroundColor = new Cesium.ConstantProperty(
         Cesium.Color.fromCssColorString('rgba(37, 99, 235, 0.88)'),
@@ -288,8 +294,9 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
-        text: point.name,
+        text: getPointLabelText(point),
         font: '14px sans-serif',
+        show: false,
         scale: 1,
         fillColor: Cesium.Color.WHITE,
         showBackground: true,
