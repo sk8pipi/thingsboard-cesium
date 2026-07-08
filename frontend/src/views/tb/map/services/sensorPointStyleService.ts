@@ -97,23 +97,23 @@ const ICONS: Record<BuiltInSensorType, SensorPointIconShape> = {
 };
 
 export const SENSOR_POINT_STYLE_REGISTRY: Record<BuiltInSensorType, SensorPointStyle> = {
-  temperature: { type: 'temperature', label: '温度', color: '#FFE4E1', icon: ICONS.temperature },
-  humidity: { type: 'humidity', label: '湿度', color: '#00CED1', icon: ICONS.humidity },
+  temperature: { type: 'temperature', label: '\u6e29\u5ea6', color: '#FFE4E1', icon: ICONS.temperature },
+  humidity: { type: 'humidity', label: '\u6e7f\u5ea6', color: '#00CED1', icon: ICONS.humidity },
   electricity_consumption: {
     type: 'electricity_consumption',
-    label: '用电量',
+    label: '\u7528\u7535\u91cf',
     color: '#FFFF00',
     icon: ICONS.electricity_consumption,
   },
-  noise: { type: 'noise', label: '噪声', color: '#D946EF', icon: ICONS.noise },
-  illuminance: { type: 'illuminance', label: '光照', color: '#FF8C00', icon: ICONS.illuminance },
+  noise: { type: 'noise', label: '\u566a\u58f0', color: '#D946EF', icon: ICONS.noise },
+  illuminance: { type: 'illuminance', label: '\u5149\u7167', color: '#FF8C00', icon: ICONS.illuminance },
   water_consumption: {
     type: 'water_consumption',
-    label: '用水量',
+    label: '\u7528\u6c34\u91cf',
     color: '#00FFFF',
     icon: ICONS.water_consumption,
   },
-  default: { type: 'default', label: '默认传感器', color: '#FFFFFF', icon: ICONS.default },
+  default: { type: 'default', label: '\u9ed8\u8ba4\u4f20\u611f\u5668', color: '#FFFFFF', icon: ICONS.default },
 };
 
 const BUILT_IN_SENSOR_TYPES = new Set(Object.keys(SENSOR_POINT_STYLE_REGISTRY));
@@ -121,8 +121,6 @@ const BUILT_IN_SENSOR_TYPES = new Set(Object.keys(SENSOR_POINT_STYLE_REGISTRY));
 const ONLINE_ICON_COLOR = '#111827';
 const OFFLINE_BODY_COLOR = '#94A3B8';
 const OFFLINE_ICON_COLOR = '#475569';
-const OFFLINE_RING_COLOR = '#94A3B8';
-const ONLINE_RING_COLOR = '#FFFFFF';
 
 export function normalizeSensorType(value: unknown): BuiltInSensorType {
   const normalized = String(value || '')
@@ -155,9 +153,6 @@ export function buildSensorPointBillboard(style: ResolvedSensorPointStyle, onlin
   const iconColor = online
     ? style.override?.iconColor || ONLINE_ICON_COLOR
     : style.override?.offlineIconColor || OFFLINE_ICON_COLOR;
-  const ringColor = online
-    ? style.override?.ringColor || ONLINE_RING_COLOR
-    : style.override?.offlineRingColor || OFFLINE_RING_COLOR;
   const iconPaths = buildIconPaths(style.icon, iconColor);
 
   return svgDataUrl(`
@@ -168,8 +163,8 @@ export function buildSensorPointBillboard(style: ResolvedSensorPointStyle, onlin
         </filter>
       </defs>
       <g filter="url(#shadow)">
-        <circle cx="32" cy="32" r="25" fill="${bodyColor}" stroke="${ringColor}" stroke-width="3"/>
-        <circle cx="32" cy="32" r="21" fill="${bodyColor}" stroke="rgba(15,23,42,0.16)" stroke-width="0.6"/>
+        <circle cx="32" cy="32" r="25" fill="${bodyColor}"/>
+        <circle cx="32" cy="32" r="21" fill="${bodyColor}"/>
       </g>
       <svg x="15" y="15" width="34" height="34" viewBox="${style.icon.viewBox}">
         ${iconPaths}
