@@ -103,6 +103,22 @@
     }
     return String(value).trim();
   }
+  function inferSensorTypeFromName(value: unknown) {
+    const name = toSensorStyleText(value);
+    const match = name.match(/^sim-sensor-(\d{3})$/i);
+    if (!match) return '';
+
+    const index = Number(match[1]);
+    if (index >= 1 && index <= 10) return 'temperature';
+    if (index >= 11 && index <= 20) return 'humidity';
+    if (index >= 21 && index <= 50) return 'electricity_consumption';
+    if (index >= 51 && index <= 60) return 'noise';
+    if (index >= 61 && index <= 70) return 'illuminance';
+    if (index >= 71 && index <= 90) return 'water_consumption';
+    if (index >= 91 && index <= 100) return 'default';
+    return '';
+  }
+
   function getSensorDeviceType(point: SensorMapPoint) {
     const candidates = [
       point.sensorType,
@@ -118,7 +134,8 @@
       const value = toSensorStyleText(candidate);
       if (value) return value;
     }
-    return '';
+
+    return inferSensorTypeFromName(point.entityName) || inferSensorTypeFromName(point.name);
   }
 
   function buildSensorBillboard(point: SensorMapPoint) {
