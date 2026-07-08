@@ -1,6 +1,13 @@
-import { getAttributes, getLatestTimeseries, type TsKvEntity, type kvEntity } from '/@/api/tb/telemetry';
+import {
+  getAttributes,
+  getLatestTimeseries,
+  saveEntityAttributesV2,
+  type TsKvEntity,
+  type kvEntity,
+} from '/@/api/tb/telemetry';
 import { getDeviceById, getDeviceInfoById, saveDevice, type DeviceInfo } from '/@/api/tb/device';
 import { EntityType } from '/@/enums/entityTypeEnum';
+import { Scope } from '/@/enums/telemetryEnum';
 import type { CameraMapPoint, MapPoint, SensorMapPoint } from '../types/mapPointTypes';
 
 export type DeviceNodeKind = 'sensor' | 'camera';
@@ -203,6 +210,7 @@ function toMapPoint(device: DeviceInfo, state: LoadedDeviceState): MapPoint | nu
     ...base,
     type: 'sensor',
     color: status.online ? 'blue' : 'gray',
+    sensorType: String(device.type || '').trim(),
     description: device.deviceProfileName || device.type || '',
     datasource: {
       entityType: 'DEVICE',
@@ -328,6 +336,28 @@ export async function applyDeviceInfoMapPointLocations(
   });
 }
 
+function buildLocationAttributes(point: Pick<MapPoint, 'longitude' | 'latitude' | 'height'>) {
+  const height = point.height ?? 0;
+  return {
+    lon: point.longitude,
+    lng: point.longitude,
+    longitude: point.longitude,
+    lat: point.latitude,
+    latitude: point.latitude,
+    alt: height,
+    altitude: height,
+    height,
+  };
+}
+
+async function saveDeviceServerLocationAttributes(point: MapPoint) {
+  await saveEntityAttributesV2(
+    { entityType: EntityType.DEVICE, id: point.entityId } as any,
+    Scope.SERVER_SCOPE,
+    buildLocationAttributes(point),
+  );
+}
+
 function sameLocation(
   additionalInfo: DeviceInfo['additionalInfo'] | undefined,
   point: Pick<MapPoint, 'longitude' | 'latitude' | 'height'>,
@@ -347,17 +377,23 @@ export async function saveDeviceMapPointLocations(points: MapPoint[], concurrenc
 
   await mapWithConcurrency(devicePoints, concurrency, async (point) => {
     const device = await getDeviceById(point.entityId);
-    if (sameLocation(device.additionalInfo, point)) return;
+    if (!sameLocation(device.additionalInfo, point)) {
+      await saveDevice({
+        ...device,
+        additionalInfo: {
+          ...(device.additionalInfo || {}),
+          longitude: point.longitude,
+          latitude: point.latitude,
+          altitude: point.height ?? 0,
+        },
+      });
+    }
 
-    await saveDevice({
-      ...device,
-      additionalInfo: {
-        ...(device.additionalInfo || {}),
-        longitude: point.longitude,
-        latitude: point.latitude,
-        altitude: point.height ?? 0,
-      },
-    });
+    try {
+      await saveDeviceServerLocationAttributes(point);
+    } catch (error) {
+      console.warn('[deviceMapPointService] Failed to sync device location attributes:', point.entityId, error);
+    }
   });
 }
 

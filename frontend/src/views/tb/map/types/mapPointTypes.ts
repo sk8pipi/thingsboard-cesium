@@ -42,6 +42,15 @@ export interface SensorDatasourceKey {
 
 export interface SensorMapPoint extends BaseMapPoint {
   type: 'sensor';
+  sensorType?: string;
+  sensorStyleOverride?: {
+    color?: string;
+    iconColor?: string;
+    offlineColor?: string;
+    offlineIconColor?: string;
+    ringColor?: string;
+    offlineRingColor?: string;
+  };
   datasource?: {
     entityType: MapPointEntityType;
     entityId: string;

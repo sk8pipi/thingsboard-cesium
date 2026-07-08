@@ -8,6 +8,7 @@
       :fly-to-first-camera="!isSysAdminMap"
       :globe-only="mapGlobeOnly"
       :scene-models="sceneModels"
+      :enable-sensor-type-styles="isCustomerUserMap"
       @sensor-click="onSensorClick"
       @camera-click="onCameraClick"
     />
@@ -235,12 +236,39 @@
     return online ? '\u5728\u7ebf' : '\u79bb\u7ebf';
   }
 
+  function toRuntimeText(value: unknown): string {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'string') {
+      const optionalMatch = value.match(/^Optional\[(.*)\]$/);
+      return (optionalMatch ? optionalMatch[1] : value).trim();
+    }
+    if (typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      return toRuntimeText(record.value ?? record.data ?? record.rawValue ?? record.name ?? '');
+    }
+    return String(value).trim();
+  }
   function mergeRuntimeIntoPoint(point: MapPoint, runtime?: Record<string, unknown>): MapPoint {
     if (!runtime) return point;
 
     const online = toRuntimeBoolean(runtime.online ?? runtime.status ?? runtime.active);
     const streamOnline = online === false ? false : toRuntimeBoolean(runtime.streamOnline ?? runtime.streamAlive);
     const statusText = normalizeRuntimeStatusText(runtime.statusText, online) || point.statusText;
+    const runtimeSensorType =
+      toRuntimeText(runtime.sensorType) ||
+      toRuntimeText(runtime.deviceType) ||
+      toRuntimeText(runtime.deviceProfileName) ||
+      toRuntimeText(runtime.deviceProfile) ||
+      toRuntimeText(runtime.profileName) ||
+      toRuntimeText(runtime.tbDeviceType) ||
+      toRuntimeText(runtime.type);
+    const pointSensorType =
+      point.type === 'sensor'
+        ? toRuntimeText((point as SensorMapPoint).sensorType) ||
+          toRuntimeText((point as any).deviceType) ||
+          toRuntimeText(point.description)
+        : '';
+    const sensorType = point.type === 'sensor' ? runtimeSensorType || pointSensorType || undefined : undefined;
     const color =
       online === undefined ? (point as any).color : online ? (point.type === 'camera' ? 'green' : 'blue') : 'gray';
 
@@ -250,6 +278,10 @@
       id: point.id,
       type: point.type,
       name: point.name,
+      longitude: point.longitude,
+      latitude: point.latitude,
+      height: point.height,
+      locationSource: point.locationSource,
       entityType: point.entityType,
       entityId: point.entityId,
       entityName: point.entityName,
@@ -258,7 +290,8 @@
       streamAlive: online === false ? false : ((runtime as any).streamAlive ?? (point as any).streamAlive),
       statusText,
       color,
-    } as MapPoint;
+      sensorType,
+    } as unknown as MapPoint;
   }
 
   function mergeRuntimeIntoTemplateState(
@@ -553,7 +586,7 @@
         entityName: camera.entityName,
         error,
       });
-      cameraRuntimeError.value = '读取摄像头设备信息失败';
+      cameraRuntimeError.value = '\u8bfb\u53d6\u6444\u50cf\u5934\u8bbe\u5907\u4fe1\u606f\u5931\u8d25';
       selectedCameraRuntime.value = {
         entityId: camera.entityId,
         entityName: camera.entityName || camera.name,

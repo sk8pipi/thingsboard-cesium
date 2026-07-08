@@ -24,6 +24,15 @@ export interface TsData extends Recordable {
 
 export type TsKvEntity = Record<string, { data: Array<TsData>; property?: Function }>;
 
+function telemetryParams(params: Record<string, unknown>) {
+  return Object.entries(params).reduce<Record<string, unknown>>((result, [key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      result[key] = value;
+    }
+    return result;
+  }, {});
+}
+
 export interface TelemetryQuery extends Recordable {
   entityType: EntityType;
   entityId: string;
@@ -68,7 +77,7 @@ export function getTimeseriesKeys(entityId: EntityId<any>) {
 export function getAttributes(entityId: EntityId<any>, keys?: string) {
   return defHttp.get<Array<kvEntity>>({
     url: `/api/plugins/telemetry/${entityId.entityType}/${entityId.id}/values/attributes`,
-    params: { keys: keys },
+    params: telemetryParams({ keys }),
   });
 }
 
@@ -83,7 +92,7 @@ export function getLatestTimeseries(entityId: EntityId<any>, keys?: string, useS
   //useStrictDataTypes  数值转换为字符串
   return defHttp.get<TsKvEntity>({
     url: `/api/plugins/telemetry/${entityId.entityType}/${entityId.id}/values/timeseries`,
-    params: { keys: keys, useStrictDataTypes: useStrictDataTypes },
+    params: telemetryParams({ keys, useStrictDataTypes }),
   });
 }
 
@@ -108,7 +117,11 @@ export function deleteEntityAttributes(entityId: EntityId<any>, scope: Scope, ke
   });
 }
 
-export function saveDeviceAttributes(deviceId: string, scope: Scope.SERVER_SCOPE | Scope.SHARED_SCOPE, data: any) {
+export function saveDeviceAttributes(
+  deviceId: string,
+  scope: Scope.CLIENT_SCOPE | Scope.SERVER_SCOPE | Scope.SHARED_SCOPE,
+  data: any,
+) {
   return defHttp.postJson<void>({
     url: `/api/plugins/telemetry/${deviceId}/${scope}`,
     data,
@@ -117,7 +130,7 @@ export function saveDeviceAttributes(deviceId: string, scope: Scope.SERVER_SCOPE
 
 export function saveEntityAttributesV1(
   entityId: EntityId<any>,
-  scope: Scope.SERVER_SCOPE | Scope.SHARED_SCOPE,
+  scope: Scope.CLIENT_SCOPE | Scope.SERVER_SCOPE | Scope.SHARED_SCOPE,
   data: any,
 ) {
   return defHttp.postJson<void>({
@@ -127,7 +140,7 @@ export function saveEntityAttributesV1(
 }
 export function saveEntityAttributesV2(
   entityId: EntityId<any>,
-  scope: Scope.SERVER_SCOPE | Scope.SHARED_SCOPE,
+  scope: Scope.CLIENT_SCOPE | Scope.SERVER_SCOPE | Scope.SHARED_SCOPE,
   data: any,
 ) {
   return defHttp.postJson<void>({

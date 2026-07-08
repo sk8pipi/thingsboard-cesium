@@ -54,6 +54,15 @@ function normalizeMapPoint(point: unknown): MapPoint | null {
       ...basePoint,
       type: 'sensor',
       color: rawPoint.color ? String(rawPoint.color) : undefined,
+      sensorType: rawPoint.sensorType
+        ? String(rawPoint.sensorType)
+        : rawPoint.deviceType
+          ? String(rawPoint.deviceType)
+          : undefined,
+      sensorStyleOverride:
+        rawPoint.sensorStyleOverride && typeof rawPoint.sensorStyleOverride === 'object'
+          ? (rawPoint.sensorStyleOverride as SensorMapPoint['sensorStyleOverride'])
+          : undefined,
       description: rawPoint.description ? String(rawPoint.description) : undefined,
       popupWidgetIds: Array.isArray(rawPoint.popupWidgetIds) ? rawPoint.popupWidgetIds.map(String) : undefined,
       datasource: {

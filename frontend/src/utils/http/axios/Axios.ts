@@ -4,7 +4,7 @@ import type { CreateAxiosOptions } from './axiosTransform';
 import axios from 'axios';
 import qs from 'qs';
 import { AxiosCanceler } from './axiosCancel';
-import { isFunction } from '/@/utils/is';
+import { isEmpty, isFunction } from '/@/utils/is';
 import { cloneDeep, omit } from 'lodash-es';
 import { ContentTypeEnum } from '/@/enums/httpEnum';
 import { RequestEnum } from '/@/enums/httpEnum';
@@ -158,7 +158,7 @@ export class VAxios {
       !Reflect.has(config, 'data') ||
       config.method?.toUpperCase() === RequestEnum.GET
     ) {
-      if (config.url && config.params) {
+      if (config.url && config.params && !isEmpty(config.params)) {
         let url = config.url;
         url += url.indexOf('?') == -1 ? '?' : '&';
         url += qs.stringify(config.params, { encode: true });

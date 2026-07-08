@@ -175,11 +175,17 @@
     try {
       const data = await validate();
       setModalProps({ confirmLoading: true });
-
-      // console.log('submit', params, data, record);
-      const res = await saveUser({ ...data, id: record.value.id }, data.sendActivationMail);
+      const { sendActivationMail, additionalInfo, ...userData } = data;
+      const res = await saveUser(
+        {
+          ...record.value,
+          ...userData,
+          additionalInfo: { ...(record.value.additionalInfo || {}), ...(additionalInfo || {}) },
+        },
+        sendActivationMail,
+      );
       showMessage(record.value.id?.id ? t('tb.user.admin.action.editSuccess') : t('tb.user.admin.action.addSuccess'));
-      if (!record.value.id?.id && data.sendActivationMail == 'false') {
+      if (!record.value.id?.id && sendActivationMail == 'false') {
         const activationLink = await getProxyActivationLink(res.id.id);
         createConfirm({
           iconType: 'success',
@@ -194,7 +200,7 @@
         });
       }
       setTimeout(closeModal);
-      emit('success', data);
+      emit('success', res);
     } catch (error: any) {
       if (error && error.errorFields) {
         showMessage(t('common.validateError'));

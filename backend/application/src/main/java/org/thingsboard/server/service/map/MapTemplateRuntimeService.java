@@ -49,6 +49,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -71,7 +72,8 @@ public class MapTemplateRuntimeService {
             "webRtcUrl", "rtspUrl", "flvUrl", "streamType", "supportsLive", "supportsPlayback", "supportsPtz",
             "supportsZoom", "supportsPreset", "supportsAudio", "controlMode", "supportedRpcMethods",
             "rpcTargetDeviceId", "controlDeviceId", "gatewayDeviceId", "rpcTargetCameraId", "rpcDeviceName",
-            "rpcGatewayMethod", "rpcTopic", "rpcPayloadMode", "rpcTargetMode", "rpcCallType", "rpcTimeout"
+            "rpcGatewayMethod", "rpcTopic", "rpcPayloadMode", "rpcTargetMode", "rpcCallType", "rpcTimeout",
+            "lat", "lon", "lng", "latitude", "longitude", "height", "alt", "altitude", "sensorModel", "deviceType"
     );
     private static final Set<String> BASE_TELEMETRY_KEYS = Set.of(
             "online", "active", "status", "lastActivityTime", "streamOnline", "streamAlive", "fps", "bitrate",
@@ -257,8 +259,8 @@ public class MapTemplateRuntimeService {
 
         JsonNode deviceAdditionalInfo = putDeviceInfo(values, tenantId, deviceId);
         putAttributes(values, tenantId, deviceId, request.getAttributeKeys());
-        putTimeseries(values, tenantId, deviceId, request.getTelemetryKeys());
         putDeviceLocation(values, deviceAdditionalInfo);
+        putTimeseries(values, tenantId, deviceId, request.getTelemetryKeys());
         applyDerivedStatus(values);
         return values;
     }
@@ -270,6 +272,12 @@ public class MapTemplateRuntimeService {
                 values.put("deviceActive", deviceInfo.isActive());
                 values.put("active", deviceInfo.isActive());
                 values.put("entityName", deviceInfo.getName());
+                if (deviceInfo.getType() != null) {
+                    values.put("tbDeviceType", deviceInfo.getType());
+                }
+                if (deviceInfo.getDeviceProfileName() != null) {
+                    values.put("deviceProfileName", deviceInfo.getDeviceProfileName());
+                }
                 return deviceInfo.getAdditionalInfo();
             }
         } catch (Exception e) {
@@ -279,13 +287,17 @@ public class MapTemplateRuntimeService {
     }
 
     private void putDeviceLocation(Map<String, Object> values, JsonNode additionalInfo) {
-        if (additionalInfo == null || !additionalInfo.isObject()) {
-            return;
+        Double longitude = firstNumber(values, List.of("longitude", "lon", "lng"));
+        Double latitude = firstNumber(values, List.of("latitude", "lat"));
+        Double height = firstNumber(values, List.of("altitude", "height", "alt"));
+        String source = longitude != null && latitude != null ? "attribute" : "deviceInfo";
+
+        if ((longitude == null || latitude == null) && additionalInfo != null && additionalInfo.isObject()) {
+            longitude = firstNumber(additionalInfo, List.of("longitude", "lon", "lng"));
+            latitude = firstNumber(additionalInfo, List.of("latitude", "lat"));
+            height = firstNumber(additionalInfo, List.of("altitude", "height", "alt"));
         }
 
-        Double longitude = firstNumber(additionalInfo, List.of("longitude", "lon", "lng"));
-        Double latitude = firstNumber(additionalInfo, List.of("latitude", "lat"));
-        Double height = firstNumber(additionalInfo, List.of("altitude", "height", "alt"));
         if (longitude == null || latitude == null ||
                 Math.abs(longitude) > 180D || Math.abs(latitude) > 90D) {
             return;
@@ -296,9 +308,26 @@ public class MapTemplateRuntimeService {
         if (height != null) {
             values.put("height", height);
         }
-        values.put("mapLocationSource", "deviceInfo");
+        values.put("mapLocationSource", source);
     }
 
+    private Double firstNumber(Map<String, Object> source, List<String> keys) {
+        for (String key : keys) {
+            Object value = source.get(key);
+            if (value == null || String.valueOf(value).isBlank()) {
+                continue;
+            }
+            try {
+                double number = value instanceof Number numberValue ? numberValue.doubleValue() : Double.parseDouble(String.valueOf(value));
+                if (Double.isFinite(number)) {
+                    return number;
+                }
+            } catch (NumberFormatException ignored) {
+                // Try the next supported location alias.
+            }
+        }
+        return null;
+    }
     private Double firstNumber(JsonNode source, List<String> keys) {
         for (String key : keys) {
             JsonNode value = source.get(key);
@@ -364,9 +393,20 @@ public class MapTemplateRuntimeService {
 
         for (KvEntry entry : entries) {
             if (entry != null && entry.getKey() != null) {
-                values.put(entry.getKey(), entry.getValue());
+                Object value = unwrapKvValue(entry.getValue());
+                values.put(entry.getKey(), value);
+                if ("deviceType".equals(entry.getKey())) {
+                    values.put("sensorType", value);
+                }
             }
         }
+    }
+
+    private Object unwrapKvValue(Object value) {
+        if (value instanceof Optional<?> optionalValue) {
+            return optionalValue.orElse(null);
+        }
+        return value;
     }
 
     private void applyDerivedStatus(Map<String, Object> values) {
@@ -484,3 +524,6 @@ public class MapTemplateRuntimeService {
     }
 
 }
+
+
+

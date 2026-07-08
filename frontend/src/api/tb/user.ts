@@ -11,10 +11,16 @@ export function getUserById(userId: string) {
   });
 }
 
-export function saveUser(data: UserInfo | any, sendActivationMail = false) {
+function toBooleanParam(value: unknown, defaultValue = false) {
+  if (value === undefined || value === null || value === '') return defaultValue;
+  if (typeof value === 'boolean') return value;
+  return String(value).toLowerCase() === 'true';
+}
+
+export function saveUser(data: UserInfo | any, sendActivationMail: unknown = false) {
   return defHttp.postJson<UserInfo>({
     url: '/api/user',
-    params: { sendActivationMail: sendActivationMail },
+    params: { sendActivationMail: toBooleanParam(sendActivationMail) },
     data,
   });
 }

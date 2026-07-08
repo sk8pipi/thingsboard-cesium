@@ -446,6 +446,7 @@
   const editorMode = ref<MapEditorMode>('view');
   const addPanelVisible = ref(false);
   const errorMsg = ref('');
+  const isSavingEdit = ref(false);
   const dragHint = ref('');
   let dragHintTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -810,31 +811,11 @@
     originalMapPoints.value = await applyDeviceInfoMapPointLocations(originalMapPoints.value);
     draftMapPoints.value = cloneJson(originalMapPoints.value);
   }
-  function applyDeviceInfoLocations(points: MapPoint[], devices: MapTemplateRuntimeDevices) {
-    return points.map((point) => {
-      const runtime = devices[point.entityId];
-      if (runtime?.mapLocationSource !== 'deviceInfo') return point;
-
-      const longitude = Number(runtime.longitude);
-      const latitude = Number(runtime.latitude);
-      const height = Number(runtime.height);
-      if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return point;
-
-      return {
-        ...point,
-        longitude,
-        latitude,
-        height: Number.isFinite(height) ? height : point.height,
-        locationSource: 'deviceInfo',
-      } as MapPoint;
-    });
-  }
 
   function applyTemplateRuntimeDevices(devices?: MapTemplateRuntimeDevices | null) {
     templateRuntimeDevices.value = devices || {};
     datasourceRuntime.refreshExternalValues();
     if (isDashboardTemplateMode.value && editorMode.value === 'view') {
-      originalMapPoints.value = applyDeviceInfoLocations(originalMapPoints.value, templateRuntimeDevices.value);
       draftMapPoints.value = cloneJson(originalMapPoints.value);
     }
   }
@@ -1255,6 +1236,26 @@
     }
   }
 
+  function samePointLocation(a?: MapPoint | null, b?: MapPoint | null) {
+    if (!a || !b) return false;
+    return a.longitude === b.longitude && a.latitude === b.latitude && (a.height ?? 0) === (b.height ?? 0);
+  }
+
+  function getChangedDeviceLocationPoints(points: MapPoint[]) {
+    const originalById = new Map(originalMapPoints.value.map((point) => [point.id, point]));
+    const originalByEntityId = new Map(
+      originalMapPoints.value
+        .filter((point) => point.entityType === 'DEVICE' && point.entityId)
+        .map((point) => [point.entityId, point]),
+    );
+
+    return points.filter((point) => {
+      if (point.entityType !== 'DEVICE' || !point.entityId) return false;
+      const original = originalById.get(point.id) || originalByEntityId.get(point.entityId);
+      return !samePointLocation(original, point);
+    });
+  }
+
   function showDragHint(point: MapPoint) {
     const longitude = formatCoordinate(point.longitude);
     const latitude = formatCoordinate(point.latitude);
@@ -1558,7 +1559,7 @@
   }
 
   async function saveEdit() {
-    if (!grid || !canSaveEdit.value) return;
+    if (!grid || !canSaveEdit.value || isSavingEdit.value) return;
     if (!canEditTemplate.value) return;
 
     const duplicateBindings = findDuplicateDeviceBindings(draftMapPoints.value);
@@ -1572,12 +1573,18 @@
     errorMsg.value = '';
     syncLayoutFromGrid();
     const state = getEditorState();
+    const changedDeviceLocationPoints = getChangedDeviceLocationPoints(state.mapPoints);
+    isSavingEdit.value = true;
     try {
-      await saveDeviceMapPointLocations(state.mapPoints);
+      if (changedDeviceLocationPoints.length) {
+        await saveDeviceMapPointLocations(changedDeviceLocationPoints);
+      }
       await persistEditorState(state);
     } catch (error: any) {
       errorMsg.value = error?.message || '点位保存失败，请检查设备位置信息后重试';
       return;
+    } finally {
+      isSavingEdit.value = false;
     }
 
     originalMapPoints.value = cloneJson(state.mapPoints);

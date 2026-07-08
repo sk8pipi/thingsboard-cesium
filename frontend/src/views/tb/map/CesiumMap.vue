@@ -8,6 +8,7 @@
   import type { CameraMapPoint, MapPointLocation, SensorMapPoint } from './types/mapPointTypes';
   import { BASE_MODEL_ASSET_ID, BASE_MODEL_CENTER, MODEL_AUTO_FLY_VIEW } from './mapSceneConfig';
   import type { MapSceneModel } from './mapTemplateConfig';
+  import { buildSensorPointBillboard, resolveSensorPointStyle } from './services/sensorPointStyleService';
 
   type MapInteractionMode = 'default' | 'pickPoint';
 
@@ -21,6 +22,7 @@
       hideBasePoints?: boolean;
       globeOnly?: boolean;
       sceneModels?: MapSceneModel[];
+      enableSensorTypeStyles?: boolean;
     }>(),
     {
       sensorPoints: () => [],
@@ -31,6 +33,7 @@
       hideBasePoints: false,
       globeOnly: false,
       sceneModels: () => [],
+      enableSensorTypeStyles: false,
     },
   );
 
@@ -86,6 +89,55 @@
         </svg>
       `)
     );
+  }
+
+  function toSensorStyleText(value: unknown): string {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'string') {
+      const optionalMatch = value.match(/^Optional\[(.*)\]$/);
+      return (optionalMatch ? optionalMatch[1] : value).trim();
+    }
+    if (typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      return toSensorStyleText(record.value ?? record.data ?? record.rawValue ?? record.name ?? '');
+    }
+    return String(value).trim();
+  }
+  function getSensorDeviceType(point: SensorMapPoint) {
+    const candidates = [
+      point.sensorType,
+      (point as any).deviceType,
+      (point as any).sensorType,
+      (point as any).deviceProfileName,
+      (point as any).deviceProfile,
+      (point as any).profileName,
+      point.description,
+    ];
+
+    for (const candidate of candidates) {
+      const value = toSensorStyleText(candidate);
+      if (value) return value;
+    }
+    return '';
+  }
+
+  function buildSensorBillboard(point: SensorMapPoint) {
+    if (!props.enableSensorTypeStyles) {
+      return buildCircleBillboard(getSensorColor(point));
+    }
+
+    const style = resolveSensorPointStyle({
+      deviceType: getSensorDeviceType(point),
+      pointId: point.id,
+      deviceId: point.entityId,
+      override: point.sensorStyleOverride,
+    });
+
+    return buildSensorPointBillboard(style, !isOfflinePoint(point));
+  }
+
+  function getSensorBillboardSize() {
+    return props.enableSensorTypeStyles ? 38 : 20;
   }
 
   function getCameraColor(point: CameraMapPoint) {
@@ -384,9 +436,9 @@
         name: point.name,
         position: positions[index],
         billboard: {
-          image: buildCircleBillboard(getSensorColor(point)),
-          width: 20,
-          height: 20,
+          image: buildSensorBillboard(point),
+          width: getSensorBillboardSize(),
+          height: getSensorBillboardSize(),
           verticalOrigin: Cesium.VerticalOrigin.CENTER,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
@@ -416,6 +468,8 @@
           statusText: point.statusText || '',
           source: point.source || 'manual',
           color: point.color || '',
+          sensorType: getSensorDeviceType(point),
+          sensorStyleOverride: point.sensorStyleOverride ? JSON.stringify(point.sensorStyleOverride) : '',
           description: point.description || '',
           datasource: JSON.stringify(point.datasource || {}),
         },
@@ -496,6 +550,7 @@
 
   function toSensorPayload(entity: Cesium.Entity): SensorMapPoint {
     const datasource = parseDatasource(entity.properties?.datasource?.getValue?.());
+    const sensorStyleOverride = parseDatasource(entity.properties?.sensorStyleOverride?.getValue?.());
     const timestamp = Date.now();
 
     return {
@@ -515,6 +570,11 @@
       createdAt: timestamp,
       updatedAt: timestamp,
       color: String(entity.properties?.color?.getValue?.() ?? ''),
+      sensorType: String(entity.properties?.sensorType?.getValue?.() ?? ''),
+      sensorStyleOverride:
+        sensorStyleOverride && typeof sensorStyleOverride === 'object'
+          ? (sensorStyleOverride as SensorMapPoint['sensorStyleOverride'])
+          : undefined,
       description: String(entity.properties?.description?.getValue?.() ?? ''),
       datasource: {
         entityType: String(datasource?.entityType || 'DEVICE') as NonNullable<
