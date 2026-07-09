@@ -30,29 +30,19 @@
       @ok="onCameraPointConfigured"
     />
 
-    <CesiumMap
-      ref="cesiumMapRef"
-      class="mw-cesium"
-      :sensor-points="sensorPoints"
-      :camera-points="cameraPoints"
-      :mode="cesiumInteractionMode"
-      :hide-base-points="editorMode === 'pickingPoint'"
-      :globe-only="templateGlobeOnly"
-      :scene-models="templateScene.models"
-      :enable-sensor-type-styles="true"
-      :sensor-type-styles-ignore-offline="true"
-      :camera-styles-ignore-offline="true"
-      @sensor-click="onSensorClick"
-      @camera-click="onCameraClick"
-      @map-click="onMapPicked"
-    />
-
-    <div class="mw-topbar">
-      <div class="mw-topbar-left">
+    <div class="mw-editbar">
+      <div class="mw-editbar-left">
         <button class="mw-btn" type="button" @click="onExit">退出</button>
       </div>
 
-      <div class="mw-topbar-right">
+      <div class="mw-editbar-center">
+        <div class="mw-editbar-title">地图部件编辑</div>
+        <div class="mw-editbar-mode">
+          {{ editorMode === 'view' ? '查看模式' : editorMode === 'pickingPoint' ? '选点模式' : '编辑模式' }}
+        </div>
+      </div>
+
+      <div class="mw-editbar-right">
         <button v-if="canEditTemplate && editorMode === 'view'" class="mw-btn primary" type="button" @click="enterEdit">
           编辑
         </button>
@@ -85,224 +75,250 @@
       </div>
     </div>
 
-    <div v-if="editorMode === 'pickingPoint'" class="mw-mode-banner">
-      <div class="mw-mode-banner__text">请在地图上点击选择点位，也可以拖动已有点位调整位置</div>
-      <button class="mw-btn" type="button" @click="cancelPickingPoint">取消选点</button>
-    </div>
+    <div class="mw-stage">
+      <CesiumMap
+        ref="cesiumMapRef"
+        class="mw-cesium"
+        :sensor-points="sensorPoints"
+        :camera-points="cameraPoints"
+        :mode="cesiumInteractionMode"
+        :hide-base-points="editorMode === 'pickingPoint'"
+        :globe-only="templateGlobeOnly"
+        :scene-models="templateScene.models"
+        :enable-sensor-type-styles="true"
+        :sensor-type-styles-ignore-offline="true"
+        :camera-styles-ignore-offline="true"
+        @sensor-click="onSensorClick"
+        @camera-click="onCameraClick"
+        @map-click="onMapPicked"
+      />
 
-    <div v-if="editorMode === 'editing' && appearancePanelVisible" class="mw-appearance-panel">
-      <div class="mw-appearance-panel__header">
-        <strong>部件玻璃外观</strong>
-        <span>普通部件与点位详情同步</span>
+      <div v-if="editorMode === 'pickingPoint'" class="mw-mode-banner">
+        <div class="mw-mode-banner__text">请在地图上点击选择点位，也可以拖动已有点位调整位置</div>
+        <button class="mw-btn" type="button" @click="cancelPickingPoint">取消选点</button>
       </div>
 
-      <label class="mw-appearance-control">
-        <span>透明度</span>
-        <input v-model.number="templateBackgroundTransparency" type="range" min="0" max="100" step="1" />
-        <output>{{ templateBackgroundTransparency }}%</output>
-      </label>
+      <div v-if="editorMode === 'editing' && appearancePanelVisible" class="mw-appearance-panel">
+        <div class="mw-appearance-panel__header">
+          <strong>部件玻璃外观</strong>
+          <span>普通部件与点位详情同步</span>
+        </div>
 
-      <label class="mw-appearance-control">
-        <span>模糊度</span>
-        <input v-model.number="templateAppearance.blurPx" type="range" min="0" max="40" step="1" />
-        <output>{{ templateAppearance.blurPx || 0 }}px</output>
-      </label>
-    </div>
-
-    <div v-if="aggregateConfigVisible" class="mw-dialog-mask" @click.self="cancelAggregateWidgetConfig">
-      <div class="mw-dialog-card mw-aggregate-dialog">
-        <div class="mw-dialog-title">配置{{ pendingWidgetTitle }}</div>
-        <div class="mw-dialog-sub">该 Key 将在模板全部设备中进行聚合，未包含此 Key 的设备会自动忽略。</div>
-
-        <label class="mw-aggregate-field">
-          <span>搜索模板 Key</span>
-          <input v-model.trim="aggregateKeySearch" type="search" placeholder="输入 Key 名称筛选" />
+        <label class="mw-appearance-control">
+          <span>透明度</span>
+          <input v-model.number="templateBackgroundTransparency" type="range" min="0" max="100" step="1" />
+          <output>{{ templateBackgroundTransparency }}%</output>
         </label>
 
-        <div v-if="aggregateKeysLoading" class="mw-aggregate-key-state">正在读取模板全部设备的 timeseries keys...</div>
-        <div v-else-if="aggregateKeysError && !aggregateAvailableKeys.length" class="mw-aggregate-key-state is-error">
-          {{ aggregateKeysError }}
-        </div>
-        <div v-else class="mw-aggregate-key-picker">
-          <div class="mw-aggregate-key-picker__title">
-            <span>模板已有 Keys（{{ aggregateAvailableKeys.length }}）</span>
-            <span>已选：{{ aggregateKey || '未选择' }}</span>
+        <label class="mw-appearance-control">
+          <span>模糊度</span>
+          <input v-model.number="templateAppearance.blurPx" type="range" min="0" max="40" step="1" />
+          <output>{{ templateAppearance.blurPx || 0 }}px</output>
+        </label>
+      </div>
+
+      <div v-if="aggregateConfigVisible" class="mw-dialog-mask" @click.self="cancelAggregateWidgetConfig">
+        <div class="mw-dialog-card mw-aggregate-dialog">
+          <div class="mw-dialog-title">配置{{ pendingWidgetTitle }}</div>
+          <div class="mw-dialog-sub">该 Key 将在模板全部设备中进行聚合，未包含此 Key 的设备会自动忽略。</div>
+
+          <label class="mw-aggregate-field">
+            <span>搜索模板 Key</span>
+            <input v-model.trim="aggregateKeySearch" type="search" placeholder="输入 Key 名称筛选" />
+          </label>
+
+          <div v-if="aggregateKeysLoading" class="mw-aggregate-key-state"
+            >正在读取模板全部设备的 timeseries keys...</div
+          >
+          <div v-else-if="aggregateKeysError && !aggregateAvailableKeys.length" class="mw-aggregate-key-state is-error">
+            {{ aggregateKeysError }}
           </div>
-          <div v-if="filteredAggregateKeys.length" class="mw-aggregate-key-list">
+          <div v-else class="mw-aggregate-key-picker">
+            <div class="mw-aggregate-key-picker__title">
+              <span>模板已有 Keys（{{ aggregateAvailableKeys.length }}）</span>
+              <span>已选：{{ aggregateKey || '未选择' }}</span>
+            </div>
+            <div v-if="filteredAggregateKeys.length" class="mw-aggregate-key-list">
+              <button
+                v-for="key in filteredAggregateKeys"
+                :key="key"
+                class="mw-aggregate-key-chip"
+                :class="{ active: aggregateKey === key }"
+                type="button"
+                :aria-pressed="aggregateKey === key"
+                @click="aggregateKey = key"
+              >
+                {{ key }}
+              </button>
+            </div>
+            <div v-else class="mw-aggregate-key-state">没有匹配的 Key</div>
+            <div v-if="aggregateKeysError" class="mw-aggregate-key-warning">{{ aggregateKeysError }}</div>
+          </div>
+
+          <label v-if="pendingWidgetKey === 'templateKeyTrend'" class="mw-aggregate-field">
+            <span>趋势时间范围</span>
+            <select v-model.number="aggregateTimeWindowMs">
+              <option :value="900000">最近 15 分钟</option>
+              <option :value="3600000">最近 1 小时</option>
+              <option :value="21600000">最近 6 小时</option>
+              <option :value="86400000">最近 24 小时</option>
+            </select>
+          </label>
+
+          <div class="mw-dialog-actions">
+            <button class="mw-btn" type="button" @click="cancelAggregateWidgetConfig">取消</button>
             <button
-              v-for="key in filteredAggregateKeys"
-              :key="key"
-              class="mw-aggregate-key-chip"
-              :class="{ active: aggregateKey === key }"
+              class="mw-btn primary"
               type="button"
-              :aria-pressed="aggregateKey === key"
-              @click="aggregateKey = key"
+              :disabled="!aggregateKey"
+              @click="confirmAggregateWidgetConfig"
             >
-              {{ key }}
+              添加部件
             </button>
           </div>
-          <div v-else class="mw-aggregate-key-state">没有匹配的 Key</div>
-          <div v-if="aggregateKeysError" class="mw-aggregate-key-warning">{{ aggregateKeysError }}</div>
-        </div>
-
-        <label v-if="pendingWidgetKey === 'templateKeyTrend'" class="mw-aggregate-field">
-          <span>趋势时间范围</span>
-          <select v-model.number="aggregateTimeWindowMs">
-            <option :value="900000">最近 15 分钟</option>
-            <option :value="3600000">最近 1 小时</option>
-            <option :value="21600000">最近 6 小时</option>
-            <option :value="86400000">最近 24 小时</option>
-          </select>
-        </label>
-
-        <div class="mw-dialog-actions">
-          <button class="mw-btn" type="button" @click="cancelAggregateWidgetConfig">取消</button>
-          <button class="mw-btn primary" type="button" :disabled="!aggregateKey" @click="confirmAggregateWidgetConfig">
-            添加部件
-          </button>
         </div>
       </div>
-    </div>
 
-    <div v-if="pointTypeDialogVisible" class="mw-dialog-mask" @click.self="cancelPointTypeSelection">
-      <div class="mw-dialog-card">
-        <div class="mw-dialog-title">选择点位类型</div>
-        <div class="mw-dialog-sub">
-          经度 {{ formatCoordinate(pendingPointLocation?.longitude) }}，纬度
-          {{ formatCoordinate(pendingPointLocation?.latitude) }}，高度
-          {{ formatHeight(pendingPointLocation?.height) }} m
-        </div>
-        <div class="mw-dialog-actions">
-          <button class="mw-btn primary" type="button" @click="choosePointType('sensor')">传感器点位</button>
-          <button class="mw-btn primary" type="button" @click="choosePointType('camera')">监控点位</button>
-          <button class="mw-btn" type="button" @click="cancelPointTypeSelection">取消</button>
+      <div v-if="pointTypeDialogVisible" class="mw-dialog-mask" @click.self="cancelPointTypeSelection">
+        <div class="mw-dialog-card">
+          <div class="mw-dialog-title">选择点位类型</div>
+          <div class="mw-dialog-sub">
+            经度 {{ formatCoordinate(pendingPointLocation?.longitude) }}，纬度
+            {{ formatCoordinate(pendingPointLocation?.latitude) }}，高度
+            {{ formatHeight(pendingPointLocation?.height) }} m
+          </div>
+          <div class="mw-dialog-actions">
+            <button class="mw-btn primary" type="button" @click="choosePointType('sensor')">传感器点位</button>
+            <button class="mw-btn primary" type="button" @click="choosePointType('camera')">监控点位</button>
+            <button class="mw-btn" type="button" @click="cancelPointTypeSelection">取消</button>
+          </div>
         </div>
       </div>
-    </div>
 
-    <SensorPopupWidgetEditor
-      :runtime="datasourceRuntime"
-      :visible="sensorConfigVisible"
-      :sensor="selectedSensor"
-      :widgets="selectedSensor ? getSensorPopupWidgetsForEditor(selectedSensor.id) : []"
-      @changed="handleSensorPopupChanged"
-      @close="sensorConfigVisible = false"
-      @saved="handleSensorPopupSaved"
-    />
-
-    <SensorWidgetPopup
-      :runtime="datasourceRuntime"
-      :visible="sensorPreviewVisible"
-      :sensor="selectedSensor"
-      :widgets="selectedSensor ? getSensorPopupWidgetsForView(selectedSensor.id) : []"
-      :runtime-devices="templateRuntimeDevices"
-      @close="sensorPreviewVisible = false"
-    />
-
-    <CameraMonitorPopup
-      :visible="cameraPopupVisible"
-      :runtime-info="selectedCameraRuntime"
-      :loading="cameraRuntimeLoading"
-      :error="cameraRuntimeError"
-      @close="closeCameraPopup"
-    />
-
-    <div
-      v-if="editorMode === 'editing' && currentWidget && currentWidget.widgetKey === 'controlSwitch'"
-      class="mw-control-editor"
-    >
-      <ControlSwitchEditor
-        :model-value="controlSwitchSettingsModel"
-        @update:model-value="updateControlSwitchSettings"
-        @save="handleControlSwitchSettingsSave"
+      <SensorPopupWidgetEditor
+        :runtime="datasourceRuntime"
+        :visible="sensorConfigVisible"
+        :sensor="selectedSensor"
+        :widgets="selectedSensor ? getSensorPopupWidgetsForEditor(selectedSensor.id) : []"
+        @changed="handleSensorPopupChanged"
+        @close="sensorConfigVisible = false"
+        @saved="handleSensorPopupSaved"
       />
-    </div>
 
-    <div v-if="canEditTemplate && editorMode === 'editing' && addPanelVisible" class="mw-add-panel">
-      <div class="mw-add-title">选择要添加的部件</div>
+      <SensorWidgetPopup
+        :runtime="datasourceRuntime"
+        :visible="sensorPreviewVisible"
+        :sensor="selectedSensor"
+        :widgets="selectedSensor ? getSensorPopupWidgetsForView(selectedSensor.id) : []"
+        :runtime-devices="templateRuntimeDevices"
+        @close="sensorPreviewVisible = false"
+      />
 
-      <div class="mw-add-list">
-        <input
-          ref="fileInputEl"
-          type="file"
-          accept="application/json"
-          style="display: none"
-          @change="onImportFileChange"
+      <CameraMonitorPopup
+        :visible="cameraPopupVisible"
+        :runtime-info="selectedCameraRuntime"
+        :loading="cameraRuntimeLoading"
+        :error="cameraRuntimeError"
+        @close="closeCameraPopup"
+      />
+
+      <div
+        v-if="editorMode === 'editing' && currentWidget && currentWidget.widgetKey === 'controlSwitch'"
+        class="mw-control-editor"
+      >
+        <ControlSwitchEditor
+          :model-value="controlSwitchSettingsModel"
+          @update:model-value="updateControlSwitchSettings"
+          @save="handleControlSwitchSettingsSave"
         />
+      </div>
 
-        <button class="mw-widget-card mw-widget-card--import" type="button" @click="fileInputEl?.click()">
-          <div class="mw-widget-preview mw-widget-preview--import">
-            <span>JSON</span>
-          </div>
-          <div class="mw-widget-info">
-            <div class="mw-widget-name">导入 ThingsBoard 部件 JSON</div>
-            <div class="mw-widget-desc">从导出的 JSON 生成可复用部件</div>
-          </div>
-        </button>
+      <div v-if="canEditTemplate && editorMode === 'editing' && addPanelVisible" class="mw-add-panel">
+        <div class="mw-add-title">选择要添加的部件</div>
 
-        <div class="mw-lib-title">内置部件</div>
+        <div class="mw-add-list">
+          <input
+            ref="fileInputEl"
+            type="file"
+            accept="application/json"
+            style="display: none"
+            @change="onImportFileChange"
+          />
 
-        <div class="mw-widget-grid">
-          <button
-            v-for="def in builtInWidgetDefs"
-            :key="def.key"
-            class="mw-widget-card"
-            type="button"
-            @click="addWidgetByKey(def.key)"
-          >
-            <div class="mw-widget-preview">
-              <img class="mw-widget-preview-img" :src="getBuiltInPreview(def.key)" :alt="def.title" loading="lazy" />
+          <button class="mw-widget-card mw-widget-card--import" type="button" @click="fileInputEl?.click()">
+            <div class="mw-widget-preview mw-widget-preview--import">
+              <span>JSON</span>
             </div>
             <div class="mw-widget-info">
-              <div class="mw-widget-name" :title="def.title">{{ def.title }}</div>
-              <div class="mw-widget-meta">{{ getBuiltInKindLabel(def.key) }}</div>
+              <div class="mw-widget-name">导入 ThingsBoard 部件 JSON</div>
+              <div class="mw-widget-desc">从导出的 JSON 生成可复用部件</div>
             </div>
           </button>
-        </div>
 
-        <div v-if="libraryDefs.length" class="mw-lib-title">已导入部件</div>
+          <div class="mw-lib-title">内置部件</div>
 
-        <div v-if="libraryDefs.length" class="mw-widget-grid">
-          <div v-for="def in libraryDefs" :key="def.id" class="mw-widget-card-wrap">
-            <button class="mw-widget-card" type="button" @click="addFromLibrary(def)">
+          <div class="mw-widget-grid">
+            <button
+              v-for="def in builtInWidgetDefs"
+              :key="def.key"
+              class="mw-widget-card"
+              type="button"
+              @click="addWidgetByKey(def.key)"
+            >
               <div class="mw-widget-preview">
-                <img
-                  v-if="getLibraryPreview(def)"
-                  class="mw-widget-preview-img"
-                  :src="getLibraryPreview(def)"
-                  :alt="def.name"
-                  loading="lazy"
-                />
-                <div v-else class="mw-widget-preview-placeholder">{{ getLibraryKindLabel(def.kind) }}</div>
+                <img class="mw-widget-preview-img" :src="getBuiltInPreview(def.key)" :alt="def.title" loading="lazy" />
               </div>
               <div class="mw-widget-info">
-                <div class="mw-widget-name" :title="def.name">{{ def.name }}</div>
-                <div class="mw-widget-meta">{{ getLibraryKindLabel(def.kind) }}</div>
+                <div class="mw-widget-name" :title="def.title">{{ def.title }}</div>
+                <div class="mw-widget-meta">{{ getBuiltInKindLabel(def.key) }}</div>
               </div>
             </button>
-            <button class="mw-lib-del" type="button" title="删除" @click="deleteFromLibrary(def.id)">删除</button>
           </div>
+
+          <div v-if="libraryDefs.length" class="mw-lib-title">已导入部件</div>
+
+          <div v-if="libraryDefs.length" class="mw-widget-grid">
+            <div v-for="def in libraryDefs" :key="def.id" class="mw-widget-card-wrap">
+              <button class="mw-widget-card" type="button" @click="addFromLibrary(def)">
+                <div class="mw-widget-preview">
+                  <img
+                    v-if="getLibraryPreview(def)"
+                    class="mw-widget-preview-img"
+                    :src="getLibraryPreview(def)"
+                    :alt="def.name"
+                    loading="lazy"
+                  />
+                  <div v-else class="mw-widget-preview-placeholder">{{ getLibraryKindLabel(def.kind) }}</div>
+                </div>
+                <div class="mw-widget-info">
+                  <div class="mw-widget-name" :title="def.name">{{ def.name }}</div>
+                  <div class="mw-widget-meta">{{ getLibraryKindLabel(def.kind) }}</div>
+                </div>
+              </button>
+              <button class="mw-lib-del" type="button" title="删除" @click="deleteFromLibrary(def.id)">删除</button>
+            </div>
+          </div>
+
+          <div v-if="!libraryDefs.length" class="mw-empty-hint">暂无已导入部件</div>
         </div>
 
-        <div v-if="!libraryDefs.length" class="mw-empty-hint">暂无已导入部件</div>
+        <div class="mw-add-footer">
+          <button class="mw-btn" type="button" @click="addPanelVisible = false">关闭</button>
+        </div>
       </div>
 
-      <div class="mw-add-footer">
-        <button class="mw-btn" type="button" @click="addPanelVisible = false">关闭</button>
-      </div>
+      <div
+        ref="gridEl"
+        class="mw-grid grid-stack"
+        :class="{
+          'mw-grid--editing': editorMode !== 'view',
+          'mw-grid--hidden': shouldHideWidgetLayer,
+        }"
+      ></div>
+
+      <div v-if="dragHint" class="mw-toast">{{ dragHint }}</div>
+      <div v-if="errorMsg" class="mw-error">{{ errorMsg }}</div>
     </div>
-
-    <div
-      ref="gridEl"
-      class="mw-grid grid-stack"
-      :class="{
-        'mw-grid--editing': editorMode !== 'view',
-        'mw-grid--hidden': shouldHideWidgetLayer,
-      }"
-    ></div>
-
-    <div v-if="dragHint" class="mw-toast">{{ dragHint }}</div>
-    <div v-if="errorMsg" class="mw-error">{{ errorMsg }}</div>
   </div>
 </template>
 
@@ -1833,8 +1849,72 @@
 <style scoped>
   .mw-editor {
     position: relative;
+    display: flex;
+    flex-direction: column;
     width: 100%;
     height: 100%;
+    overflow: hidden;
+    background: #050b14;
+  }
+
+  .mw-editbar {
+    position: relative;
+    z-index: 40;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    flex: 0 0 auto;
+    min-height: 56px;
+    padding: 10px 14px;
+    box-sizing: border-box;
+    color: #fff;
+    background: linear-gradient(180deg, rgba(8, 20, 34, 0.98), rgba(8, 20, 34, 0.92));
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    box-shadow: 0 10px 24px rgba(0, 7, 18, 0.18);
+  }
+
+  .mw-editbar-left,
+  .mw-editbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .mw-editbar-right {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .mw-editbar-center {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    text-align: center;
+    pointer-events: none;
+  }
+
+  .mw-editbar-title {
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.94);
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mw-editbar-mode {
+    color: rgba(203, 213, 225, 0.8);
+    font-size: 12px;
+    line-height: 1.2;
+  }
+
+  .mw-stage {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow: hidden;
   }
 
@@ -1843,26 +1923,6 @@
     inset: 0;
     z-index: 1;
   }
-
-  .mw-topbar {
-    position: absolute;
-    top: 12px;
-    left: 12px;
-    right: 12px;
-    z-index: 20;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    pointer-events: none;
-  }
-
-  .mw-topbar-left,
-  .mw-topbar-right {
-    display: flex;
-    gap: 10px;
-    pointer-events: auto;
-  }
-
   .mw-btn {
     border: 1px solid rgba(255, 255, 255, 0.55);
     background: rgba(25, 30, 40, 0.72);
@@ -1892,7 +1952,7 @@
 
   .mw-appearance-panel {
     position: absolute;
-    top: 58px;
+    top: 12px;
     left: 12px;
     z-index: 28;
     width: min(380px, calc(100vw - 24px));
@@ -1946,7 +2006,7 @@
 
   .mw-mode-banner {
     position: absolute;
-    top: 58px;
+    top: 12px;
     left: 12px;
     z-index: 25;
     display: flex;
@@ -2360,5 +2420,46 @@
   :deep(.mw-mount) {
     width: 100%;
     height: 100%;
+  }
+
+  /* codex-delete-icon-fix */
+  .mw-grid--editing :deep(.mw-del) {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 8;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    overflow: hidden;
+    color: transparent;
+    font-size: 0;
+    line-height: 0;
+    text-indent: -999px;
+    background: rgba(220, 38, 38, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    border-radius: 999px;
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.24);
+  }
+
+  .mw-grid--editing :deep(.mw-del::before),
+  .mw-grid--editing :deep(.mw-del::after) {
+    position: absolute;
+    width: 12px;
+    height: 2px;
+    content: '';
+    background: #fff;
+    border-radius: 999px;
+  }
+
+  .mw-grid--editing :deep(.mw-del::before) {
+    transform: rotate(45deg);
+  }
+
+  .mw-grid--editing :deep(.mw-del::after) {
+    transform: rotate(-45deg);
   }
 </style>
