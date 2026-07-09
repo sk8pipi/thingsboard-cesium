@@ -41,6 +41,7 @@
       :scene-models="templateScene.models"
       :enable-sensor-type-styles="true"
       :sensor-type-styles-ignore-offline="true"
+      :camera-styles-ignore-offline="true"
       @sensor-click="onSensorClick"
       @camera-click="onCameraClick"
       @map-click="onMapPicked"

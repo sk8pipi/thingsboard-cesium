@@ -24,6 +24,7 @@
       sceneModels?: MapSceneModel[];
       enableSensorTypeStyles?: boolean;
       sensorTypeStylesIgnoreOffline?: boolean;
+      cameraStylesIgnoreOffline?: boolean;
     }>(),
     {
       sensorPoints: () => [],
@@ -36,6 +37,7 @@
       sceneModels: () => [],
       enableSensorTypeStyles: false,
       sensorTypeStylesIgnoreOffline: false,
+      cameraStylesIgnoreOffline: false,
     },
   );
 
@@ -160,7 +162,8 @@
   }
 
   function getCameraColor(point: CameraMapPoint) {
-    return isOfflinePoint(point) ? '#94a3b8' : '#22c55e';
+    if (props.cameraStylesIgnoreOffline) return '#2EF527';
+    return isOfflinePoint(point) ? '#94a3b8' : '#2EF527';
   }
 
   function buildCameraBillboard(point: CameraMapPoint) {
@@ -168,10 +171,19 @@
     return (
       'data:image/svg+xml;utf8,' +
       encodeURIComponent(`
-        <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
-          <circle cx="22" cy="22" r="18" fill="${resolvedColor}22" />
-          <circle cx="22" cy="22" r="14" fill="${resolvedColor}" stroke="#ffffff" stroke-width="2.5"/>
-          <path d="M15 18.5a2 2 0 0 1 2-2h8.3a2 2 0 0 1 2 2v1.2l3.5-2.1c.7-.4 1.5.1 1.5.9v7c0 .8-.8 1.3-1.5.9l-3.5-2.1v1.2a2 2 0 0 1-2 2H17a2 2 0 0 1-2-2v-7.2Z" fill="#ffffff"/>
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+          <defs>
+            <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+              <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000000" flood-opacity="0.28"/>
+            </filter>
+          </defs>
+          <g filter="url(#shadow)">
+            <circle cx="32" cy="32" r="25" fill="${resolvedColor}"/>
+          </g>
+          <svg x="15" y="15" width="34" height="34" viewBox="0 0 1024 1024">
+            <path d="M907.712 642.592l-2.624-302.592-204.256 145.056 206.88 157.536z m-39.68-354.784a64 64 0 0 1 101.056 51.648l2.624 302.592a64 64 0 0 1-102.752 51.456l-206.912-157.536a64 64 0 0 1 1.728-103.104l204.256-145.056z" fill="#111827"/>
+            <path d="M144 256a32 32 0 0 0-32 32v417.376a32 32 0 0 0 32 32h456.32a32 32 0 0 0 32-32V288a32 32 0 0 0-32-32H144z m0-64h456.32a96 96 0 0 1 96 96v417.376a96 96 0 0 1-96 96H144a96 96 0 0 1-96-96V288a96 96 0 0 1 96-96z" fill="#111827"/>
+          </svg>
         </svg>
       `)
     );
@@ -513,8 +525,8 @@
         position: positions[index],
         billboard: {
           image: buildCameraBillboard(point),
-          width: 30,
-          height: 30,
+          width: getSensorBillboardSize(),
+          height: getSensorBillboardSize(),
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
