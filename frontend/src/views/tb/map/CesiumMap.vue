@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div ref="cesiumEl" class="cesium-container"></div>
 </template>
 
@@ -23,6 +23,7 @@
       globeOnly?: boolean;
       sceneModels?: MapSceneModel[];
       enableSensorTypeStyles?: boolean;
+      sensorTypeStylesIgnoreOffline?: boolean;
     }>(),
     {
       sensorPoints: () => [],
@@ -34,6 +35,7 @@
       globeOnly: false,
       sceneModels: () => [],
       enableSensorTypeStyles: false,
+      sensorTypeStylesIgnoreOffline: false,
     },
   );
 
@@ -71,8 +73,8 @@
 
   function isOfflinePoint(point: { online?: boolean; statusText?: string; color?: string }) {
     const statusText = String(point.statusText || '').toLowerCase();
-    if (statusText.includes('离线') || statusText.includes('offline')) return true;
-    if (point.online === true || statusText.includes('在线') || statusText.includes('online')) return false;
+    if (statusText.includes('绂荤嚎') || statusText.includes('offline')) return true;
+    if (point.online === true || statusText.includes('鍦ㄧ嚎') || statusText.includes('online')) return false;
     return true;
   }
 
@@ -150,7 +152,7 @@
       override: point.sensorStyleOverride,
     });
 
-    return buildSensorPointBillboard(style, !isOfflinePoint(point));
+    return buildSensorPointBillboard(style, props.sensorTypeStylesIgnoreOffline || !isOfflinePoint(point));
   }
 
   function getSensorBillboardSize() {

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="mw-editor" :style="templateAppearanceCssVars">
     <SelectDeviceDialog
       :visible="widgetDeviceDialogVisible"
@@ -14,7 +14,7 @@
       :device-bindings="pointDeviceBindings"
       title="配置传感器点位"
       ok-text="保存点位"
-      detail-hint="新建点位只绑定 ThingsBoard Device，不需要选择 key。保存点位后可点击点位继续配置弹窗数据 key。"
+      detail-hint="传感器点位只绑定 ThingsBoard Device，不需要选择 key。保存点位后可点击点位继续配置弹窗数据 key。"
       @cancel="cancelPointConfig"
       @ok="onSensorPointConfigured"
     />
@@ -39,6 +39,8 @@
       :hide-base-points="editorMode === 'pickingPoint'"
       :globe-only="templateGlobeOnly"
       :scene-models="templateScene.models"
+      :enable-sensor-type-styles="true"
+      :sensor-type-styles-ignore-offline="true"
       @sensor-click="onSensorClick"
       @camera-click="onCameraClick"
       @map-click="onMapPicked"
@@ -565,56 +567,56 @@
   );
 
   const widgetPreviewByKey: Partial<Record<LocalWidgetKey, string>> = {
-    timeseriesLine: createWidgetPreviewSvg('折线图', 'line', '#2563eb', '#22c55e'),
-    timeseriesScatter: createWidgetPreviewSvg('散点图', 'scatter', '#2563eb', '#f59e0b'),
-    timeseriesBarWithLabels: createWidgetPreviewSvg('柱状图', 'bar', '#0f766e', '#38bdf8'),
-    rangeChart: createWidgetPreviewSvg('范围图', 'area', '#7c3aed', '#f59e0b'),
-    stateChart: createWidgetPreviewSvg('状态图', 'step', '#0891b2', '#84cc16'),
-    latestPie: createWidgetPreviewSvg('饼图', 'pie', '#7c3aed', '#f97316'),
-    latestBar: createWidgetPreviewSvg('柱状图', 'bar', '#2563eb', '#f59e0b'),
-    latestRadar: createWidgetPreviewSvg('雷达图', 'radar', '#0f766e', '#22c55e'),
-    latestPolarArea: createWidgetPreviewSvg('极区图', 'pie', '#be185d', '#38bdf8'),
+    timeseriesLine: createWidgetPreviewSvg('Line', 'line', '#2563eb', '#22c55e'),
+    timeseriesScatter: createWidgetPreviewSvg('Scatter', 'scatter', '#2563eb', '#f59e0b'),
+    timeseriesBarWithLabels: createWidgetPreviewSvg('Bar', 'bar', '#0f766e', '#38bdf8'),
+    rangeChart: createWidgetPreviewSvg('Range', 'area', '#7c3aed', '#f59e0b'),
+    stateChart: createWidgetPreviewSvg('State', 'step', '#0891b2', '#84cc16'),
+    latestPie: createWidgetPreviewSvg('Pie', 'pie', '#7c3aed', '#f97316'),
+    latestBar: createWidgetPreviewSvg('Bar', 'bar', '#2563eb', '#f59e0b'),
+    latestRadar: createWidgetPreviewSvg('Radar', 'radar', '#0f766e', '#22c55e'),
+    latestPolarArea: createWidgetPreviewSvg('Polar', 'pie', '#be185d', '#38bdf8'),
     ledIndicator: createWidgetPreviewSvg('LED', 'led', '#16a34a', '#facc15'),
     staticHtml: createWidgetPreviewSvg('HTML', 'static', '#475569', '#38bdf8'),
-    alarmTable: createWidgetPreviewSvg('告警表格', 'table', '#dc2626', '#f97316'),
-    alarmCard: createWidgetPreviewSvg('告警卡片', 'card', '#dc2626', '#f59e0b'),
-    controlSwitch: createWidgetPreviewSvg('开关控制', 'switch', '#0284c7', '#22c55e'),
-    templateDeviceOverview: createWidgetPreviewSvg('设备概览', 'card', '#0284c7', '#22c55e'),
-    templateAlarmOverview: createWidgetPreviewSvg('报警概览', 'card', '#dc2626', '#f59e0b'),
-    templateKeyAggregate: createWidgetPreviewSvg('Key 聚合', 'card', '#0e7490', '#38bdf8'),
-    templateKeyTrend: createWidgetPreviewSvg('Key 趋势', 'line', '#2563eb', '#22c55e'),
-    templateStatusDistribution: createWidgetPreviewSvg('状态分布', 'pie', '#16a34a', '#ef4444'),
+    alarmTable: createWidgetPreviewSvg('Alarm Table', 'table', '#dc2626', '#f97316'),
+    alarmCard: createWidgetPreviewSvg('Alarm Card', 'card', '#dc2626', '#f59e0b'),
+    controlSwitch: createWidgetPreviewSvg('Switch', 'switch', '#0284c7', '#22c55e'),
+    templateDeviceOverview: createWidgetPreviewSvg('Device Overview', 'card', '#0284c7', '#22c55e'),
+    templateAlarmOverview: createWidgetPreviewSvg('Alarm Overview', 'card', '#dc2626', '#f59e0b'),
+    templateKeyAggregate: createWidgetPreviewSvg('Key Aggregate', 'card', '#0e7490', '#38bdf8'),
+    templateKeyTrend: createWidgetPreviewSvg('Key Trend', 'line', '#2563eb', '#22c55e'),
+    templateStatusDistribution: createWidgetPreviewSvg('Status Distribution', 'pie', '#16a34a', '#ef4444'),
   };
 
   function getBuiltInPreview(key: LocalWidgetKey) {
-    return widgetPreviewByKey[key] || createWidgetPreviewSvg('部件', 'card', '#2563eb', '#22c55e');
+    return widgetPreviewByKey[key] || createWidgetPreviewSvg('閮ㄤ欢', 'card', '#2563eb', '#22c55e');
   }
 
   function getBuiltInKindLabel(key: LocalWidgetKey) {
     const def = widgetRegistry[key];
-    if (!def) return '部件';
+    if (!def) return 'Widget';
 
     const map: Record<string, string> = {
-      timeseries: '时序部件',
-      latest: '最新值部件',
-      alarm: '告警部件',
-      aggregate: '宏观部件',
-      control: '控制部件',
-      static: '静态部件',
+      timeseries: 'Timeseries',
+      latest: 'Latest',
+      alarm: 'Alarm',
+      aggregate: 'Aggregate',
+      control: 'Control',
+      static: 'Static',
     };
-    return map[def.category] || '部件';
+    return map[def.category] || 'Widget';
   }
 
   function getLibraryKindLabel(kind?: string) {
     const map: Record<string, string> = {
-      chart: '折线图',
-      pie: '饼图',
-      bar: '柱状图',
-      static: '静态部件',
-      cesium3d: '三维地图',
-      unknown: '导入部件',
+      chart: 'Chart',
+      pie: 'Pie',
+      bar: 'Bar',
+      static: 'Static',
+      cesium3d: '3D Map',
+      unknown: 'Imported Widget',
     };
-    return map[String(kind || 'unknown')] || String(kind || '导入部件');
+    return map[String(kind || 'unknown')] || String(kind || 'Imported Widget');
   }
 
   function getLibraryPreview(def: CustomWidgetDefinition) {
@@ -642,7 +644,7 @@
   }
 
   function createWidgetPreviewSvg(label: string, kind: string, primary: string, accent: string) {
-    const safeLabel = escapeSvgText(label || '部件');
+    const safeLabel = escapeSvgText(label || 'Widget');
     const normalizedKind = String(kind || '').toLowerCase();
     const chartShape = getPreviewShape(normalizedKind, primary, accent);
     const svg = `
@@ -840,7 +842,7 @@
       const deviceAccess = await inspectMapTemplateDeviceAccess(state);
       const inaccessibleDevices = deviceAccess.filter((item) => !item.device);
       if (inaccessibleDevices.length) {
-        throw new Error('模板包含不属于当前租户或已失效的设备：' + formatTemplateDeviceNames(inaccessibleDevices));
+        throw new Error('Template contains inaccessible devices: ' + formatTemplateDeviceNames(inaccessibleDevices));
       }
 
       const latest = await getDashboardById(dashboardId.value);
@@ -905,7 +907,7 @@
     const surfaceStyle = widgetAppearanceStyleText(widget?.widgetKey || widget?.type || '', widget?.appearance);
     return `
       <div class="mw-widget tb-widget-surface" data-widget-id="${id}" style="${surfaceStyle}">
-        <button class="mw-del" data-id="${id}" title="删除">×</button>
+        <button class="mw-del" data-id="${id}" title="删除">脳</button>
         <div class="mw-title" data-widget-id="${id}">${title}</div>
         <div class="mw-body">
           <div id="mw-mount-${id}" class="mw-mount"></div>
@@ -1030,7 +1032,7 @@
     aggregateKeysLoading.value = false;
 
     if (!deviceRefs.length) {
-      aggregateKeysError.value = '当前模板还没有绑定设备，无法读取可用 Key。';
+      aggregateKeysError.value = 'Failed to read keys from template devices. Please check permissions or retry later.';
       return;
     }
 
@@ -1052,11 +1054,12 @@
     aggregateAvailableKeys.value = Array.from(keySet).sort((left, right) => left.localeCompare(right));
     const failedCount = results.filter((result) => result.status === 'rejected').length;
     if (failedCount === results.length) {
-      aggregateKeysError.value = '模板设备的 Key 全部读取失败，请检查设备权限或稍后重试。';
+      aggregateKeysError.value = 'Failed to read keys from template devices. Please check permissions or retry later.';
     } else if (failedCount) {
-      aggregateKeysError.value = `${failedCount} 台设备的 Key 读取失败，当前列表来自其余设备。`;
+      aggregateKeysError.value =
+        failedCount + ' device key reads failed; the current list comes from the remaining devices.';
     } else if (!aggregateAvailableKeys.value.length) {
-      aggregateKeysError.value = '模板设备暂时没有可用的 timeseries Key。';
+      aggregateKeysError.value = 'Failed to read keys from template devices. Please check permissions or retry later.';
     }
 
     if (!aggregateAvailableKeys.value.includes(aggregateKey.value)) {
@@ -1096,7 +1099,7 @@
 
     const def = widgetRegistry[key];
     if (!def) {
-      errorMsg.value = `未找到部件定义：${key}`;
+      errorMsg.value = 'Widget definition not found: ' + key;
       return;
     }
 
@@ -1138,7 +1141,7 @@
       const defs = importThingsboardJson(json);
 
       if (!defs.length) {
-        errorMsg.value = '导入失败：未识别到 ThingsBoard widget/bundle 格式';
+        errorMsg.value = 'Import failed: unrecognized ThingsBoard widget or bundle format';
         return;
       }
 
@@ -1174,7 +1177,7 @@
 
     const localKey = mapImportedKindToLocalKey(def);
     if (!localKey) {
-      errorMsg.value = `暂不支持该部件类型：${def.kind}`;
+      errorMsg.value = 'Unsupported widget type: ' + def.kind;
       return;
     }
 
@@ -1200,7 +1203,7 @@
 
     const def = widgetRegistry[key];
     if (!def) {
-      errorMsg.value = `未找到部件定义：${key}`;
+      errorMsg.value = 'Widget definition not found: ' + key;
       return;
     }
 
@@ -1260,9 +1263,16 @@
     const longitude = formatCoordinate(point.longitude);
     const latitude = formatCoordinate(point.latitude);
     const hasHeight = point.height !== undefined && point.height !== null && !Number.isNaN(point.height);
-    const heightText = hasHeight ? `，高度 ${formatHeight(point.height)} m` : '';
+    const heightText = hasHeight ? ', height ' + formatHeight(point.height) + ' m' : '';
 
-    dragHint.value = `${point.name} 已移动到 经度 ${longitude}，纬度 ${latitude}${heightText}，点击保存后同步到 ThingsBoard`;
+    dragHint.value =
+      point.name +
+      ' moved to longitude ' +
+      longitude +
+      ', latitude ' +
+      latitude +
+      heightText +
+      '. Save to sync ThingsBoard.';
 
     if (dragHintTimer) {
       clearTimeout(dragHintTimer);
@@ -1331,7 +1341,7 @@
   }
 
   function pointTypeLabel(pointType: MapPointType) {
-    return pointType === 'camera' ? '监控点位' : '传感器点位';
+    return pointType === 'camera' ? 'Camera point' : 'Sensor point';
   }
 
   function findDraftDeviceBinding(deviceId: string) {
@@ -1343,7 +1353,14 @@
     const binding = findDraftDeviceBinding(deviceId);
     if (!binding) return true;
 
-    errorMsg.value = `设备已绑定${pointTypeLabel(binding.pointType)}“${binding.pointName}”（${binding.pointId}），不能再次绑定新点位。`;
+    errorMsg.value =
+      'Device is already bound to ' +
+      pointTypeLabel(binding.pointType) +
+      ' ' +
+      binding.pointName +
+      ' (' +
+      binding.pointId +
+      ').';
     return false;
   }
 
@@ -1431,7 +1448,7 @@
     }
 
     return {
-      id: `${type}_${now}`,
+      id: String(type) + '_' + String(now),
       type,
       name: deviceName,
       longitude: deviceLocation?.longitude ?? location.longitude,
@@ -1460,7 +1477,7 @@
       ...createPointBase('sensor', payload.deviceId, payload.deviceName, deviceLocation),
       type: 'sensor',
       online: false,
-      statusText: '离线',
+      statusText: '绂荤嚎',
       color: 'gray',
       datasource: {
         entityType: 'DEVICE',
@@ -1497,7 +1514,7 @@
       type: 'camera',
       entityType: 'DEVICE',
       online: false,
-      statusText: '离线',
+      statusText: '绂荤嚎',
       color: 'gray',
     };
 
@@ -1565,8 +1582,13 @@
     const duplicateBindings = findDuplicateDeviceBindings(draftMapPoints.value);
     if (duplicateBindings.length) {
       const duplicate = duplicateBindings[0];
-      const pointNames = duplicate.map((binding) => `“${binding.pointName}”`).join('、');
-      errorMsg.value = `同一模板中设备 ${duplicate[0].deviceName || duplicate[0].deviceId} 已绑定多个点位：${pointNames}。请删除重复点位后再保存。`;
+      const pointNames = duplicate.map((binding) => '"' + binding.pointName + '"').join(', ');
+      errorMsg.value =
+        'Device ' +
+        (duplicate[0].deviceName || duplicate[0].deviceId) +
+        ' is bound to multiple points: ' +
+        pointNames +
+        '. Please remove duplicates before saving.';
       return;
     }
 
@@ -1581,7 +1603,7 @@
       }
       await persistEditorState(state);
     } catch (error: any) {
-      errorMsg.value = error?.message || '点位保存失败，请检查设备位置信息后重试';
+      errorMsg.value = error?.message || '鐐逛綅淇濆瓨澶辫触锛岃妫€鏌ヨ澶囦綅缃俊鎭悗閲嶈瘯';
       return;
     } finally {
       isSavingEdit.value = false;
@@ -1680,7 +1702,7 @@
       cameraName: camera.name,
     };
     cameraRuntimeLoading.value = true;
-    cameraRuntimeError.value = '';
+    cameraRuntimeError.value = 'Failed to read camera device information';
     cameraPopupVisible.value = true;
 
     const requestId = ++cameraRuntimeRequestId;
@@ -1703,7 +1725,7 @@
         entityName: camera.entityName,
         error,
       });
-      cameraRuntimeError.value = '读取摄像头设备信息失败';
+      cameraRuntimeError.value = 'Failed to read camera device information';
       selectedCameraRuntime.value = {
         entityId: camera.entityId,
         entityName: camera.entityName || camera.name,
@@ -1719,7 +1741,7 @@
   function closeCameraPopup() {
     cameraPopupVisible.value = false;
     cameraRuntimeLoading.value = false;
-    cameraRuntimeError.value = '';
+    cameraRuntimeError.value = 'Failed to read camera device information';
     selectedCameraPoint.value = null;
     selectedCameraRuntime.value = null;
     cameraRuntimeRequestId += 1;
@@ -1762,7 +1784,7 @@
       await loadEditorState();
       void refreshTemplateRuntime();
     } catch (error: any) {
-      errorMsg.value = error?.message || '加载大屏模板失败';
+      errorMsg.value = error?.message || '鍔犺浇澶у睆妯℃澘澶辫触';
     }
     reloadLibrary();
 
