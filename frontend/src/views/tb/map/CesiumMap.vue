@@ -8,7 +8,12 @@
   import type { CameraMapPoint, MapPointLocation, SensorMapPoint } from './types/mapPointTypes';
   import { BASE_MODEL_ASSET_ID, BASE_MODEL_CENTER, MODEL_AUTO_FLY_VIEW } from './mapSceneConfig';
   import type { MapSceneModel } from './mapTemplateConfig';
-  import { buildSensorPointBillboard, resolveSensorPointStyle } from './services/sensorPointStyleService';
+  import {
+    buildSensorPointBillboard,
+    normalizeDeviceTypeStyleKey,
+    resolveSensorPointStyle,
+    type SensorPointStyleOverride,
+  } from './services/sensorPointStyleService';
 
   type MapInteractionMode = 'default' | 'pickPoint';
 
@@ -24,6 +29,7 @@
       sceneModels?: MapSceneModel[];
       enableSensorTypeStyles?: boolean;
       sensorTypeStylesIgnoreOffline?: boolean;
+      sensorDeviceTypeStyles?: Record<string, SensorPointStyleOverride>;
       cameraStylesIgnoreOffline?: boolean;
     }>(),
     {
@@ -37,6 +43,7 @@
       sceneModels: () => [],
       enableSensorTypeStyles: false,
       sensorTypeStylesIgnoreOffline: false,
+      sensorDeviceTypeStyles: () => ({}),
       cameraStylesIgnoreOffline: false,
     },
   );
@@ -147,11 +154,16 @@
       return buildCircleBillboard(getSensorColor(point));
     }
 
+    const deviceType = getSensorDeviceType(point);
+    const deviceTypeOverride = props.sensorDeviceTypeStyles?.[normalizeDeviceTypeStyleKey(deviceType)];
     const style = resolveSensorPointStyle({
-      deviceType: getSensorDeviceType(point),
+      deviceType,
       pointId: point.id,
       deviceId: point.entityId,
-      override: point.sensorStyleOverride,
+      override: {
+        ...(deviceTypeOverride || {}),
+        ...(point.sensorStyleOverride || {}),
+      },
     });
 
     return buildSensorPointBillboard(style, props.sensorTypeStylesIgnoreOffline || !isOfflinePoint(point));

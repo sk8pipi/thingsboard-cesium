@@ -69,6 +69,15 @@
           >
             外观
           </button>
+          <button
+            class="mw-btn"
+            :class="{ active: sensorStylePanelVisible }"
+            type="button"
+            :disabled="editorMode !== 'editing'"
+            @click="toggleSensorStylePanel"
+          >
+            点位自定义
+          </button>
           <button class="mw-btn" type="button" @click="cancelEdit">取消</button>
           <button class="mw-btn primary" type="button" :disabled="!canSaveEdit" @click="saveEdit"> 保存 </button>
         </template>
@@ -86,6 +95,7 @@
         :globe-only="templateGlobeOnly"
         :scene-models="templateScene.models"
         :enable-sensor-type-styles="true"
+        :sensor-device-type-styles="templateSensorDeviceTypeStyles"
         :sensor-type-styles-ignore-offline="true"
         :camera-styles-ignore-offline="true"
         @sensor-click="onSensorClick"
@@ -117,6 +127,76 @@
         </label>
       </div>
 
+      <div v-if="sensorStylePanelVisible" class="mw-sensor-style-panel">
+        <div class="mw-sensor-style-header">
+          <div>
+            <strong>点位自定义</strong>
+            <span>按传感器客户端属性 deviceType 统一设置在线图标和颜色</span>
+          </div>
+          <button class="mw-panel-close" type="button" @click="sensorStylePanelVisible = false">关闭</button>
+        </div>
+
+        <div v-if="sensorStyleError" class="mw-sensor-style-error">{{ sensorStyleError }}</div>
+        <div v-if="sensorStyleLoading" class="mw-sensor-style-state">正在读取传感器 deviceType...</div>
+
+        <div v-else-if="!sensorDeviceTypeOptions.length" class="mw-sensor-style-state">
+          当前模板还没有传感器点位。
+        </div>
+
+        <div v-else class="mw-sensor-style-content">
+          <div class="mw-sensor-type-list">
+            <button
+              v-for="item in sensorDeviceTypeOptions"
+              :key="item.key"
+              class="mw-sensor-type-item"
+              :class="{ active: item.key === selectedSensorDeviceTypeKey }"
+              type="button"
+              @click="selectedSensorDeviceTypeKey = item.key"
+            >
+              <span>{{ item.label }}</span>
+              <em>{{ item.count }} 个</em>
+            </button>
+          </div>
+
+          <div class="mw-sensor-style-form">
+            <div class="mw-sensor-style-selected">
+              <span>当前类型</span>
+              <strong>{{ selectedSensorDeviceTypeOption?.label || '未选择' }}</strong>
+            </div>
+
+            <label class="mw-sensor-style-field">
+              <span>在线颜色</span>
+              <input v-model="selectedSensorStyleColor" type="color" />
+            </label>
+
+            <label class="mw-sensor-style-field">
+              <span>上传 SVG 图标</span>
+              <input
+                ref="sensorStyleIconInputEl"
+                type="file"
+                accept="image/svg+xml,.svg"
+                @change="onSensorStyleIconFileChange"
+              />
+            </label>
+
+            <div class="mw-sensor-style-preview-row">
+              <div class="mw-sensor-style-preview-card">
+                <span>在线预览</span>
+                <img v-if="selectedSensorStyleOnlinePreview" :src="selectedSensorStyleOnlinePreview" alt="在线预览" />
+              </div>
+              <div class="mw-sensor-style-preview-card">
+                <span>离线预览</span>
+                <img v-if="selectedSensorStyleOfflinePreview" :src="selectedSensorStyleOfflinePreview" alt="离线预览" />
+              </div>
+            </div>
+
+            <div class="mw-sensor-style-actions">
+              <button class="mw-btn" type="button" @click="resetSelectedSensorStyle">重置该类型</button>
+              <button class="mw-btn primary" type="button" @click="confirmSensorStylePanel">确认</button>
+            </div>
+          </div>
+        </div>
+      </div>
       <div v-if="aggregateConfigVisible" class="mw-dialog-mask" @click.self="cancelAggregateWidgetConfig">
         <div class="mw-dialog-card mw-aggregate-dialog">
           <div class="mw-dialog-title">配置{{ pendingWidgetTitle }}</div>
@@ -324,7 +404,7 @@
 
 <script setup lang="ts">
   import { computed, createApp, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-  import { getTimeseriesKeys } from '/@/api/tb/telemetry';
+  import { getAttributesByScope, getTimeseriesKeys } from '/@/api/tb/telemetry';
   import type * as Cesium from 'cesium';
   import { useRoute, useRouter } from 'vue-router';
   import { GridStack } from 'gridstack';
@@ -351,6 +431,14 @@
     saveDeviceMapPointLocations,
   } from './services/deviceMapPointService';
   import { getAssignedMapTemplateRuntime, type MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
+  import {
+    buildSensorPointBillboard,
+    normalizeDeviceTypeStyleKey,
+    resolveSensorPointStyle,
+    UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY,
+    type SensorPointIconShape,
+    type SensorPointStyleOverride,
+  } from './services/sensorPointStyleService';
   import type {
     CameraMapPoint,
     CameraRuntimeInfo,
@@ -386,6 +474,7 @@
   import ControlSwitchEditor from '../dashboard/runtime/widgets/control/ControlSwitchEditor.vue';
   import { getDashboardById, saveDashboard, type Dashboard } from '/@/api/tb/dashboard';
   import { Authority } from '/@/enums/authorityEnum';
+  import { Scope } from '/@/enums/telemetryEnum';
   import { usePermission } from '/@/hooks/web/usePermission';
   import {
     DASHBOARD_MAP_WIDGET_CONFIG_KEY,
@@ -395,6 +484,7 @@
     type MapTemplateAppearance,
     type MapTemplateScene,
     type MapTemplateState,
+    type SensorDeviceTypeStyles,
   } from './mapTemplateConfig';
   import {
     collectMapTemplateDeviceRefs,
@@ -411,10 +501,16 @@
     layout: GridItem[];
     widgets: Record<string, WidgetData>;
     appearance: WidgetAppearance;
+    sensorDeviceTypeStyles: SensorDeviceTypeStyles;
   };
 
   type MapWidgetEditorState = MapTemplateState;
 
+  type SensorDeviceTypeOption = {
+    key: string;
+    label: string;
+    count: number;
+  };
   type CesiumMapExpose = {
     getViewer: () => Cesium.Viewer | undefined;
   };
@@ -460,6 +556,7 @@
 
   const gridEl = ref<HTMLDivElement | null>(null);
   const fileInputEl = ref<HTMLInputElement | null>(null);
+  const sensorStyleIconInputEl = ref<HTMLInputElement | null>(null);
   let grid: any = null;
 
   const editorMode = ref<MapEditorMode>('view');
@@ -491,7 +588,12 @@
   const dashboardTemplate = ref<Dashboard | null>(null);
   const templateScene = ref<MapTemplateScene>(createDefaultMapTemplateState().scene);
   const templateAppearance = ref<MapTemplateAppearance>({ ...createDefaultMapTemplateState().appearance });
+  const templateSensorDeviceTypeStyles = ref<SensorDeviceTypeStyles>({});
   const appearancePanelVisible = ref(false);
+  const sensorStylePanelVisible = ref(false);
+  const sensorStyleLoading = ref(false);
+  const sensorStyleError = ref('');
+  const selectedSensorDeviceTypeKey = ref('');
   const templateAppearanceCssVars = computed(() => mapTemplateAppearanceStyle(templateAppearance.value));
   const templateBackgroundTransparency = computed({
     get: () => Math.round((1 - Number(templateAppearance.value.backgroundOpacity ?? 0.04)) * 100),
@@ -566,6 +668,226 @@
   const cameraPoints = computed(() =>
     activeMapPoints.value.filter((point): point is CameraMapPoint => point.type === 'camera'),
   );
+  function getSensorPointDeviceType(point: SensorMapPoint) {
+    return String((point as any).deviceType || point.sensorType || point.description || '').trim();
+  }
+
+  function getSensorDeviceTypeLabel(key: string, sampleLabel?: string) {
+    return key === UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY ? '未设置 deviceType' : sampleLabel || key;
+  }
+
+  const sensorDeviceTypeOptions = computed<SensorDeviceTypeOption[]>(() => {
+    const optionMap = new Map<string, SensorDeviceTypeOption>();
+
+    draftMapPoints.value
+      .filter((point): point is SensorMapPoint => point.type === 'sensor')
+      .forEach((point) => {
+        const rawType = getSensorPointDeviceType(point);
+        const key = normalizeDeviceTypeStyleKey(rawType);
+        const current = optionMap.get(key);
+        if (current) {
+          current.count += 1;
+          return;
+        }
+        optionMap.set(key, {
+          key,
+          label: getSensorDeviceTypeLabel(key, rawType),
+          count: 1,
+        });
+      });
+
+    Object.keys(templateSensorDeviceTypeStyles.value || {}).forEach((key) => {
+      const normalizedKey = normalizeDeviceTypeStyleKey(key);
+      if (!optionMap.has(normalizedKey)) {
+        optionMap.set(normalizedKey, {
+          key: normalizedKey,
+          label: getSensorDeviceTypeLabel(normalizedKey, key),
+          count: 0,
+        });
+      }
+    });
+
+    return Array.from(optionMap.values()).sort((left, right) => {
+      if (right.count !== left.count) return right.count - left.count;
+      return left.label.localeCompare(right.label);
+    });
+  });
+
+  const selectedSensorDeviceTypeOption = computed(() =>
+    sensorDeviceTypeOptions.value.find((item) => item.key === selectedSensorDeviceTypeKey.value),
+  );
+
+  const selectedSensorDeviceTypeStyle = computed<SensorPointStyleOverride>(() =>
+    selectedSensorDeviceTypeKey.value
+      ? templateSensorDeviceTypeStyles.value[selectedSensorDeviceTypeKey.value] || {}
+      : {},
+  );
+
+  const selectedSensorStyleColor = computed({
+    get: () => selectedSensorDeviceTypeStyle.value.color || '#38bdf8',
+    set: (value: string) => {
+      updateSelectedSensorStyle({ color: value });
+    },
+  });
+
+  const selectedSensorStyleOnlinePreview = computed(() => buildSensorStylePreview(true));
+  const selectedSensorStyleOfflinePreview = computed(() => buildSensorStylePreview(false));
+
+  function ensureSelectedSensorDeviceType() {
+    const options = sensorDeviceTypeOptions.value;
+    if (!options.length) {
+      selectedSensorDeviceTypeKey.value = '';
+      return;
+    }
+    if (!options.some((item) => item.key === selectedSensorDeviceTypeKey.value)) {
+      selectedSensorDeviceTypeKey.value = options[0].key;
+    }
+  }
+
+  function buildSensorStylePreview(online: boolean) {
+    const key = selectedSensorDeviceTypeKey.value || sensorDeviceTypeOptions.value[0]?.key || '';
+    if (!key) return '';
+    const style = resolveSensorPointStyle({
+      deviceType: key === UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY ? '' : key,
+      override: templateSensorDeviceTypeStyles.value[key] || {},
+    });
+    return buildSensorPointBillboard(style, online);
+  }
+
+  function updateSelectedSensorStyle(patch: SensorPointStyleOverride) {
+    const key = selectedSensorDeviceTypeKey.value || sensorDeviceTypeOptions.value[0]?.key || '';
+    if (!key) return;
+    selectedSensorDeviceTypeKey.value = key;
+    templateSensorDeviceTypeStyles.value = {
+      ...templateSensorDeviceTypeStyles.value,
+      [key]: {
+        ...(templateSensorDeviceTypeStyles.value[key] || {}),
+        ...patch,
+      },
+    };
+  }
+
+  function extractAttributeValue(value: unknown): string {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      return extractAttributeValue(record.value ?? record.data ?? record.rawValue ?? record.name ?? '');
+    }
+    return String(value).trim();
+  }
+
+  async function syncSensorDeviceTypesFromClientAttributes() {
+    const sensorPointsForSync = Array.from(
+      new Map(
+        draftMapPoints.value
+          .filter((point): point is SensorMapPoint => point.type === 'sensor' && point.entityType === 'DEVICE')
+          .map((point) => [point.entityId, point]),
+      ).values(),
+    );
+
+    if (!sensorPointsForSync.length) {
+      sensorStyleLoading.value = false;
+      ensureSelectedSensorDeviceType();
+      return;
+    }
+
+    sensorStyleLoading.value = true;
+    const results = await Promise.allSettled(
+      sensorPointsForSync.map(async (point) => {
+        const attributes = await getAttributesByScope(
+          { entityType: 'DEVICE', id: point.entityId } as any,
+          Scope.CLIENT_SCOPE,
+          { keys: 'deviceType' },
+        );
+        const deviceType = extractAttributeValue((attributes || []).find((item) => item.key === 'deviceType')?.value);
+        return { entityId: point.entityId, deviceType };
+      }),
+    );
+
+    const deviceTypeMap = new Map<string, string>();
+    let failedCount = 0;
+    results.forEach((result) => {
+      if (result.status === 'fulfilled') {
+        if (result.value.deviceType) deviceTypeMap.set(result.value.entityId, result.value.deviceType);
+      } else {
+        failedCount += 1;
+      }
+    });
+
+    if (deviceTypeMap.size) {
+      draftMapPoints.value = draftMapPoints.value.map((point) => {
+        if (point.type !== 'sensor') return point;
+        const deviceType = deviceTypeMap.get(point.entityId);
+        return deviceType ? ({ ...point, sensorType: deviceType } as SensorMapPoint) : point;
+      });
+    }
+
+    sensorStyleError.value = failedCount ? failedCount + ' 个设备的 deviceType 读取失败，已显示可读取到的类型。' : '';
+    sensorStyleLoading.value = false;
+    ensureSelectedSensorDeviceType();
+  }
+
+  function openSensorStylePanel() {
+    if (editorMode.value === 'view') return;
+    if (editorMode.value !== 'editing') editorMode.value = 'editing';
+    addPanelVisible.value = false;
+    appearancePanelVisible.value = false;
+    sensorStyleError.value = '';
+    sensorStyleLoading.value = false;
+    sensorStylePanelVisible.value = true;
+    ensureSelectedSensorDeviceType();
+    setTimeout(() => {
+      void syncSensorDeviceTypesFromClientAttributes();
+    }, 0);
+  }
+
+  function toggleSensorStylePanel() {
+    if (sensorStylePanelVisible.value) {
+      sensorStylePanelVisible.value = false;
+      return;
+    }
+    openSensorStylePanel();
+  }
+
+  function parseSvgIcon(text: string): SensorPointIconShape {
+    const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+    const parseError = doc.querySelector('parsererror');
+    const svg = doc.querySelector('svg');
+    if (parseError || !svg) throw new Error('请上传有效的 SVG 图标。');
+    const viewBox = svg.getAttribute('viewBox') || '0 0 1024 1024';
+    const paths = Array.from(svg.querySelectorAll('path'))
+      .map((path) => String(path.getAttribute('d') || '').trim())
+      .filter(Boolean)
+      .slice(0, 80);
+    if (!paths.length) throw new Error('SVG 中没有可用的 path，当前仅支持 path 图标。');
+    return { viewBox, paths };
+  }
+
+  async function onSensorStyleIconFileChange(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      updateSelectedSensorStyle({ icon: parseSvgIcon(await file.text()) });
+      sensorStyleError.value = '';
+    } catch (error: any) {
+      sensorStyleError.value = error?.message || 'SVG 图标解析失败。';
+    } finally {
+      input.value = '';
+    }
+  }
+
+  function resetSelectedSensorStyle() {
+    const key = selectedSensorDeviceTypeKey.value;
+    if (!key) return;
+    const next = { ...templateSensorDeviceTypeStyles.value };
+    delete next[key];
+    templateSensorDeviceTypeStyles.value = next;
+  }
+
+  function confirmSensorStylePanel() {
+    sensorStylePanelVisible.value = false;
+  }
   const canSaveEdit = computed(
     () => canEditTemplate.value && (editorMode.value === 'editing' || editorMode.value === 'pickingPoint'),
   );
@@ -769,6 +1091,7 @@
     const normalized = normalizeMapTemplateState(state);
     templateScene.value = cloneJson(normalized.scene);
     templateAppearance.value = cloneJson(normalized.appearance);
+    templateSensorDeviceTypeStyles.value = cloneJson(normalized.sensorDeviceTypeStyles);
     layout.value = normalized.layout;
     widgets.value = normalizeWidgetState(normalized.widgets);
     originalMapPoints.value = cloneJson(normalized.mapPoints);
@@ -782,6 +1105,7 @@
       ...createDefaultMapTemplateState(),
       scene: cloneJson(templateScene.value),
       appearance: cloneJson(templateAppearance.value),
+      sensorDeviceTypeStyles: cloneJson(templateSensorDeviceTypeStyles.value),
       layout: cloneJson(layout.value),
       widgets: cloneJson(widgets.value),
       mapPoints: cloneJson(draftMapPoints.value),
@@ -1244,6 +1568,7 @@
     aggregateConfigVisible.value = false;
     sensorPreviewVisible.value = false;
     sensorConfigVisible.value = false;
+    sensorStylePanelVisible.value = false;
     selectedSensor.value = null;
     closeCameraPopup();
   }
@@ -1330,6 +1655,7 @@
       layout: cloneJson(layout.value),
       widgets: cloneJson(widgets.value),
       appearance: cloneJson(templateAppearance.value),
+      sensorDeviceTypeStyles: cloneJson(templateSensorDeviceTypeStyles.value),
     };
     draftMapPoints.value = cloneJson(originalMapPoints.value);
     draftSensorPopupBindings.value = cloneJson(originalSensorPopupBindings.value);
@@ -1547,12 +1873,14 @@
   function openAddPanel() {
     if (editorMode.value !== 'editing') return;
     appearancePanelVisible.value = false;
+    sensorStylePanelVisible.value = false;
     addPanelVisible.value = !addPanelVisible.value;
   }
 
   function toggleAppearancePanel() {
     if (editorMode.value !== 'editing') return;
     addPanelVisible.value = false;
+    sensorStylePanelVisible.value = false;
     appearancePanelVisible.value = !appearancePanelVisible.value;
   }
 
@@ -1561,6 +1889,7 @@
     layout.value = cloneJson(widgetSnapshot.layout);
     widgets.value = cloneJson(widgetSnapshot.widgets);
     templateAppearance.value = cloneJson(widgetSnapshot.appearance);
+    templateSensorDeviceTypeStyles.value = cloneJson(widgetSnapshot.sensorDeviceTypeStyles);
     renderGrid();
   }
 
@@ -1571,6 +1900,7 @@
     editorMode.value = 'view';
     addPanelVisible.value = false;
     appearancePanelVisible.value = false;
+    sensorStylePanelVisible.value = false;
     pendingPointLocation.value = null;
     selectedWidgetId.value = '';
     closeAllOverlays();
@@ -1632,6 +1962,7 @@
       layout: cloneJson(state.layout),
       widgets: cloneJson(state.widgets),
       appearance: cloneJson(state.appearance),
+      sensorDeviceTypeStyles: cloneJson(state.sensorDeviceTypeStyles),
     };
 
     leaveEditMode();
@@ -2147,6 +2478,197 @@
     margin-top: 16px;
   }
 
+  .mw-sensor-style-panel {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 31;
+    width: min(720px, calc(100vw - 24px));
+    max-height: calc(100vh - 96px);
+    overflow: hidden;
+    box-sizing: border-box;
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 12px;
+    background: rgba(8, 20, 34, 0.94);
+    color: #fff;
+    box-shadow: 0 18px 48px rgba(0, 7, 18, 0.34);
+    backdrop-filter: blur(10px);
+  }
+
+  .mw-sensor-style-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+  }
+
+  .mw-sensor-style-header div {
+    display: grid;
+    gap: 4px;
+  }
+
+  .mw-sensor-style-header strong {
+    font-size: 15px;
+  }
+
+  .mw-sensor-style-header span {
+    color: rgba(226, 232, 240, 0.68);
+    font-size: 12px;
+  }
+
+  .mw-panel-close {
+    border: 1px solid rgba(148, 163, 184, 0.34);
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.72);
+    color: #e2e8f0;
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  .mw-sensor-style-content {
+    display: grid;
+    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .mw-sensor-type-list {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+
+  .mw-sensor-type-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    border: 1px solid rgba(125, 211, 252, 0.22);
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.64);
+    color: rgba(226, 232, 240, 0.88);
+    padding: 9px 10px;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .mw-sensor-type-item span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mw-sensor-type-item em {
+    flex: 0 0 auto;
+    color: rgba(186, 230, 253, 0.72);
+    font-size: 11px;
+    font-style: normal;
+  }
+
+  .mw-sensor-type-item:hover,
+  .mw-sensor-type-item.active {
+    border-color: rgba(56, 189, 248, 0.78);
+    background: rgba(14, 116, 144, 0.58);
+    color: #fff;
+  }
+
+  .mw-sensor-style-form {
+    display: grid;
+    align-content: start;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .mw-sensor-style-selected,
+  .mw-sensor-style-field {
+    display: grid;
+    gap: 6px;
+    color: rgba(226, 232, 240, 0.74);
+    font-size: 12px;
+  }
+
+  .mw-sensor-style-selected strong {
+    color: #fff;
+    font-size: 14px;
+  }
+
+  .mw-sensor-style-field input[type='color'] {
+    width: 72px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid rgba(125, 211, 252, 0.34);
+    border-radius: 8px;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .mw-sensor-style-field input[type='file'] {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid rgba(125, 211, 252, 0.24);
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.64);
+    color: rgba(226, 232, 240, 0.82);
+    padding: 8px;
+  }
+
+  .mw-sensor-style-preview-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .mw-sensor-style-preview-card {
+    display: grid;
+    place-items: center;
+    gap: 8px;
+    min-height: 124px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.5);
+    color: rgba(226, 232, 240, 0.72);
+    font-size: 12px;
+  }
+
+  .mw-sensor-style-preview-card img {
+    width: 64px;
+    height: 64px;
+  }
+
+  .mw-sensor-style-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+
+  .mw-sensor-style-state,
+  .mw-sensor-style-error {
+    padding: 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(224, 242, 254, 0.72);
+    font-size: 12px;
+  }
+
+  .mw-sensor-style-error {
+    border: 1px solid rgba(251, 146, 60, 0.24);
+    color: #fdba74;
+  }
+
+  @media (max-width: 720px) {
+    .mw-sensor-style-content {
+      grid-template-columns: 1fr;
+    }
+  }
   .mw-add-panel {
     position: absolute;
     top: 58px;

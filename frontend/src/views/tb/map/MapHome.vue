@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="map-home" :style="mapAppearanceStyle">
     <CesiumMap
       class="map-canvas"
@@ -9,6 +9,7 @@
       :globe-only="mapGlobeOnly"
       :scene-models="sceneModels"
       :enable-sensor-type-styles="isCustomerUserMap"
+      :sensor-device-type-styles="assignedTemplateState?.sensorDeviceTypeStyles || {}"
       @sensor-click="onSensorClick"
       @camera-click="onCameraClick"
     />

@@ -1,4 +1,4 @@
-export type MapPointType = 'sensor' | 'camera';
+﻿export type MapPointType = 'sensor' | 'camera';
 
 export type MapPointEntityType = 'DEVICE' | 'ASSET';
 
@@ -50,6 +50,10 @@ export interface SensorMapPoint extends BaseMapPoint {
     offlineIconColor?: string;
     ringColor?: string;
     offlineRingColor?: string;
+    icon?: {
+      viewBox: string;
+      paths: string[];
+    };
   };
   datasource?: {
     entityType: MapPointEntityType;

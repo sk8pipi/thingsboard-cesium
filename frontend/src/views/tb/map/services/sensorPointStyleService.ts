@@ -1,4 +1,4 @@
-export type BuiltInSensorType =
+﻿export type BuiltInSensorType =
   | 'temperature'
   | 'humidity'
   | 'electricity_consumption'
@@ -121,6 +121,12 @@ const BUILT_IN_SENSOR_TYPES = new Set(Object.keys(SENSOR_POINT_STYLE_REGISTRY));
 const ONLINE_ICON_COLOR = '#111827';
 const OFFLINE_BODY_COLOR = '#94A3B8';
 const OFFLINE_ICON_COLOR = '#475569';
+
+export const UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY = '__unset_deviceType';
+
+export function normalizeDeviceTypeStyleKey(value: unknown) {
+  return String(value || '').trim() || UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY;
+}
 
 export function normalizeSensorType(value: unknown): BuiltInSensorType {
   const normalized = String(value || '')
