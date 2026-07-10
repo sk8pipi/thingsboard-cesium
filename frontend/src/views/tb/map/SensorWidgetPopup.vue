@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div v-if="visible" class="sensor-widget-popup tb-widget-surface">
     <div class="sensor-widget-popup__header">
       <div>
@@ -77,6 +77,34 @@
     const coordinate = Number(value);
     return Number.isFinite(coordinate) ? coordinate.toFixed(6) : '-';
   }
+  function formatHeight(value: unknown) {
+    const height = Number(value);
+    return Number.isFinite(height) ? `${height.toFixed(2)} m` : '-';
+  }
+  function getRuntimeDevice(sensor: Record<string, any>) {
+    const entityId = String(sensor.entityId || sensor.deviceId || '').trim();
+    return entityId ? props.runtimeDevices?.[entityId] || {} : {};
+  }
+
+  function toDisplayText(value: unknown) {
+    if (value === undefined || value === null || value === '') return '';
+    if (typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      return toDisplayText(record.value ?? record.data ?? record.rawValue ?? record.name ?? '');
+    }
+    return String(value).trim();
+  }
+
+  function getDisplayDeviceType(sensor: Record<string, any>) {
+    const runtimeDevice = getRuntimeDevice(sensor) as Record<string, unknown>;
+    return (
+      toDisplayText(sensor.deviceType) ||
+      toDisplayText(sensor.sensorType) ||
+      toDisplayText(runtimeDevice.deviceType) ||
+      toDisplayText(runtimeDevice.sensorType) ||
+      '未知'
+    );
+  }
 
   const infoRows = computed(() => {
     const sensor = props.sensor || {};
@@ -86,9 +114,10 @@
         label: '状态',
         value: sensor.statusText || (sensor.online === true ? '在线' : sensor.online === false ? '离线' : '-'),
       },
-      { label: '类型', value: sensor.description || sensor.entityType || '-' },
+      { label: '类型', value: getDisplayDeviceType(sensor) },
       { label: '经度', value: formatCoordinate(sensor.longitude) },
       { label: '纬度', value: formatCoordinate(sensor.latitude) },
+      { label: '高度', value: formatHeight(sensor.height) },
     ];
   });
 
