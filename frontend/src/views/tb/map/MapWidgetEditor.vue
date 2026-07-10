@@ -175,7 +175,7 @@
           当前模板还没有传感器点位。
         </div>
 
-        <div v-else class="mw-sensor-style-content">
+        <div v-else class="mw-sensor-style-content" :class="{ 'is-point-tab': sensorStyleTab === 'point' }">
           <div v-if="sensorStyleTab === 'type'" class="mw-sensor-type-list">
             <button
               v-for="item in sensorDeviceTypeOptions"
@@ -231,6 +231,36 @@
               />
             </label>
 
+            <div class="mw-sensor-style-inline-preview">
+              <span>最终效果</span>
+              <div class="mw-sensor-style-preview-row">
+                <div class="mw-sensor-style-preview-card">
+                  <span>在线效果</span>
+                  <img
+                    v-if="selectedSensorStyleOnlinePreview"
+                    :src="selectedSensorStyleOnlinePreview"
+                    alt="在线效果预览"
+                  />
+                </div>
+                <div class="mw-sensor-style-preview-card">
+                  <span>离线效果</span>
+                  <img
+                    v-if="selectedSensorStyleOfflinePreview"
+                    :src="selectedSensorStyleOfflinePreview"
+                    alt="离线效果预览"
+                  />
+                </div>
+              </div>
+              <div class="mw-preview-scope">
+                <span>影响点位（{{ selectedSensorStyleScopeNames.length }}）</span>
+                <div>
+                  <small v-for="(name, index) in selectedSensorStyleScopeNames" :key="`${name}-${index}`">{{
+                    name
+                  }}</small>
+                </div>
+              </div>
+            </div>
+
             <div class="mw-sensor-style-actions">
               <button
                 class="mw-btn"
@@ -240,55 +270,10 @@
               >
                 {{ sensorStyleTab === 'point' ? '恢复自动样式' : '重置该类型' }}
               </button>
-              <button
-                class="mw-btn"
-                type="button"
-                :disabled="!hasSelectedSensorStyleTarget"
-                @click="sensorStylePreviewVisible = true"
-              >
-                效果预览
-              </button>
               <button class="mw-btn primary" type="button" @click="confirmSensorStylePanel">确认</button>
             </div>
           </div>
         </div>
-      </div>
-
-      <div v-if="sensorStylePreviewVisible" class="mw-dialog-mask" @click.self="sensorStylePreviewVisible = false">
-        <section
-          class="mw-dialog-card mw-sensor-style-preview-dialog"
-          aria-modal="true"
-          role="dialog"
-          aria-label="点位效果预览"
-        >
-          <div class="mw-dialog-title-row">
-            <div>
-              <div class="mw-dialog-title">效果预览</div>
-              <div class="mw-dialog-sub">{{ selectedSensorStyleTargetLabel }} · {{ selectedSensorStylePriority }}</div>
-            </div>
-            <button class="mw-panel-close" type="button" @click="sensorStylePreviewVisible = false">关闭</button>
-          </div>
-          <div class="mw-sensor-style-preview-row">
-            <div class="mw-sensor-style-preview-card">
-              <span>在线效果</span>
-              <img v-if="selectedSensorStyleOnlinePreview" :src="selectedSensorStyleOnlinePreview" alt="在线效果预览" />
-            </div>
-            <div class="mw-sensor-style-preview-card">
-              <span>离线效果</span>
-              <img
-                v-if="selectedSensorStyleOfflinePreview"
-                :src="selectedSensorStyleOfflinePreview"
-                alt="离线效果预览"
-              />
-            </div>
-          </div>
-          <div class="mw-preview-scope">
-            <span>影响点位（{{ selectedSensorStyleScopeNames.length }}）</span>
-            <div>
-              <small v-for="name in selectedSensorStyleScopeNames" :key="name">{{ name }}</small>
-            </div>
-          </div>
-        </section>
       </div>
       <div v-if="aggregateConfigVisible" class="mw-dialog-mask" @click.self="cancelAggregateWidgetConfig">
         <div class="mw-dialog-card mw-aggregate-dialog">
@@ -697,7 +682,6 @@
   const sensorStyleLoading = ref(false);
   const sensorStyleError = ref('');
   const sensorStyleTab = ref<'point' | 'type'>('point');
-  const sensorStylePreviewVisible = ref(false);
   const selectedSensorDeviceTypeKey = ref('');
   const selectedSensorPointId = ref('');
   const sensorPointSearch = ref('');
@@ -1054,7 +1038,6 @@
 
   function toggleSensorStylePanel() {
     if (sensorStylePanelVisible.value) {
-      sensorStylePreviewVisible.value = false;
       sensorStylePanelVisible.value = false;
       return;
     }
@@ -1109,7 +1092,6 @@
   }
 
   function confirmSensorStylePanel() {
-    sensorStylePreviewVisible.value = false;
     sensorStylePanelVisible.value = false;
   }
   const canSaveEdit = computed(
@@ -2128,7 +2110,6 @@
     addPanelVisible.value = false;
     appearancePanelVisible.value = false;
     sensorStylePanelVisible.value = false;
-    sensorStylePreviewVisible.value = false;
     pendingPointLocation.value = null;
     selectedWidgetId.value = '';
     closeAllOverlays();
@@ -2744,7 +2725,7 @@
     top: 12px;
     right: 12px;
     z-index: 31;
-    width: min(720px, calc(100vw - 24px));
+    width: min(860px, calc(100vw - 24px));
     max-height: calc(100vh - 96px);
     overflow: hidden;
     box-sizing: border-box;
@@ -2831,6 +2812,9 @@
     min-height: 0;
   }
 
+  .mw-sensor-style-content.is-point-tab {
+    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  }
   .mw-sensor-type-list {
     display: grid;
     align-content: start;
@@ -2939,10 +2923,6 @@
     height: 64px;
   }
 
-  .mw-sensor-style-preview-dialog {
-    width: min(440px, calc(100vw - 32px));
-  }
-
   .mw-dialog-title-row {
     display: flex;
     align-items: flex-start;
@@ -2972,6 +2952,15 @@
     border: 1px solid rgba(125, 211, 252, 0.22);
     padding: 4px 7px;
     color: #e0f2fe;
+  }
+  .mw-sensor-style-inline-preview {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid rgba(125, 211, 252, 0.2);
+    background: rgba(15, 23, 42, 0.36);
+    color: rgba(226, 232, 240, 0.78);
+    font-size: 12px;
   }
   .mw-sensor-style-actions {
     display: flex;
