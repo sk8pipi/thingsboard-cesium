@@ -411,14 +411,13 @@ public class MapTemplateRuntimeService {
 
     private void applyDerivedStatus(Map<String, Object> values) {
         Boolean deviceActive = toBoolean(values.get("deviceActive"));
-        Boolean telemetryOnline = toBoolean(firstValue(values, List.of("online", "status", "active")));
-        Boolean online = Boolean.FALSE.equals(deviceActive) ? false : telemetryOnline;
-        values.put("online", Boolean.TRUE.equals(online));
-        if (Boolean.FALSE.equals(online)) {
+        boolean online = Boolean.TRUE.equals(deviceActive);
+        values.put("online", online);
+        if (!online) {
             values.put("streamOnline", false);
             values.put("streamAlive", false);
         }
-        values.put("statusText", Boolean.TRUE.equals(online) ? "online" : "offline");
+        values.put("statusText", online ? "online" : "offline");
     }
 
     private Object firstValue(Map<String, Object> values, List<String> keys) {

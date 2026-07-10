@@ -1,6 +1,7 @@
-﻿<template>
+<template>
   <div class="map-home" :style="mapAppearanceStyle">
     <CesiumMap
+      ref="cesiumMapRef"
       class="map-canvas"
       :sensor-points="visibleSensorPoints"
       :camera-points="visibleCameraPoints"
@@ -21,6 +22,7 @@
       :data="assignedTemplateState"
       :runtime-devices="assignedTemplateRuntimeDevices"
       :runtime="datasourceRuntime"
+      @alarm-focus="onAlarmFocus"
     />
 
     <SensorWidgetPopup
@@ -76,7 +78,8 @@
     loadDeviceMapPointStatuses,
     type DeviceMapPointStatus,
   } from './services/deviceMapPointService';
-  import type { CameraMapPoint, CameraRuntimeInfo, MapPoint, SensorMapPoint } from './types/mapPointTypes';
+  import type { CameraMapPoint, CameraRuntimeInfo, MapPoint, MapPointLocation, SensorMapPoint } from './types/mapPointTypes';
+  import type { AlarmFocusPayload } from '../dashboard/runtime/widgets/alarm/focus';
   import type { PopupWidgetConfig } from './sensorPopupWidgetStorage';
   import {
     DASHBOARD_MAP_WIDGET_CONFIG_KEY,
@@ -92,6 +95,9 @@
 
   const DEVICE_POINT_REFRESH_MS = 30000;
   type AssignedTemplateState = MapTemplateState;
+  type CesiumMapExpose = {
+    flyToPoint: (point: MapPointLocation) => void;
+  };
 
   const router = useRouter();
   const userStore = useUserStore();
@@ -111,6 +117,8 @@
       ) || undefined,
   });
   watch(assignedTemplateRuntimeDeviceMap, () => datasourceRuntime.refreshExternalValues());
+
+  const cesiumMapRef = ref<CesiumMapExpose | null>(null);
 
   const selectedSensor = ref<SensorMapPoint | null>(null);
   const sensorPreviewVisible = ref(false);
@@ -556,6 +564,39 @@
     closeCameraPopup();
     selectedSensor.value = sensor;
     sensorPreviewVisible.value = true;
+  }
+
+  function findAlarmPoint(payload: AlarmFocusPayload) {
+    const pointId = payload.pointId || '';
+    const originatorId = payload.originatorId || '';
+    return mapPoints.value.find((point) => {
+      if (pointId && point.id === pointId) return true;
+      if (originatorId && point.entityId === originatorId) return true;
+      return false;
+    });
+  }
+
+  function onAlarmFocus(payload: AlarmFocusPayload) {
+    const point = findAlarmPoint(payload);
+    if (point) {
+      cesiumMapRef.value?.flyToPoint(point);
+      if (point.type === 'sensor') {
+        onSensorClick(point);
+      } else {
+        void onCameraClick(point);
+      }
+      return;
+    }
+
+    if (Number.isFinite(payload.longitude) && Number.isFinite(payload.latitude)) {
+      cesiumMapRef.value?.flyToPoint({
+        longitude: payload.longitude as number,
+        latitude: payload.latitude as number,
+        height: payload.height,
+      });
+    } else {
+      console.warn('[MapHome] Alarm point not found:', payload);
+    }
   }
 
   async function onCameraClick(camera: CameraMapPoint) {

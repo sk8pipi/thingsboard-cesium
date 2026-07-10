@@ -26,6 +26,7 @@
       @ack="handleAck"
       @clear="handleClear"
       @detail="openDetail"
+      @focus="handleFocus"
     />
 
     <AlarmDetailDialog v-model:visible="detailVisible" :item="currentDetailItem" />
@@ -42,6 +43,7 @@ import { useAlarmData } from '../composables/useAlarmData';
 import { handleAckAlarm, handleClearAlarm } from '../actions';
 import type { AlarmItem } from '../types';
 import { normalizeId } from '../utils';
+import { emitAlarmFocus } from '../focus';
 
 const props = defineProps<{
   widget?: any;
@@ -199,6 +201,10 @@ async function handleClear(item: AlarmItem) {
 function openDetail(item: AlarmItem) {
   currentDetailItem.value = item;
   detailVisible.value = true;
+}
+
+function handleFocus(item: AlarmItem) {
+  emitAlarmFocus(item, props.ctx);
 }
 
 watch(

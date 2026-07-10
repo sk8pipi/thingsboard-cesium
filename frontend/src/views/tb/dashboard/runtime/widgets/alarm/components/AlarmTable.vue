@@ -24,7 +24,8 @@
               v-for="item in rows"
               :key="item.id"
               class="alarm-table__row"
-              @dblclick="$emit('detail', item)"
+              @click="emit('focus', item)"
+              @dblclick.stop="emit('detail', item)"
             >
               <td>{{ item.name || '-' }}</td>
               <td v-if="showColumn('type')">{{ item.type || '-' }}</td>
@@ -44,7 +45,7 @@
                     v-if="settings.showAck"
                     class="alarm-table__btn"
                     :disabled="!canAckAlarm(item)"
-                    @click="$emit('ack', item)"
+                    @click.stop="emit('ack', item)"
                   >
                     确认
                   </button>
@@ -52,13 +53,13 @@
                     v-if="settings.showClear"
                     class="alarm-table__btn alarm-table__btn--warn"
                     :disabled="!canClearAlarm(item)"
-                    @click="$emit('clear', item)"
+                    @click.stop="emit('clear', item)"
                   >
                     清除
                   </button>
                   <button
                     class="alarm-table__btn alarm-table__btn--ghost"
-                    @click="$emit('detail', item)"
+                    @click.stop="emit('detail', item)"
                   >
                     详情
                   </button>
@@ -100,12 +101,13 @@ const props = defineProps<{
   hasNext: boolean;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'prev-page'): void;
   (e: 'next-page'): void;
   (e: 'ack', item: AlarmItem): void;
   (e: 'clear', item: AlarmItem): void;
   (e: 'detail', item: AlarmItem): void;
+  (e: 'focus', item: AlarmItem): void;
 }>();
 
 function showColumn(name: string) {
@@ -138,6 +140,9 @@ function showColumn(name: string) {
 .alarm-table thead th {
   background: #fafafa;
   font-weight: 600;
+}
+.alarm-table__row {
+  cursor: pointer;
 }
 .alarm-table__row:hover {
   background: #fafcff;

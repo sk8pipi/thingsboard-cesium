@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div ref="cesiumEl" class="cesium-container"></div>
 </template>
 
@@ -760,6 +760,7 @@
   defineExpose({
     renderSensorPoints,
     renderCameraPoints,
+    flyToPoint,
     getViewer: () => viewer,
   });
 

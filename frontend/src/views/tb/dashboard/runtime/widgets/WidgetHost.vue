@@ -33,6 +33,7 @@
       readonly?: boolean;
       entity?: Record<string, any> | null;
       runtimeDevices?: Record<string, Record<string, unknown>> | null;
+      emit?: (event: string, payload?: unknown) => void;
     };
   }>();
 
@@ -53,6 +54,7 @@
     entity: props.context?.entity || null,
     runtimeDevices: props.context?.runtimeDevices || null,
     data: runtimeData.value,
+    emit: (event: string, payload?: unknown) => props.context?.emit?.(event, payload),
   }));
 
   onMounted(() => {

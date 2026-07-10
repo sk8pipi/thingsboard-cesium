@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="mw-editor" :style="templateAppearanceCssVars">
     <SelectDeviceDialog
       :visible="widgetDeviceDialogVisible"
@@ -466,6 +466,7 @@
     TbWidgetConfig,
     WidgetAppearance,
   } from '../dashboard/runtime/types';
+  import type { AlarmFocusPayload } from '../dashboard/runtime/widgets/alarm/focus';
   import { importThingsboardJson } from './widgetLibrary/importThingsboardWidget';
   import { loadWidgetLibrary, removeWidget, upsertWidget } from './widgetLibrary/libraryStorage';
   import type { CustomWidgetDefinition } from './widgetLibrary/types';
@@ -513,6 +514,7 @@
   };
   type CesiumMapExpose = {
     getViewer: () => Cesium.Viewer | undefined;
+    flyToPoint: (point: MapPointLocation) => void;
   };
 
   function cloneJson<T>(value: T): T {
@@ -1235,6 +1237,9 @@
             host: 'editor',
             readonly: editorMode.value === 'view',
             runtimeDevices: templateRuntimeDevices.value,
+            emit: (event: string, payload?: unknown) => {
+              if (event === 'alarm-focus') onAlarmFocus(payload as AlarmFocusPayload);
+            },
           },
         }),
     });
@@ -2036,6 +2041,39 @@
 
     sensorConfigVisible.value = false;
     sensorPreviewVisible.value = true;
+  }
+
+  function findAlarmPoint(payload: AlarmFocusPayload) {
+    const pointId = payload.pointId || '';
+    const originatorId = payload.originatorId || '';
+    return activeMapPoints.value.find((point) => {
+      if (pointId && point.id === pointId) return true;
+      if (originatorId && point.entityId === originatorId) return true;
+      return false;
+    });
+  }
+
+  function onAlarmFocus(payload: AlarmFocusPayload) {
+    const point = findAlarmPoint(payload);
+    if (point) {
+      cesiumMapRef.value?.flyToPoint(point);
+      if (point.type === 'sensor') {
+        onSensorClick(point);
+      } else {
+        void onCameraClick(point);
+      }
+      return;
+    }
+
+    if (Number.isFinite(payload.longitude) && Number.isFinite(payload.latitude)) {
+      cesiumMapRef.value?.flyToPoint({
+        longitude: payload.longitude as number,
+        latitude: payload.latitude as number,
+        height: payload.height,
+      });
+    } else {
+      errorMsg.value = '未找到该报警对应的地图点位';
+    }
   }
 
   async function onCameraClick(camera: CameraMapPoint) {

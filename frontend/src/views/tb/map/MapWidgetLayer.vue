@@ -13,6 +13,7 @@
   import { normalizeWidgetRecord, widgetAppearanceStyleText } from '../dashboard/runtime/widgets/core/widgetInstance';
   import '../dashboard/runtime/widgets/core/widgetSurface.css';
   import type { DashboardWidget, GridItem, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
+  import type { AlarmFocusPayload } from '../dashboard/runtime/widgets/alarm/focus';
   import type { MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
 
   type WidgetData = DashboardWidget & {
@@ -30,6 +31,10 @@
     data?: WidgetLayerData | null;
     runtimeDevices?: MapTemplateRuntimeDevices | null;
     runtime?: DatasourceRuntime;
+  }>();
+
+  const emit = defineEmits<{
+    (e: 'alarm-focus', payload: AlarmFocusPayload): void;
   }>();
 
   const gridEl = ref<HTMLDivElement | null>(null);
@@ -115,7 +120,14 @@
         h(WidgetHost, {
           widget,
           runtime: datasourceRuntime,
-          context: { host: 'dashboard', readonly: true, runtimeDevices: props.runtimeDevices },
+          context: {
+            host: 'dashboard',
+            readonly: true,
+            runtimeDevices: props.runtimeDevices,
+            emit: (event: string, payload?: unknown) => {
+              if (event === 'alarm-focus') emit('alarm-focus', payload as AlarmFocusPayload);
+            },
+          },
         }),
     });
 

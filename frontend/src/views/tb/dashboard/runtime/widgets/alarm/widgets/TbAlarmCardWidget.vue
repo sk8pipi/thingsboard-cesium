@@ -22,7 +22,8 @@
         v-for="item in rows"
         :key="item.id"
         class="tb-alarm-card-widget__item"
-        @dblclick="openDetail(item)"
+        @click="handleFocus(item)"
+        @dblclick.stop="openDetail(item)"
       >
         <div class="tb-alarm-card-widget__header">
           <div class="tb-alarm-card-widget__name">{{ item.name }}</div>
@@ -41,7 +42,7 @@
             v-if="settings.showAck"
             class="tb-alarm-card-widget__btn"
             :disabled="!canAckAlarm(item)"
-            @click="handleAck(item)"
+            @click.stop="handleAck(item)"
           >
             确认
           </button>
@@ -49,13 +50,13 @@
             v-if="settings.showClear"
             class="tb-alarm-card-widget__btn tb-alarm-card-widget__btn--warn"
             :disabled="!canClearAlarm(item)"
-            @click="handleClear(item)"
+            @click.stop="handleClear(item)"
           >
             清除
           </button>
           <button
             class="tb-alarm-card-widget__btn tb-alarm-card-widget__btn--ghost"
-            @click="openDetail(item)"
+            @click.stop="openDetail(item)"
           >
             详情
           </button>
@@ -90,6 +91,7 @@ import { useAlarmData } from '../composables/useAlarmData';
 import { handleAckAlarm, handleClearAlarm } from '../actions';
 import type { AlarmItem } from '../types';
 import { canAckAlarm, canClearAlarm, formatAlarmTime, normalizeId } from '../utils';
+import { emitAlarmFocus } from '../focus';
 
 const props = defineProps<{
   widget?: any;
@@ -229,6 +231,10 @@ async function handleClear(item: AlarmItem) {
 function openDetail(item: AlarmItem) {
   currentDetailItem.value = item;
   detailVisible.value = true;
+}
+
+function handleFocus(item: AlarmItem) {
+  emitAlarmFocus(item, props.ctx);
 }
 
 watch(
