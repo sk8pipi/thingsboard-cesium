@@ -42,6 +42,7 @@ export interface SensorDatasourceKey {
 
 export interface SensorMapPoint extends BaseMapPoint {
   type: 'sensor';
+  deviceType?: string;
   sensorType?: string;
   sensorStyleOverride?: {
     color?: string;

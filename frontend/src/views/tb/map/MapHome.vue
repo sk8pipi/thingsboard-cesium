@@ -9,7 +9,7 @@
       :fly-to-first-camera="!isSysAdminMap"
       :globe-only="mapGlobeOnly"
       :scene-models="sceneModels"
-      :enable-sensor-type-styles="isCustomerUserMap"
+      :enable-sensor-type-styles="enableMapSensorTypeStyles"
       :sensor-device-type-styles="assignedTemplateState?.sensorDeviceTypeStyles || {}"
       @sensor-click="onSensorClick"
       @camera-click="onCameraClick"
@@ -64,6 +64,7 @@
   import SensorWidgetPopup from './SensorWidgetPopup.vue';
   import CameraMonitorPopup from './components/CameraMonitorPopup.vue';
   import { getMapWidgetStorageKey } from './mapWidgetStorage';
+  import { resolveSensorDeviceType } from './services/sensorPointStyleService';
   import { getMapPointStorageKey, loadMapPoints } from './mapPointStorage';
   import { loadCameraRuntimeInfo } from './services/cameraDeviceRuntimeService';
   import {
@@ -78,7 +79,13 @@
     loadDeviceMapPointStatuses,
     type DeviceMapPointStatus,
   } from './services/deviceMapPointService';
-  import type { CameraMapPoint, CameraRuntimeInfo, MapPoint, MapPointLocation, SensorMapPoint } from './types/mapPointTypes';
+  import type {
+    CameraMapPoint,
+    CameraRuntimeInfo,
+    MapPoint,
+    MapPointLocation,
+    SensorMapPoint,
+  } from './types/mapPointTypes';
   import type { AlarmFocusPayload } from '../dashboard/runtime/widgets/alarm/focus';
   import type { PopupWidgetConfig } from './sensorPopupWidgetStorage';
   import {
@@ -163,6 +170,10 @@
     mapPoints.value.filter((point): point is CameraMapPoint => point.type === 'camera'),
   );
   const hasAssignedTemplate = computed(() => Boolean(assignedTemplateState.value));
+  const hasSensorDeviceTypeStyles = computed(
+    () => Object.keys(assignedTemplateState.value?.sensorDeviceTypeStyles || {}).length > 0,
+  );
+  const enableMapSensorTypeStyles = computed(() => isCustomerUserMap.value || hasSensorDeviceTypeStyles.value);
   const showDefaultGlobeOnly = computed(
     () => isSysAdminMap.value || (isCustomerUserMap.value && !hasAssignedTemplate.value),
   );
@@ -245,39 +256,13 @@
     return online ? '\u5728\u7ebf' : '\u79bb\u7ebf';
   }
 
-  function toRuntimeText(value: unknown): string {
-    if (value === undefined || value === null) return '';
-    if (typeof value === 'string') {
-      const optionalMatch = value.match(/^Optional\[(.*)\]$/);
-      return (optionalMatch ? optionalMatch[1] : value).trim();
-    }
-    if (typeof value === 'object') {
-      const record = value as Record<string, unknown>;
-      return toRuntimeText(record.value ?? record.data ?? record.rawValue ?? record.name ?? '');
-    }
-    return String(value).trim();
-  }
   function mergeRuntimeIntoPoint(point: MapPoint, runtime?: Record<string, unknown>): MapPoint {
     if (!runtime) return point;
 
     const online = toRuntimeBoolean(runtime.online ?? runtime.status ?? runtime.active);
     const streamOnline = online === false ? false : toRuntimeBoolean(runtime.streamOnline ?? runtime.streamAlive);
     const statusText = normalizeRuntimeStatusText(runtime.statusText, online) || point.statusText;
-    const runtimeSensorType =
-      toRuntimeText(runtime.sensorType) ||
-      toRuntimeText(runtime.deviceType) ||
-      toRuntimeText(runtime.deviceProfileName) ||
-      toRuntimeText(runtime.deviceProfile) ||
-      toRuntimeText(runtime.profileName) ||
-      toRuntimeText(runtime.tbDeviceType) ||
-      toRuntimeText(runtime.type);
-    const pointSensorType =
-      point.type === 'sensor'
-        ? toRuntimeText((point as SensorMapPoint).sensorType) ||
-          toRuntimeText((point as any).deviceType) ||
-          toRuntimeText(point.description)
-        : '';
-    const sensorType = point.type === 'sensor' ? runtimeSensorType || pointSensorType || undefined : undefined;
+    const deviceType = point.type === 'sensor' ? resolveSensorDeviceType(runtime) || undefined : undefined;
     const color =
       online === undefined ? (point as any).color : online ? (point.type === 'camera' ? 'green' : 'blue') : 'gray';
 
@@ -299,7 +284,7 @@
       streamAlive: online === false ? false : ((runtime as any).streamAlive ?? (point as any).streamAlive),
       statusText,
       color,
-      sensorType,
+      deviceType,
     } as unknown as MapPoint;
   }
 

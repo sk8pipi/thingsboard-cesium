@@ -122,10 +122,38 @@ const ONLINE_ICON_COLOR = '#111827';
 const OFFLINE_BODY_COLOR = '#94A3B8';
 const OFFLINE_ICON_COLOR = '#475569';
 
-export const UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY = '__unset_deviceType';
+const LEGACY_UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY = '__unset_deviceType';
+export const UNKNOWN_SENSOR_DEVICE_TYPE_STYLE_KEY = '__unknown_device_type__';
+// Kept as an alias so previously saved templates continue to resolve safely.
+export const UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY = UNKNOWN_SENSOR_DEVICE_TYPE_STYLE_KEY;
 
 export function normalizeDeviceTypeStyleKey(value: unknown) {
-  return String(value || '').trim() || UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY;
+  const normalized = toDeviceTypeText(value);
+  if (!normalized || normalized === LEGACY_UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY) {
+    return UNKNOWN_SENSOR_DEVICE_TYPE_STYLE_KEY;
+  }
+  return normalized;
+}
+
+function toDeviceTypeText(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') {
+    const optionalMatch = value.match(/^Optional\[(.*)\]$/);
+    return (optionalMatch ? optionalMatch[1] : value).trim();
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return toDeviceTypeText(record.value ?? record.data ?? record.rawValue ?? record.name ?? '');
+  }
+  return String(value).trim();
+}
+
+/**
+ * Resolves the persisted map style key. Descriptions are deliberately excluded:
+ * a device without an explicit type must use the default point style.
+ */
+export function resolveSensorDeviceType(source?: { deviceType?: unknown } | null): string {
+  return source ? toDeviceTypeText(source.deviceType) : '';
 }
 
 export function normalizeSensorType(value: unknown): BuiltInSensorType {

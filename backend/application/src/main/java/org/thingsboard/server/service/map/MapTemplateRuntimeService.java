@@ -395,9 +395,7 @@ public class MapTemplateRuntimeService {
             if (entry != null && entry.getKey() != null) {
                 Object value = unwrapKvValue(entry.getValue());
                 values.put(entry.getKey(), value);
-                if ("deviceType".equals(entry.getKey())) {
-                    values.put("sensorType", value);
-                }
+
             }
         }
     }

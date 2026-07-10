@@ -1,7 +1,7 @@
-﻿import type { CSSProperties } from 'vue';
+import type { CSSProperties } from 'vue';
 import type { GridItem, WidgetAppearance } from '../dashboard/runtime/types';
 import type { SensorPopupBinding } from './sensorPopupWidgetStorage';
-import type { SensorPointStyleOverride } from './services/sensorPointStyleService';
+import { normalizeDeviceTypeStyleKey, type SensorPointStyleOverride } from './services/sensorPointStyleService';
 import type { MapPoint } from './types/mapPointTypes';
 
 export const DASHBOARD_MAP_WIDGET_CONFIG_KEY = '__mapWidgetEditor';
@@ -33,6 +33,19 @@ export type MapSceneModel = {
 export type MapTemplateAppearance = Pick<WidgetAppearance, 'backgroundOpacity' | 'blurPx'>;
 
 export type SensorDeviceTypeStyles = Record<string, SensorPointStyleOverride>;
+
+function normalizeSensorDeviceTypeStyles(value: unknown): SensorDeviceTypeStyles {
+  if (!value || typeof value !== 'object') return {};
+  return Object.entries(value as Record<string, SensorPointStyleOverride>).reduce<SensorDeviceTypeStyles>(
+    (styles, [key, style]) => {
+      if (style && typeof style === 'object') {
+        styles[normalizeDeviceTypeStyleKey(key)] = style;
+      }
+      return styles;
+    },
+    {},
+  );
+}
 
 export const DEFAULT_MAP_TEMPLATE_APPEARANCE: Required<MapTemplateAppearance> = {
   backgroundOpacity: 0.04,
@@ -110,10 +123,7 @@ export function normalizeMapTemplateState(state?: Partial<MapTemplateState> | nu
     mapPoints: Array.isArray(state?.mapPoints) ? state.mapPoints : [],
     sensorPopupBindings:
       state?.sensorPopupBindings && typeof state.sensorPopupBindings === 'object' ? state.sensorPopupBindings : {},
-    sensorDeviceTypeStyles:
-      state?.sensorDeviceTypeStyles && typeof state.sensorDeviceTypeStyles === 'object'
-        ? (state.sensorDeviceTypeStyles as SensorDeviceTypeStyles)
-        : {},
+    sensorDeviceTypeStyles: normalizeSensorDeviceTypeStyles(state?.sensorDeviceTypeStyles),
     appearance: {
       ...fallback.appearance,
       ...(state?.appearance || {}),
