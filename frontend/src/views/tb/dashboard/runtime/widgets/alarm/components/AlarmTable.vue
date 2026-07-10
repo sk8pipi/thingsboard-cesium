@@ -337,4 +337,32 @@
     padding: 5px 8px;
     font-size: 12px;
   }
+  /* Transparent map-overlay table surface. */
+  .alarm-table__viewport {
+    background: transparent;
+    scrollbar-color: rgba(226, 232, 240, 0.45) transparent;
+  }
+  .alarm-table {
+    background: transparent;
+  }
+  .alarm-table th,
+  .alarm-table td {
+    height: 42px;
+    padding: 7px 10px;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  .alarm-table thead th {
+    background: rgba(15, 23, 42, 0.45);
+    color: #f8fafc;
+  }
+  .alarm-table td {
+    color: #f8fafc;
+  }
+  .alarm-table__time {
+    color: rgba(226, 232, 240, 0.72);
+  }
+  .alarm-table__row:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
 </style>
