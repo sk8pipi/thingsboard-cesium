@@ -1,8 +1,8 @@
 <template>
   <div class="tb-alarm-widget">
-    <div v-if="settings.title" class="tb-alarm-widget__title">
+    <!-- <div v-if="settings.title" class="tb-alarm-widget__title">
       {{ settings.title }}
-    </div>
+    </div> -->
 
     <AlarmToolbar
       v-if="settings.showSearch"
@@ -14,17 +14,12 @@
     />
 
     <AlarmTable
+      class="tb-alarm-widget__table"
       :rows="rows"
       :loading="loading"
       :error="error"
       :settings="settings"
-      :page="page"
-      :total="total"
-      :has-next="hasNext"
-      @prev-page="handlePrevPage"
-      @next-page="handleNextPage"
       @ack="handleAck"
-      @clear="handleClear"
       @detail="openDetail"
       @focus="handleFocus"
     />
@@ -34,221 +29,235 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
-import AlarmToolbar from '../components/AlarmToolbar.vue';
-import AlarmTable from '../components/AlarmTable.vue';
-import AlarmDetailDialog from '../components/AlarmDetailDialog.vue';
-import { parseAlarmSettings } from '../settings';
-import { useAlarmData } from '../composables/useAlarmData';
-import { handleAckAlarm, handleClearAlarm } from '../actions';
-import type { AlarmItem } from '../types';
-import { normalizeId } from '../utils';
-import { emitAlarmFocus } from '../focus';
+  import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+  import AlarmToolbar from '../components/AlarmToolbar.vue';
+  import AlarmTable from '../components/AlarmTable.vue';
+  import AlarmDetailDialog from '../components/AlarmDetailDialog.vue';
+  import { parseAlarmSettings } from '../settings';
+  import { useAlarmData } from '../composables/useAlarmData';
+  import { handleAckAlarm } from '../actions';
+  import type { AlarmItem } from '../types';
+  import { normalizeId } from '../utils';
+  import { emitAlarmFocus } from '../focus';
 
-const props = defineProps<{
-  widget?: any;
-  datasource?: any;
-  ctx?: any;
-  timewindow?: {
-    startTs?: number;
-    endTs?: number;
-  };
-}>();
+  const props = defineProps<{
+    widget?: any;
+    datasource?: any;
+    ctx?: any;
+    timewindow?: {
+      startTs?: number;
+      endTs?: number;
+    };
+  }>();
+  const searchText = ref('');
+  const statusValue = ref('');
+  const severityValue = ref('');
 
-const page = ref(0);
-const searchText = ref('');
-const statusValue = ref('');
-const severityValue = ref('');
+  const detailVisible = ref(false);
+  const currentDetailItem = ref<AlarmItem | null>(null);
 
-const detailVisible = ref(false);
-const currentDetailItem = ref<AlarmItem | null>(null);
+  let autoRefreshTimer: number | undefined;
+  let autoRefreshing = false;
 
-const settings = computed(() => {
-  const rawSettings =
-    props.widget?.config?.settings ||
-    props.widget?.settings ||
-    {};
-  return parseAlarmSettings(rawSettings);
-});
+  const settings = computed(() => {
+    const rawSettings = props.widget?.config?.settings || props.widget?.settings || {};
+    return parseAlarmSettings(rawSettings);
+  });
 
-const hasValidDatasource = computed(() => {
-  const { entityId, entityType } = resolveEntity();
-  return !!entityId && !!entityType;
-});
+  const hasValidDatasource = computed(() => {
+    const { entityId, entityType } = resolveEntity();
+    const { startTime, endTime } = resolveQueryTimewindow();
+    return !!entityId && !!entityType;
+  });
 
-function resolveDatasource() {
-  return (
-    props.datasource ||
-    props.widget?.config?.datasource ||
-    props.widget?.config?.datasources?.[0] ||
-    props.widget?.datasource ||
-    null
-  );
-}
-
-function normalizeEntityType(type?: string) {
-  if (!type) return '';
-  return String(type).toUpperCase();
-}
-
-function resolveEntity() {
-  const ds = resolveDatasource();
-
-  const entityId =
-    normalizeId(ds?.entityId) ||
-    normalizeId(ds?.deviceId) ||
-    normalizeId(ds?.entity?.id) ||
-    '';
-
-  const entityType =
-    normalizeEntityType(
-      ds?.entityType ||
-      ds?.entity?.entityType ||
-      ''
+  function resolveDatasource() {
+    return (
+      props.datasource ||
+      props.widget?.config?.datasource ||
+      props.widget?.config?.datasources?.[0] ||
+      props.widget?.datasource ||
+      null
     );
-
-  return {
-    entityId,
-    entityType,
-  };
-}
-
-function buildQuery() {
-  const { entityId, entityType } = resolveEntity();
-
-  const statusList = statusValue.value
-    ? [statusValue.value]
-    : (settings.value.defaultStatusList?.length ? settings.value.defaultStatusList : undefined);
-
-  const severityList = severityValue.value
-    ? [severityValue.value]
-    : (settings.value.defaultSeverityList?.length ? settings.value.defaultSeverityList : undefined);
-
-  return {
-    page: page.value,
-    pageSize: settings.value.pageSize,
-    searchText: searchText.value.trim() || undefined,
-    sortProperty: 'createdTime' as const,
-    sortOrder: 'DESC' as const,
-    startTime: props.timewindow?.startTs,
-    endTime: props.timewindow?.endTs,
-    statusList,
-    severityList,
-    entityId: entityId || undefined,
-    entityType: entityType || undefined,
-  };
-}
-
-const { rows, loading, error, hasNext, total, reload } = useAlarmData(buildQuery);
-
-async function reloadSilently() {
-  try {
-    const q = buildQuery();
-    console.log('[alarm.buildQuery]', q);
-    console.log('[alarm.datasource]', resolveDatasource());
-    await reload();
-  } catch (e: any) {
-    console.error('[alarm.reload]', e);
-    console.error('[alarm.reload.response]', e?.response?.data);
   }
-}
 
-function handleSearch() {
-  page.value = 0;
-  reloadSilently();
-}
-
-function handlePrevPage() {
-  if (page.value <= 0) return;
-  page.value -= 1;
-  reloadSilently();
-}
-
-function handleNextPage() {
-  if (!hasNext.value) return;
-  page.value += 1;
-  reloadSilently();
-}
-
-async function handleAck(item: AlarmItem) {
-  try {
-    await handleAckAlarm(item, {
-      item,
-      widget: props.widget,
-      datasource: props.datasource,
-      ctx: props.ctx,
-    });
-    await reloadSilently();
-  } catch (e) {
-    console.error('[alarm.ack]', e);
+  function normalizeEntityType(type?: string) {
+    if (!type) return '';
+    return String(type).toUpperCase();
   }
-}
 
-async function handleClear(item: AlarmItem) {
-  try {
-    await handleClearAlarm(item, {
-      item,
-      widget: props.widget,
-      datasource: props.datasource,
-      ctx: props.ctx,
-    });
-    await reloadSilently();
-  } catch (e) {
-    console.error('[alarm.clear]', e);
+  function resolveEntity() {
+    const ds = resolveDatasource();
+
+    const entityId = normalizeId(ds?.entityId) || normalizeId(ds?.deviceId) || normalizeId(ds?.entity?.id) || '';
+
+    const entityType = normalizeEntityType(ds?.entityType || ds?.entity?.entityType || '');
+
+    return {
+      entityId,
+      entityType,
+    };
   }
-}
 
-function openDetail(item: AlarmItem) {
-  currentDetailItem.value = item;
-  detailVisible.value = true;
-}
+  function resolveQueryTimewindow() {
+    const configuredWindow = props.widget?.config?.timewindow;
+    const isRealtime = configuredWindow?.realtime !== false;
 
-function handleFocus(item: AlarmItem) {
-  emitAlarmFocus(item, props.ctx);
-}
+    if (!isRealtime) {
+      return {
+        startTime,
+        endTime,
+      };
+    }
 
-watch(
-  () => [
-    props.datasource,
-    props.widget,
-    props.timewindow?.startTs,
-    props.timewindow?.endTs,
-    settings.value.pageSize,
-  ],
-  () => {
-    page.value = 0;
+    const hostInterval =
+      props.timewindow?.startTs && props.timewindow?.endTs ? props.timewindow.endTs - props.timewindow.startTs : 0;
+    const configuredInterval = Number(configuredWindow?.intervalMs);
+    const intervalMs = configuredInterval > 0 ? configuredInterval : hostInterval || 300000;
+    const endTime = Date.now();
+
+    return {
+      startTime: endTime - intervalMs,
+      endTime,
+    };
+  }
+
+  function buildQuery() {
+    const { entityId, entityType } = resolveEntity();
+    const { startTime, endTime } = resolveQueryTimewindow();
+
+    const statusList = statusValue.value
+      ? [statusValue.value]
+      : settings.value.defaultStatusList?.length
+        ? settings.value.defaultStatusList
+        : undefined;
+
+    const severityList = severityValue.value
+      ? [severityValue.value]
+      : settings.value.defaultSeverityList?.length
+        ? settings.value.defaultSeverityList
+        : undefined;
+
+    return {
+      page: 0,
+      pageSize: Math.max(settings.value.pageSize, 100),
+      searchText: searchText.value.trim() || undefined,
+      sortProperty: 'createdTime' as const,
+      sortOrder: 'DESC' as const,
+      startTime,
+      endTime,
+      statusList,
+      severityList,
+      entityId: entityId || undefined,
+      entityType: entityType || undefined,
+    };
+  }
+
+  const { rows, loading, error, reload } = useAlarmData(buildQuery);
+
+  async function reloadSilently() {
+    if (autoRefreshing) return;
+
+    autoRefreshing = true;
+    try {
+      const q = buildQuery();
+      console.log('[alarm.buildQuery]', q);
+      console.log('[alarm.datasource]', resolveDatasource());
+      await reload();
+    } catch (e: any) {
+      console.error('[alarm.reload]', e);
+      console.error('[alarm.reload.response]', e?.response?.data);
+    } finally {
+      autoRefreshing = false;
+    }
+  }
+
+  function startAutoRefresh() {
+    if (autoRefreshTimer) return;
+
+    autoRefreshTimer = window.setInterval(() => {
+      if (!document.hidden) {
+        void reloadSilently();
+      }
+    }, 5000);
+  }
+
+  function stopAutoRefresh() {
+    if (!autoRefreshTimer) return;
+    window.clearInterval(autoRefreshTimer);
+    autoRefreshTimer = undefined;
+  }
+
+  function handleSearch() {
     reloadSilently();
-  },
-  { deep: true }
-);
+  }
 
-onMounted(() => {
-  reloadSilently();
-});
+  async function handleAck(item: AlarmItem) {
+    try {
+      await handleAckAlarm(item, {
+        item,
+        widget: props.widget,
+        datasource: props.datasource,
+        ctx: props.ctx,
+      });
+      await reloadSilently();
+    } catch (e) {
+      console.error('[alarm.ack]', e);
+    }
+  }
+
+  function openDetail(item: AlarmItem) {
+    currentDetailItem.value = item;
+    detailVisible.value = true;
+  }
+
+  function handleFocus(item: AlarmItem) {
+    emitAlarmFocus(item, props.ctx);
+  }
+
+  watch(
+    () => [props.datasource, props.widget, props.timewindow?.startTs, props.timewindow?.endTs, settings.value.pageSize],
+    () => {
+      reloadSilently();
+    },
+    { deep: true },
+  );
+
+  onMounted(() => {
+    void reloadSilently();
+    startAutoRefresh();
+  });
+
+  onBeforeUnmount(() => {
+    stopAutoRefresh();
+  });
 </script>
 
 <style scoped>
-.tb-alarm-widget {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  min-height: 220px;
-}
-.tb-alarm-widget__title {
-  margin-bottom: 12px;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1f1f1f;
-}
-.tb-alarm-widget__placeholder {
-  min-height: 160px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #8c8c8c;
-  border: 1px dashed #d9d9d9;
-  border-radius: 10px;
-  background: #fafafa;
-}
+  .tb-alarm-widget {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 220px;
+  }
+  .tb-alarm-widget__table {
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+  .tb-alarm-widget__title {
+    margin-bottom: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1f1f1f;
+  }
+  .tb-alarm-widget__placeholder {
+    min-height: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8c8c8c;
+    border: 1px dashed #d9d9d9;
+    border-radius: 10px;
+    background: #fafafa;
+  }
 </style>

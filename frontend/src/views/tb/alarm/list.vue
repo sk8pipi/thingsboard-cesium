@@ -47,7 +47,7 @@
   });
 </script>
 <script lang="ts" setup>
-  import { defineComponent, reactive, ref } from 'vue';
+  import { defineComponent, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref } from 'vue';
   import { useI18n } from '/@/hooks/web/useI18n';
   import { useModal } from '/@/components/Modal';
   import { BasicTable, BasicColumn, useTable } from '/@/components/Table';
@@ -183,6 +183,32 @@
     canResize: true,
   });
 
+  let autoRefreshTimer: number | undefined;
+  let autoRefreshing = false;
+
+  async function reloadAlarmsSilently() {
+    if (autoRefreshing || document.hidden) return;
+    autoRefreshing = true;
+    try {
+      await reload();
+    } finally {
+      autoRefreshing = false;
+    }
+  }
+
+  function startAutoRefresh() {
+    if (autoRefreshTimer) return;
+    autoRefreshTimer = window.setInterval(() => {
+      void reloadAlarmsSilently();
+    }, 5000);
+  }
+
+  function stopAutoRefresh() {
+    if (!autoRefreshTimer) return;
+    window.clearInterval(autoRefreshTimer);
+    autoRefreshTimer = undefined;
+  }
+
   function wrapFetchParams(param: any) {
     const startTime = searchParam.timeRange && searchParam.timeRange[0] ? searchParam.timeRange[0].valueOf() : null;
     const endTime = searchParam.timeRange && searchParam.timeRange[1] ? searchParam.timeRange[1].valueOf() : null;
@@ -239,4 +265,12 @@
   function handleDetail(record: Recordable) {
     openModal(true, record);
   }
+
+  onMounted(startAutoRefresh);
+  onActivated(() => {
+    startAutoRefresh();
+    void reloadAlarmsSilently();
+  });
+  onDeactivated(stopAutoRefresh);
+  onBeforeUnmount(stopAutoRefresh);
 </script>

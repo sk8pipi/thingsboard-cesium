@@ -54,11 +54,10 @@
     };
   }
 
-  function widgetHtml(id: string, title: string, widget: WidgetData) {
+  function widgetHtml(id: string, widget: WidgetData) {
     const surfaceStyle = widgetAppearanceStyleText(widget.widgetKey, widget.appearance);
     return `
       <div class="mw-widget tb-widget-surface" style="${surfaceStyle}">
-        <div class="mw-title">${title}</div>
         <div class="mw-body">
           <div id="mw-mount-${id}" class="mw-mount"></div>
         </div>
@@ -147,15 +146,13 @@
       const w = widgets[it.i];
       if (!w) continue;
 
-      const title = w.title || it.i;
-
       grid.addWidget({
         id: it.i,
         x: it.x,
         y: it.y,
         w: it.w,
         h: it.h,
-        content: widgetHtml(it.i, title, w),
+        content: widgetHtml(it.i, w),
       } as any);
 
       await mountWidget(it.i, w);
@@ -244,17 +241,6 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
-  }
-
-  :deep(.mw-title) {
-    height: 34px;
-    line-height: 34px;
-    padding: 0 10px;
-    font-size: 13px;
-    font-weight: 600;
-    color: #fff;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-    user-select: none;
   }
 
   :deep(.mw-body) {

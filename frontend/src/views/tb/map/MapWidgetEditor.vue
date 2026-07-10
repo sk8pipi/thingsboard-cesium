@@ -1452,13 +1452,12 @@
     mountedApps.set(id, app);
   }
 
-  function widgetHtml(id: string, title: string) {
+  function widgetHtml(id: string) {
     const widget = widgets.value[id];
     const surfaceStyle = widgetAppearanceStyleText(widget?.widgetKey || widget?.type || '', widget?.appearance);
     return `
       <div class="mw-widget tb-widget-surface" data-widget-id="${id}" style="${surfaceStyle}">
         <button class="mw-del" data-id="${id}" title="删除">脳</button>
-        <div class="mw-title" data-widget-id="${id}">${title}</div>
         <div class="mw-body">
           <div id="mw-mount-${id}" class="mw-mount"></div>
         </div>
@@ -1474,7 +1473,7 @@
 
     layout.value.forEach((item) => {
       const widget = widgets.value[item.i];
-      const title = widget?.title || item.i;
+
       const widgetKey = (widget?.widgetKey || widget?.type) as LocalWidgetKey | undefined;
 
       grid?.addWidget({
@@ -1483,7 +1482,7 @@
         y: item.y,
         w: item.w,
         h: item.h,
-        content: widgetHtml(item.i, title),
+        content: widgetHtml(item.i),
       } as any);
 
       if (widgetKey) {
@@ -1542,8 +1541,8 @@
       return;
     }
 
-    const titleEl = target.closest?.('.mw-title') as HTMLElement | null;
-    const widgetId = titleEl?.getAttribute('data-widget-id') || '';
+    const widgetEl = target.closest?.('.mw-widget') as HTMLElement | null;
+    const widgetId = widgetEl?.getAttribute('data-widget-id') || '';
     if (widgetId) {
       selectedWidgetId.value = widgetId;
       addPanelVisible.value = false;
@@ -1566,7 +1565,7 @@
       id,
       w: def.dashboardPlacement.width,
       h: def.dashboardPlacement.height,
-      content: widgetHtml(id, title),
+      content: widgetHtml(id),
     } as any);
 
     void mountWidget(id, key);
@@ -2385,8 +2384,8 @@
         margin: 10,
         float: true,
         draggable: {
-          handle: '.mw-title',
-          cancel: '.mw-body, .mw-mount, button, input, textarea, select, option, canvas, video, iframe',
+          handle: '.mw-widget',
+          cancel: 'button, input, textarea, select, option, canvas, video, iframe',
         },
         disableResize: false,
         resizable: { handles: 'all' },
@@ -3271,18 +3270,6 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-  }
-
-  :deep(.mw-title) {
-    height: 34px;
-    line-height: 34px;
-    padding: 0 36px 0 10px;
-    font-size: 13px;
-    font-weight: 600;
-    color: #fff;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-    user-select: none;
-    cursor: move;
   }
 
   :deep(.mw-body) {

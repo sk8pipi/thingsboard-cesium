@@ -18,6 +18,7 @@ function buildAlarmParams(query: AlarmQuery) {
     endTime: query.endTime ?? null,
     severityList: Array.isArray(query.severityList) && query.severityList.length ? query.severityList.join(',') : null,
     statusList: Array.isArray(query.statusList) && query.statusList.length ? query.statusList.join(',') : null,
+    _t: Date.now(),
   };
 }
 

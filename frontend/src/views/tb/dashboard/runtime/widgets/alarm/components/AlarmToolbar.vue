@@ -1,4 +1,4 @@
-<template>
+<!-- <template>
   <div class="alarm-toolbar">
     <input
       class="alarm-toolbar__input"
@@ -27,7 +27,7 @@
       刷新
     </button>
   </div>
-</template>
+</template> -->
 
 <script setup lang="ts">
 import { DEFAULT_SEVERITY_OPTIONS, DEFAULT_STATUS_OPTIONS } from '../constants';

@@ -18,11 +18,15 @@ withDefaults(
 
 <style scoped>
 .alarm-empty {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 160px;
   color: #8c8c8c;
 }
 .alarm-empty__icon {

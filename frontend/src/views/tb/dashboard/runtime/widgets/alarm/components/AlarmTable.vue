@@ -1,186 +1,340 @@
 <template>
   <div class="alarm-table-wrap" :class="{ 'is-dense': settings?.dense }">
-    <div v-if="loading" class="alarm-table-wrap__loading">加载中...</div>
+    <div v-if="loading" class="alarm-table-wrap__loading">&#x52A0;&#x8F7D;&#x4E2D;...</div>
 
     <template v-else>
-      <AlarmEmpty v-if="!rows.length && !error" text="暂无报警数据" />
+      <AlarmEmpty v-if="!rows.length && !error" />
       <AlarmEmpty v-else-if="error" :text="error" />
 
-      <template v-else>
+      <div
+        v-else
+        ref="viewportRef"
+        class="alarm-table__viewport"
+        @mouseenter="pauseAutoScroll"
+        @mouseleave="resumeAutoScroll"
+        @focusin="pauseAutoScroll"
+        @focusout="resumeAutoScroll"
+      >
         <table class="alarm-table">
+          <colgroup>
+            <col class="alarm-table__col-severity" />
+            <col class="alarm-table__col-time" />
+            <col class="alarm-table__col-originator" />
+            <col class="alarm-table__col-type" />
+            <col class="alarm-table__col-content" />
+            <col class="alarm-table__col-status" />
+          </colgroup>
           <thead>
             <tr>
-              <th>名称</th>
-              <th v-if="showColumn('type')">类型</th>
-              <th v-if="showColumn('severity')">级别</th>
-              <th v-if="showColumn('status')">状态</th>
-              <th v-if="showColumn('createdTime')">创建时间</th>
-              <th v-if="showColumn('originator')">来源实体</th>
-              <th v-if="showColumn('actions')">操作</th>
+              <th>&#x7EA7;&#x522B;</th>
+              <th>&#x65F6;&#x95F4;</th>
+              <th>&#x8BBE;&#x5907;/&#x70B9;&#x4F4D;</th>
+              <th>&#x544A;&#x8B66;&#x7C7B;&#x578B;</th>
+              <th>&#x544A;&#x8B66;&#x5185;&#x5BB9;</th>
+              <th>&#x72B6;&#x6001;</th>
             </tr>
           </thead>
           <tbody>
             <tr
-              v-for="item in rows"
-              :key="item.id"
+              v-for="(item, index) in displayRows"
+              :key="`${item.id}-${index}`"
               class="alarm-table__row"
               @click="emit('focus', item)"
               @dblclick.stop="emit('detail', item)"
             >
-              <td>{{ item.name || '-' }}</td>
-              <td v-if="showColumn('type')">{{ item.type || '-' }}</td>
-              <td v-if="showColumn('severity')">
-                <AlarmSeverityTag :severity="item.severity" />
+              <td><AlarmSeverityTag :severity="item.severity" /></td>
+              <td class="alarm-table__time">{{ formatAlarmTime(item.createdTime) }}</td>
+              <td class="alarm-table__truncate" :title="getOriginatorName(item)">
+                {{ getOriginatorName(item) }}
               </td>
-              <td v-if="showColumn('status')">
-                <AlarmStatusTag :status="item.status" />
+              <td class="alarm-table__truncate" :title="item.type || '-'">{{ item.type || '-' }}</td>
+              <td class="alarm-table__truncate" :title="formatAlarmContent(item)">
+                {{ formatAlarmContent(item) }}
               </td>
-              <td v-if="showColumn('createdTime')">{{ formatAlarmTime(item.createdTime) }}</td>
-              <td v-if="showColumn('originator')">
-                {{ item.originator?.name || item.originator?.label || '-' }}
-              </td>
-              <td v-if="showColumn('actions')">
-                <div class="alarm-table__actions">
+              <td class="alarm-table__status-cell">
+                <div class="alarm-table__status-content">
+                  <AlarmStatusTag :status="item.status" />
                   <button
-                    v-if="settings.showAck"
-                    class="alarm-table__btn"
-                    :disabled="!canAckAlarm(item)"
+                    v-if="settings.showAck && canAckAlarm(item)"
+                    class="alarm-table__status-ack"
+                    type="button"
                     @click.stop="emit('ack', item)"
                   >
-                    确认
-                  </button>
-                  <button
-                    v-if="settings.showClear"
-                    class="alarm-table__btn alarm-table__btn--warn"
-                    :disabled="!canClearAlarm(item)"
-                    @click.stop="emit('clear', item)"
-                  >
-                    清除
-                  </button>
-                  <button
-                    class="alarm-table__btn alarm-table__btn--ghost"
-                    @click.stop="emit('detail', item)"
-                  >
-                    详情
+                    &#x786E;&#x8BA4;
                   </button>
                 </div>
               </td>
             </tr>
           </tbody>
         </table>
-
-        <div v-if="settings.showPagination" class="alarm-table__pager">
-          <button class="alarm-table__btn alarm-table__btn--ghost" :disabled="page <= 0" @click="$emit('prev-page')">
-            上一页
-          </button>
-          <span>第 {{ page + 1 }} 页</span>
-          <span>共 {{ total }} 条</span>
-          <button class="alarm-table__btn alarm-table__btn--ghost" :disabled="!hasNext" @click="$emit('next-page')">
-            下一页
-          </button>
-        </div>
-      </template>
+      </div>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { AlarmItem, AlarmWidgetSettings } from '../types';
-import AlarmStatusTag from './AlarmStatusTag.vue';
-import AlarmSeverityTag from './AlarmSeverityTag.vue';
-import AlarmEmpty from './AlarmEmpty.vue';
-import { canAckAlarm, canClearAlarm, formatAlarmTime } from '../utils';
+  import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+  import type { AlarmItem, AlarmWidgetSettings } from '../types';
+  import AlarmStatusTag from './AlarmStatusTag.vue';
+  import AlarmSeverityTag from './AlarmSeverityTag.vue';
+  import AlarmEmpty from './AlarmEmpty.vue';
+  import { canAckAlarm, formatAlarmContent, formatAlarmTime } from '../utils';
 
-const props = defineProps<{
-  rows: AlarmItem[];
-  loading: boolean;
-  error?: string;
-  settings: AlarmWidgetSettings;
-  page: number;
-  total: number;
-  hasNext: boolean;
-}>();
+  const props = defineProps<{
+    rows: AlarmItem[];
+    loading: boolean;
+    error?: string;
+    settings: AlarmWidgetSettings;
+  }>();
 
-const emit = defineEmits<{
-  (e: 'prev-page'): void;
-  (e: 'next-page'): void;
-  (e: 'ack', item: AlarmItem): void;
-  (e: 'clear', item: AlarmItem): void;
-  (e: 'detail', item: AlarmItem): void;
-  (e: 'focus', item: AlarmItem): void;
-}>();
+  const emit = defineEmits<{
+    (e: 'ack', item: AlarmItem): void;
+    (e: 'detail', item: AlarmItem): void;
+    (e: 'focus', item: AlarmItem): void;
+  }>();
 
-function showColumn(name: string) {
-  return Array.isArray(props.settings.columns) && props.settings.columns.includes(name);
-}
+  const viewportRef = ref<HTMLElement>();
+  const shouldLoop = ref(false);
+  const isPointerInside = ref(false);
+  const displayRows = computed(() => (shouldLoop.value ? [...props.rows, ...props.rows] : props.rows));
+
+  let resizeObserver: ResizeObserver | undefined;
+  let autoScrollTimer: number | undefined;
+  let resetScrollTimer: number | undefined;
+  let isResetting = false;
+
+  function getOriginatorName(item: AlarmItem) {
+    return item.originator?.name || item.originator?.label || '-';
+  }
+
+  function getRowHeight() {
+    const row = viewportRef.value?.querySelector('tbody tr');
+    return row instanceof HTMLElement ? row.offsetHeight : 0;
+  }
+
+  function updateLoopState() {
+    const viewport = viewportRef.value;
+    const header = viewport?.querySelector('thead') as HTMLElement | null;
+    const rowHeight = getRowHeight();
+
+    if (!viewport || !header || !rowHeight || !props.rows.length) {
+      shouldLoop.value = false;
+      return;
+    }
+
+    const hasOverflow = header.offsetHeight + rowHeight * props.rows.length > viewport.clientHeight + 1;
+    shouldLoop.value = hasOverflow;
+
+    if (!hasOverflow) viewport.scrollTop = 0;
+  }
+
+  function scheduleLoopStateUpdate() {
+    void nextTick(() => {
+      updateLoopState();
+    });
+  }
+
+  function stopAutoScroll() {
+    if (autoScrollTimer) {
+      window.clearInterval(autoScrollTimer);
+      autoScrollTimer = undefined;
+    }
+    if (resetScrollTimer) {
+      window.clearTimeout(resetScrollTimer);
+      resetScrollTimer = undefined;
+    }
+    isResetting = false;
+  }
+
+  function scrollToNextRow() {
+    const viewport = viewportRef.value;
+    const rowHeight = getRowHeight();
+    if (!viewport || !shouldLoop.value || !rowHeight || !props.rows.length || isResetting) return;
+
+    const loopHeight = rowHeight * props.rows.length;
+    const nextTop = viewport.scrollTop + rowHeight;
+
+    if (nextTop < loopHeight) {
+      viewport.scrollTo({ top: nextTop, behavior: 'smooth' });
+      return;
+    }
+
+    isResetting = true;
+    viewport.scrollTo({ top: loopHeight, behavior: 'smooth' });
+    resetScrollTimer = window.setTimeout(() => {
+      if (viewportRef.value && !isPointerInside.value) viewportRef.value.scrollTop = 0;
+      isResetting = false;
+      resetScrollTimer = undefined;
+    }, 420);
+  }
+
+  function startAutoScroll() {
+    if (autoScrollTimer || !shouldLoop.value || isPointerInside.value) return;
+
+    autoScrollTimer = window.setInterval(() => {
+      if (!document.hidden && !isPointerInside.value) scrollToNextRow();
+    }, 3000);
+  }
+
+  function pauseAutoScroll() {
+    isPointerInside.value = true;
+    stopAutoScroll();
+  }
+
+  function resumeAutoScroll() {
+    isPointerInside.value = false;
+    startAutoScroll();
+  }
+
+  watch(
+    () => [props.rows, props.settings.dense],
+    () => {
+      stopAutoScroll();
+      shouldLoop.value = false;
+      if (viewportRef.value) viewportRef.value.scrollTop = 0;
+      scheduleLoopStateUpdate();
+    },
+    { flush: 'post' },
+  );
+
+  watch(shouldLoop, (enabled) => {
+    if (enabled) {
+      void nextTick(startAutoScroll);
+    } else {
+      stopAutoScroll();
+    }
+  });
+
+  onMounted(() => {
+    resizeObserver = new ResizeObserver(scheduleLoopStateUpdate);
+    if (viewportRef.value) resizeObserver.observe(viewportRef.value);
+    scheduleLoopStateUpdate();
+  });
+
+  onBeforeUnmount(() => {
+    stopAutoScroll();
+    resizeObserver?.disconnect();
+  });
 </script>
 
 <style scoped>
-.alarm-table-wrap {
-  width: 100%;
-  min-height: 180px;
-}
-.alarm-table-wrap__loading {
-  padding: 24px;
-  color: #666;
-}
-.alarm-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: #fff;
-}
-.alarm-table th,
-.alarm-table td {
-  padding: 10px 12px;
-  border: 1px solid #f0f0f0;
-  text-align: left;
-  font-size: 14px;
-  vertical-align: middle;
-}
-.alarm-table thead th {
-  background: #fafafa;
-  font-weight: 600;
-}
-.alarm-table__row {
-  cursor: pointer;
-}
-.alarm-table__row:hover {
-  background: #fafcff;
-}
-.alarm-table__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.alarm-table__btn {
-  height: 28px;
-  padding: 0 10px;
-  border: none;
-  border-radius: 6px;
-  background: #1677ff;
-  color: #fff;
-  cursor: pointer;
-}
-.alarm-table__btn:disabled {
-  background: #d9d9d9;
-  cursor: not-allowed;
-}
-.alarm-table__btn--warn {
-  background: #fa8c16;
-}
-.alarm-table__btn--ghost {
-  background: #f5f5f5;
-  color: #333;
-}
-.alarm-table__pager {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-}
-.is-dense .alarm-table th,
-.is-dense .alarm-table td {
-  padding: 6px 8px;
-  font-size: 13px;
-}
+  .alarm-table-wrap {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+  }
+  .alarm-table-wrap__loading {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+  }
+  .alarm-table__viewport {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-color: #c7c7c7 transparent;
+    scrollbar-width: thin;
+  }
+  .alarm-table {
+    width: 100%;
+    min-width: 780px;
+    border-collapse: collapse;
+    table-layout: fixed;
+    background: transparent;
+  }
+  .alarm-table__col-severity {
+    width: 82px;
+  }
+  .alarm-table__col-time {
+    width: 164px;
+  }
+  .alarm-table__col-originator {
+    width: 15%;
+  }
+  .alarm-table__col-type {
+    width: 14%;
+  }
+  .alarm-table__col-status {
+    width: 148px;
+  }
+  .alarm-table th,
+  .alarm-table td {
+    height: 44px;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1px solid #f0f0f0;
+    text-align: left;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+  .alarm-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #fafafa;
+    color: #262626;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .alarm-table td {
+    color: #434343;
+    font-size: 13px;
+  }
+  .alarm-table__row {
+    cursor: pointer;
+  }
+  .alarm-table__row:hover {
+    background: #fafcff;
+  }
+  .alarm-table__time,
+  .alarm-table__truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .alarm-table__status-cell {
+    overflow: hidden;
+  }
+  .alarm-table__status-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .alarm-table__status-ack {
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid #1677ff;
+    border-radius: 4px;
+    background: #1677ff;
+    color: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateX(-4px);
+    transition:
+      opacity 160ms ease,
+      transform 160ms ease,
+      visibility 160ms ease;
+  }
+  .alarm-table__status-cell:hover .alarm-table__status-ack,
+  .alarm-table__status-cell:focus-within .alarm-table__status-ack {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateX(0);
+  }
+  .is-dense .alarm-table th,
+  .is-dense .alarm-table td {
+    height: 38px;
+    padding: 5px 8px;
+    font-size: 12px;
+  }
 </style>
