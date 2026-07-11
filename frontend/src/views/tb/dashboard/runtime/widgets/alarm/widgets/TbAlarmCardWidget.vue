@@ -117,6 +117,7 @@
 
   let autoRefreshTimer: number | undefined;
   let autoRefreshing = false;
+  const AUTO_REFRESH_INTERVAL = 10_000;
 
   const settings = computed(() => {
     const rawSettings = props.widget?.config?.settings || props.widget?.settings || {};
@@ -152,8 +153,8 @@
 
     if (!isRealtime) {
       return {
-        startTime,
-        endTime,
+        startTime: props.timewindow?.startTs,
+        endTime: props.timewindow?.endTs,
       };
     }
 
@@ -215,7 +216,7 @@
       if (!document.hidden) {
         void reloadSilently();
       }
-    }, 5000);
+    }, AUTO_REFRESH_INTERVAL);
   }
 
   function stopAutoRefresh() {
