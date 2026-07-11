@@ -20,11 +20,8 @@
       :error="error"
       :settings="settings"
       @ack="handleAck"
-      @detail="openDetail"
       @focus="handleFocus"
     />
-
-    <AlarmDetailDialog v-model:visible="detailVisible" :item="currentDetailItem" />
   </div>
 </template>
 
@@ -32,7 +29,6 @@
   import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
   import AlarmToolbar from '../components/AlarmToolbar.vue';
   import AlarmTable from '../components/AlarmTable.vue';
-  import AlarmDetailDialog from '../components/AlarmDetailDialog.vue';
   import { parseAlarmSettings } from '../settings';
   import { useAlarmData } from '../composables/useAlarmData';
   import { handleAckAlarm } from '../actions';
@@ -52,9 +48,6 @@
   const searchText = ref('');
   const statusValue = ref('');
   const severityValue = ref('');
-
-  const detailVisible = ref(false);
-  const currentDetailItem = ref<AlarmItem | null>(null);
 
   let autoRefreshTimer: number | undefined;
   let autoRefreshing = false;
@@ -203,11 +196,6 @@
     } catch (e) {
       console.error('[alarm.ack]', e);
     }
-  }
-
-  function openDetail(item: AlarmItem) {
-    currentDetailItem.value = item;
-    detailVisible.value = true;
   }
 
   function handleFocus(item: AlarmItem) {

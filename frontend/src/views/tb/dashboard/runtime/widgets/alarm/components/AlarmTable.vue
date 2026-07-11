@@ -40,7 +40,6 @@
               :key="`${item.id}-${index}`"
               class="alarm-table__row"
               @click="emit('focus', item)"
-              @dblclick.stop="emit('detail', item)"
             >
               <td><AlarmSeverityTag :severity="item.severity" /></td>
               <td class="alarm-table__time">{{ formatAlarmTime(item.createdTime) }}</td>
@@ -89,7 +88,6 @@
 
   const emit = defineEmits<{
     (e: 'ack', item: AlarmItem): void;
-    (e: 'detail', item: AlarmItem): void;
     (e: 'focus', item: AlarmItem): void;
   }>();
 

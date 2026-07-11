@@ -57,43 +57,44 @@ export function pickFirstDefined<T = any>(...values: T[]): T | undefined {
   return undefined;
 }
 
-const ALARM_DETAIL_TEXT_KEYS = ['message', 'description', 'detail', 'reason', 'content'];
-const ALARM_DETAIL_VALUE_KEYS = ['currentValue', 'current', 'value', 'actualValue', 'latestValue'];
-const ALARM_DETAIL_THRESHOLD_KEYS = ['threshold', 'limit', 'upperThreshold', 'lowerThreshold'];
+const ALARM_DETAIL_MESSAGE_KEYS = ['message', 'alarmMessage', 'description', 'detail', 'reason', 'content'];
 
-function formatAlarmDetailValue(value: unknown) {
+function stringifyAlarmDetail(value: unknown) {
   if (typeof value === 'string') return value.trim();
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return '';
+  if (value === null || value === undefined) return '';
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
-function findAlarmDetailValue(details: Record<string, any>, keys: string[]) {
-  for (const key of keys) {
-    const value = formatAlarmDetailValue(details[key]);
-    if (value) return value;
+function formatRuleChainDetails(details: unknown) {
+  if (typeof details === 'string') return details.trim();
+  if (!details || typeof details !== 'object') return '';
+
+  if (!Array.isArray(details)) {
+    const record = details as Record<string, unknown>;
+    for (const key of ALARM_DETAIL_MESSAGE_KEYS) {
+      const message = stringifyAlarmDetail(record[key]);
+      if (message) return message;
+    }
+
+    return Object.entries(record)
+      .map(([key, value]) => {
+        const formatted = stringifyAlarmDetail(value);
+        return formatted ? `${key}: ${formatted}` : '';
+      })
+      .filter(Boolean)
+      .join('\uff1b');
   }
-  return '';
+
+  return stringifyAlarmDetail(details);
 }
 
 export function formatAlarmContent(item: AlarmItem) {
-  const details = item.details || {};
-  const text = findAlarmDetailValue(details, ALARM_DETAIL_TEXT_KEYS);
-  if (text) return text;
-
-  const currentValue = findAlarmDetailValue(details, ALARM_DETAIL_VALUE_KEYS);
-  const threshold = findAlarmDetailValue(details, ALARM_DETAIL_THRESHOLD_KEYS);
-  const summary: string[] = [];
-  if (currentValue) summary.push(`\u5f53\u524d\u503c ${currentValue}`);
-  if (threshold) summary.push(`\u9608\u503c ${threshold}`);
-  if (summary.length) return summary.join('\uff0c');
-
-  const fallback = Object.entries(details)
-    .map(([key, value]) => {
-      const formatted = formatAlarmDetailValue(value);
-      return formatted ? `${key}: ${formatted}` : '';
-    })
-    .filter(Boolean)
-    .slice(0, 2);
-
-  return fallback.join('\uff1b') || item.name || item.type || '-';
+  const ruleChainDetails = item.raw?.details ?? item.details;
+  return formatRuleChainDetails(ruleChainDetails) || item.name || item.type || '-';
 }
