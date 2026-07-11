@@ -8,7 +8,7 @@
         </Radio.Group>
       </div>
     </Form.Item>
-    <Form.Item :name="formState.scriptLang == 'JS' ? 'jsScript' : 'tbelScript'">
+    <Form.Item :name="formState.scriptLang == 'JS' ? 'alarmDetailsBuildJs' : 'alarmDetailsBuildTbel'">
       <div>
         <div class="flex justify-between">
           <p class="text-gray-500">function Details(msg, metadata, msgType) {</p>
@@ -118,11 +118,14 @@
   );
 
   async function getConfiguration() {
-    try {
-      return await formRef.value?.validate();
-    } catch (error: any) {
-      throw error;
-    }
+    await formRef.value?.validate();
+
+    return {
+      scriptLang: formState.scriptLang,
+      alarmType: formState.alarmType,
+      alarmDetailsBuildJs: formState.alarmDetailsBuildJs,
+      alarmDetailsBuildTbel: formState.alarmDetailsBuildTbel,
+    };
   }
 
   function handleFormatScript() {}

@@ -31,7 +31,7 @@
     "org.thingsboard.rule.engine.transform.TbTransformMsgNode":"transform-script",
     "org.thingsboard.rule.engine.transform.TbRenameKeysNode":"rename-keys",
     "org.thingsboard.rule.engine.deduplication.TbMsgDeduplicationNode":"deduplication",
-    "org.thingsboard.rule.engine.transform.TbSplitArrayMsgNod":"split-array-msg",
+    "org.thingsboard.rule.engine.transform.TbSplitArrayMsgNode":"split-array-msg",
     "org.thingsboard.rule.engine.mail.TbMsgToEmailNode":"to-email",
 
     "org.thingsboard.rule.engine.action.TbAssignToCustomerNode":"assign-to-customer",
