@@ -95,7 +95,7 @@
   import { useAlarmData } from '../composables/useAlarmData';
   import { handleAckAlarm, handleClearAlarm } from '../actions';
   import type { AlarmItem } from '../types';
-  import { canAckAlarm, canClearAlarm, formatAlarmTime, normalizeId } from '../utils';
+  import { canAckAlarm, canClearAlarm, formatAlarmTime } from '../utils';
   import { emitAlarmFocus } from '../focus';
 
   const props = defineProps<{
@@ -124,56 +124,7 @@
     return parseAlarmSettings(rawSettings);
   });
 
-  function resolveDatasource() {
-    return props.datasource || props.widget?.config?.datasources?.[0] || props.widget?.datasource || null;
-  }
-
-  function resolveEntity() {
-    const ds = resolveDatasource();
-
-    const entityId =
-      normalizeId(ds?.entityId) ||
-      normalizeId(ds?.deviceId) ||
-      normalizeId(ds?.entity?.id) ||
-      normalizeId(ds?.entity) ||
-      normalizeId(ds?.entityInfo?.id) ||
-      '';
-
-    const entityType = ds?.entityType || ds?.type || ds?.entity?.entityType || ds?.entityInfo?.entityType || '';
-
-    return {
-      entityId,
-      entityType,
-    };
-  }
-
-  function resolveQueryTimewindow() {
-    const configuredWindow = props.widget?.config?.timewindow;
-    const isRealtime = configuredWindow?.realtime !== false;
-
-    if (!isRealtime) {
-      return {
-        startTime: props.timewindow?.startTs,
-        endTime: props.timewindow?.endTs,
-      };
-    }
-
-    const hostInterval =
-      props.timewindow?.startTs && props.timewindow?.endTs ? props.timewindow.endTs - props.timewindow.startTs : 0;
-    const configuredInterval = Number(configuredWindow?.intervalMs);
-    const intervalMs = configuredInterval > 0 ? configuredInterval : hostInterval || 300000;
-    const endTime = Date.now();
-
-    return {
-      startTime: endTime - intervalMs,
-      endTime,
-    };
-  }
-
   function buildQuery() {
-    const { entityId, entityType } = resolveEntity();
-    const { startTime, endTime } = resolveQueryTimewindow();
-
     const statusList = statusValue.value ? [statusValue.value] : settings.value.defaultStatusList;
 
     const severityList = severityValue.value ? [severityValue.value] : settings.value.defaultSeverityList;
@@ -184,13 +135,9 @@
       searchText: searchText.value.trim(),
       sortProperty: 'createdTime' as const,
       sortOrder: 'DESC' as const,
-      startTime,
-      endTime,
       statusList,
       severityList,
-      entityId,
-      entityType,
-      fetchMode: entityId ? ('entity' as const) : ('all' as const),
+      fetchMode: 'all' as const,
     };
   }
 
@@ -280,7 +227,7 @@
   }
 
   watch(
-    () => [props.datasource, props.widget, props.timewindow?.startTs, props.timewindow?.endTs, settings.value.pageSize],
+    () => [props.widget?.config?.settings, settings.value.pageSize],
     () => {
       page.value = 0;
       reloadSilently();

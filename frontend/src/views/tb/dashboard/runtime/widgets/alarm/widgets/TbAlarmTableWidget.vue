@@ -33,7 +33,6 @@
   import { useAlarmData } from '../composables/useAlarmData';
   import { handleAckAlarm } from '../actions';
   import type { AlarmItem } from '../types';
-  import { normalizeId } from '../utils';
   import { emitAlarmFocus } from '../focus';
 
   const props = defineProps<{
@@ -58,67 +57,7 @@
     return parseAlarmSettings(rawSettings);
   });
 
-  const hasValidDatasource = computed(() => {
-    const { entityId, entityType } = resolveEntity();
-    const { startTime, endTime } = resolveQueryTimewindow();
-    return !!entityId && !!entityType;
-  });
-
-  function resolveDatasource() {
-    return (
-      props.datasource ||
-      props.widget?.config?.datasource ||
-      props.widget?.config?.datasources?.[0] ||
-      props.widget?.datasource ||
-      null
-    );
-  }
-
-  function normalizeEntityType(type?: string) {
-    if (!type) return '';
-    return String(type).toUpperCase();
-  }
-
-  function resolveEntity() {
-    const ds = resolveDatasource();
-
-    const entityId = normalizeId(ds?.entityId) || normalizeId(ds?.deviceId) || normalizeId(ds?.entity?.id) || '';
-
-    const entityType = normalizeEntityType(ds?.entityType || ds?.entity?.entityType || '');
-
-    return {
-      entityId,
-      entityType,
-    };
-  }
-
-  function resolveQueryTimewindow() {
-    const configuredWindow = props.widget?.config?.timewindow;
-    const isRealtime = configuredWindow?.realtime !== false;
-
-    if (!isRealtime) {
-      return {
-        startTime: props.timewindow?.startTs,
-        endTime: props.timewindow?.endTs,
-      };
-    }
-
-    const hostInterval =
-      props.timewindow?.startTs && props.timewindow?.endTs ? props.timewindow.endTs - props.timewindow.startTs : 0;
-    const configuredInterval = Number(configuredWindow?.intervalMs);
-    const intervalMs = configuredInterval > 0 ? configuredInterval : hostInterval || 300000;
-    const endTime = Date.now();
-
-    return {
-      startTime: endTime - intervalMs,
-      endTime,
-    };
-  }
-
   function buildQuery() {
-    const { entityId, entityType } = resolveEntity();
-    const { startTime, endTime } = resolveQueryTimewindow();
-
     const statusList = statusValue.value
       ? [statusValue.value]
       : settings.value.defaultStatusList?.length
@@ -137,12 +76,9 @@
       searchText: searchText.value.trim() || undefined,
       sortProperty: 'createdTime' as const,
       sortOrder: 'DESC' as const,
-      startTime,
-      endTime,
       statusList,
       severityList,
-      entityId: entityId || undefined,
-      entityType: entityType || undefined,
+      fetchMode: 'all' as const,
     };
   }
 
@@ -201,7 +137,7 @@
   }
 
   watch(
-    () => [props.datasource, props.widget, props.timewindow?.startTs, props.timewindow?.endTs, settings.value.pageSize],
+    () => [props.widget?.config?.settings, settings.value.pageSize],
     () => {
       reloadSilently();
     },
