@@ -353,7 +353,7 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.12);
   }
   .alarm-table thead th {
-    background: rgba(15, 23, 42, 0.45);
+    background: transparent;
     color: #f8fafc;
   }
   .alarm-table td {
