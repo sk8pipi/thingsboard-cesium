@@ -50,6 +50,8 @@
     brand: {
       visible: true,
       logoUrl: '',
+      logoHeight: 34,
+      logoMaxWidth: 120,
       name: '\u667a\u6167\u7269\u8054\u5e73\u53f0',
     },
   });

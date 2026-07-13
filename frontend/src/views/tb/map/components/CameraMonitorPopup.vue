@@ -815,12 +815,14 @@
 <style scoped>
   .camera-monitor-popup {
     position: absolute;
-    top: 16px;
+    top: calc(var(--map-top-bar-offset, 0px) + 16px);
     right: 16px;
     z-index: 1700;
     width: min(460px, calc(100vw - 24px));
+    max-height: calc(100% - var(--map-top-bar-offset, 0px) - 32px);
     border-radius: 16px;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     border: 1px solid rgba(148, 163, 184, 0.24);
     background: linear-gradient(180deg, rgba(12, 18, 28, 0.97), rgba(6, 10, 18, 0.95));
     color: #f8fafc;
@@ -1027,10 +1029,11 @@
 
   @media (max-width: 768px) {
     .camera-monitor-popup {
-      top: 12px;
+      top: calc(var(--map-top-bar-offset, 0px) + 12px);
       right: 12px;
       left: 12px;
       width: auto;
+      max-height: calc(100% - var(--map-top-bar-offset, 0px) - 24px);
     }
 
     .camera-monitor-popup__grid {

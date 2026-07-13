@@ -3,9 +3,9 @@
     <div class="map-screen-top-bar__brand">
       <template v-if="config.brand.visible">
         <img
-          v-if="config.brand.logoUrl && !logoLoadFailed"
+          v-if="resolvedLogoUrl && !logoLoadFailed"
           class="map-screen-top-bar__logo"
-          :src="config.brand.logoUrl"
+          :src="resolvedLogoUrl"
           alt=""
           @error="logoLoadFailed = true"
         />
@@ -44,6 +44,7 @@
   import { Tooltip as ATooltip } from 'ant-design-vue';
   import { Icon } from '/@/components/Icon';
   import type { MapTopBarActionConfig, MapTopBarActionType, MapTopBarConfig } from '../mapTemplateConfig';
+  import { resolveMapLogoImageSrc } from '../services/mapLogoImageService';
 
   const props = withDefaults(
     defineProps<{
@@ -65,10 +66,20 @@
   }>();
 
   const logoLoadFailed = ref(false);
+  const resolvedLogoUrl = ref('');
+  let logoRequestId = 0;
 
-  const headerStyle = computed<CSSProperties>(() => ({
-    '--map-top-bar-height': `${props.config.height}px`,
-  }));
+  const headerStyle = computed<CSSProperties>(() => {
+    const configuredLogoHeight = Number(props.config.brand.logoHeight) || 34;
+    const maximumLogoHeight = Math.max(20, Number(props.config.height) - 16);
+    const logoHeight = Math.min(configuredLogoHeight, maximumLogoHeight);
+    const logoMaxWidth = Number(props.config.brand.logoMaxWidth) || 120;
+    return {
+      '--map-top-bar-height': `${props.config.height}px`,
+      '--map-logo-height': `${logoHeight}px`,
+      '--map-logo-max-width': `${logoMaxWidth}px`,
+    };
+  });
 
   const resolvedTitle = computed(() => {
     const configuredTitle = props.config.title.text.trim();
@@ -85,9 +96,22 @@
 
   watch(
     () => props.config.brand.logoUrl,
-    () => {
+    async (source) => {
+      const requestId = ++logoRequestId;
       logoLoadFailed.value = false;
+      resolvedLogoUrl.value = '';
+      try {
+        const resolved = await resolveMapLogoImageSrc(source);
+        if (requestId === logoRequestId) {
+          resolvedLogoUrl.value = resolved;
+        }
+      } catch {
+        if (requestId === logoRequestId) {
+          logoLoadFailed.value = true;
+        }
+      }
     },
+    { immediate: true },
   );
 
   function actionIcon(type: MapTopBarActionType) {
@@ -105,6 +129,8 @@
 <style scoped>
   .map-screen-top-bar {
     --map-top-bar-height: 64px;
+    --map-logo-height: 34px;
+    --map-logo-max-width: 120px;
     --map-top-bar-background: rgba(7, 17, 29, 0.94);
     --map-top-bar-border: rgba(123, 160, 191, 0.28);
     --map-top-bar-text: #f4f7fb;
@@ -139,8 +165,9 @@
   }
 
   .map-screen-top-bar__logo {
-    width: 34px;
-    height: 34px;
+    width: auto;
+    height: var(--map-logo-height);
+    max-width: var(--map-logo-max-width);
     flex: 0 0 auto;
     object-fit: contain;
   }
@@ -227,6 +254,10 @@
 
     .map-screen-top-bar__brand-name {
       display: none;
+    }
+
+    .map-screen-top-bar__logo {
+      max-width: min(var(--map-logo-max-width), 80px);
     }
 
     .map-screen-top-bar__title {

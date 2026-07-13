@@ -100,6 +100,7 @@
   import {
     DASHBOARD_MAP_WIDGET_CONFIG_KEY,
     createDefaultMapTopBarConfig,
+    mapTopBarOffsetStyle,
     mapTemplateAppearanceStyle,
     normalizeMapTemplateState,
     type MapTopBarActionType,
@@ -164,7 +165,10 @@
   const availableTopBarActions = computed(() =>
     getAvailableMapTopBarActions(topBarConfig.value.actions, userStore.getAuthority),
   );
-  const mapAppearanceStyle = computed(() => mapTemplateAppearanceStyle(assignedTemplateState.value?.appearance));
+  const mapAppearanceStyle = computed(() => ({
+    ...mapTemplateAppearanceStyle(assignedTemplateState.value?.appearance),
+    ...mapTopBarOffsetStyle(topBarConfig.value),
+  }));
   const currentAssignedTemplateDashboardId = ref('');
   const storageKey = computed(() => getMapWidgetStorageKey());
   const assignedTemplateMapPoints = computed(() => assignedTemplateState.value?.mapPoints || []);
@@ -771,7 +775,7 @@
 
   .map-widgets {
     position: absolute;
-    inset: 0;
+    inset: var(--map-top-bar-offset, 0px) 0 0;
     z-index: 10;
     pointer-events: none;
   }

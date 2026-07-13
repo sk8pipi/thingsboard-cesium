@@ -220,7 +220,7 @@
 <style scoped>
   .mw-layer {
     position: absolute;
-    inset: 0;
+    inset: var(--map-top-bar-offset, 0px) 0 0;
     z-index: 10;
     pointer-events: none;
   }

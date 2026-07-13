@@ -51,6 +51,8 @@ export type MapTopBarConfig = {
   brand: {
     visible: boolean;
     logoUrl: string;
+    logoHeight: number;
+    logoMaxWidth: number;
     name: string;
   };
   title: {
@@ -69,12 +71,14 @@ const DEFAULT_MAP_TOP_BAR_ACTIONS: MapTopBarActionConfig[] = [
 
 export function createDefaultMapTopBarConfig(): MapTopBarConfig {
   return {
-    version: 1,
+    version: 2,
     visible: true,
     height: 64,
     brand: {
       visible: false,
       logoUrl: '',
+      logoHeight: 34,
+      logoMaxWidth: 120,
       name: '',
     },
     title: {
@@ -114,12 +118,14 @@ function normalizeMapTopBarConfig(value?: Partial<MapTopBarConfig> | null): MapT
   const configuredActions = Array.isArray(value?.actions) ? value.actions : [];
 
   return {
-    version: 1,
+    version: 2,
     visible: typeof value?.visible === 'boolean' ? value.visible : fallback.visible,
     height: clamp(value?.height, fallback.height, 48, 96),
     brand: {
       visible: typeof value?.brand?.visible === 'boolean' ? value.brand.visible : fallback.brand.visible,
       logoUrl: typeof value?.brand?.logoUrl === 'string' ? value.brand.logoUrl : fallback.brand.logoUrl,
+      logoHeight: clamp(value?.brand?.logoHeight, fallback.brand.logoHeight, 20, 48),
+      logoMaxWidth: clamp(value?.brand?.logoMaxWidth, fallback.brand.logoMaxWidth, 40, 160),
       name: typeof value?.brand?.name === 'string' ? value.brand.name : fallback.brand.name,
     },
     title: {
@@ -161,6 +167,13 @@ export function mapTemplateAppearanceStyle(appearance?: MapTemplateAppearance | 
       0,
       40,
     )}px`,
+  } as CSSProperties;
+}
+
+export function mapTopBarOffsetStyle(topBar?: Partial<MapTopBarConfig> | null): CSSProperties {
+  const normalized = normalizeMapTopBarConfig(topBar);
+  return {
+    '--map-top-bar-offset': normalized.visible ? `${normalized.height}px` : '0px',
   } as CSSProperties;
 }
 

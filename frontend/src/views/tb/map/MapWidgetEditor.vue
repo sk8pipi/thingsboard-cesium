@@ -94,7 +94,7 @@
       </div>
     </div>
 
-    <div class="mw-stage">
+    <div class="mw-stage" :style="templateTopBarOffsetStyle">
       <CesiumMap
         ref="cesiumMapRef"
         class="mw-cesium"
@@ -496,6 +496,7 @@
           'mw-grid--editing': editorMode !== 'view',
           'mw-grid--hidden': shouldHideWidgetLayer,
         }"
+        :style="{ top: templateTopBarOffset }"
       ></div>
 
       <div v-if="dragHint" class="mw-toast">{{ dragHint }}</div>
@@ -587,6 +588,7 @@
     DASHBOARD_MAP_WIDGET_CONFIG_KEY,
     createDefaultMapTemplateState,
     createDefaultMapTopBarConfig,
+    mapTopBarOffsetStyle,
     mapTemplateAppearanceStyle,
     normalizeMapTemplateState,
     type MapTemplateAppearance,
@@ -718,6 +720,10 @@
   const selectedSensorPointId = ref('');
   const sensorPointSearch = ref('');
   const templateAppearanceCssVars = computed(() => mapTemplateAppearanceStyle(templateAppearance.value));
+  const templateTopBarOffsetStyle = computed(() => mapTopBarOffsetStyle(templateTopBar.value));
+  const templateTopBarOffset = computed(() =>
+    templateTopBar.value.visible ? `${templateTopBar.value.height}px` : '0px',
+  );
   const templateBackgroundTransparency = computed({
     get: () => Math.round((1 - Number(templateAppearance.value.backgroundOpacity ?? 0.04)) * 100),
     set: (value: number) => {
@@ -3248,7 +3254,7 @@
 
   .mw-grid {
     position: absolute;
-    inset: 0;
+    inset: var(--map-top-bar-offset, 0px) 0 0;
     z-index: 10;
     transition: opacity 0.2s ease;
     pointer-events: none;

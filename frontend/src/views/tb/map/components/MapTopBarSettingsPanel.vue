@@ -54,6 +54,72 @@
           @change="patchBrand({ visible: checkedValue($event) })"
         />
       </label>
+      <div class="map-top-bar-settings__logo-upload">
+        <div class="map-top-bar-settings__logo-preview">
+          <img
+            v-if="logoPreviewUrl && !logoPreviewFailed"
+            :src="logoPreviewUrl"
+            alt="Logo 预览"
+            @error="logoPreviewFailed = true"
+          />
+          <Icon v-else icon="ant-design:picture-outlined" :size="28" />
+        </div>
+        <div class="map-top-bar-settings__logo-controls">
+          <input
+            ref="logoFileInput"
+            class="map-top-bar-settings__file-input"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            @change="handleLogoFileChange"
+          />
+          <div class="map-top-bar-settings__logo-actions">
+            <button type="button" :disabled="logoUploading" @click="logoFileInput?.click()">
+              <Icon icon="ant-design:upload-outlined" :size="16" />
+              {{ logoUploading ? '正在上传' : modelValue.brand.logoUrl ? '替换图片' : '上传图片' }}
+            </button>
+            <button
+              v-if="modelValue.brand.logoUrl"
+              class="is-danger"
+              type="button"
+              :disabled="logoUploading"
+              @click="clearLogo"
+            >
+              <Icon icon="ant-design:delete-outlined" :size="16" />
+              移除
+            </button>
+          </div>
+          <small>支持 PNG、JPG、WebP，文件不超过 2MB</small>
+          <div v-if="logoUploadError" class="map-top-bar-settings__upload-error">{{ logoUploadError }}</div>
+        </div>
+      </div>
+      <label class="map-top-bar-settings__field">
+        <span>Logo 高度</span>
+        <div class="map-top-bar-settings__range">
+          <input
+            type="range"
+            min="20"
+            max="48"
+            step="2"
+            :value="modelValue.brand.logoHeight"
+            @input="patchBrand({ logoHeight: numberValue($event) })"
+          />
+          <output>{{ modelValue.brand.logoHeight }}px</output>
+        </div>
+      </label>
+      <label class="map-top-bar-settings__field">
+        <span>Logo 最大宽度</span>
+        <div class="map-top-bar-settings__range">
+          <input
+            type="range"
+            min="40"
+            max="160"
+            step="4"
+            :value="modelValue.brand.logoMaxWidth"
+            @input="patchBrand({ logoMaxWidth: numberValue($event) })"
+          />
+          <output>{{ modelValue.brand.logoMaxWidth }}px</output>
+        </div>
+      </label>
       <label class="map-top-bar-settings__field">
         <span>Logo 地址</span>
         <input
@@ -159,9 +225,12 @@
 </template>
 
 <script setup lang="ts">
-  import { computed } from 'vue';
+  import { computed, ref, watch } from 'vue';
+  import { uploadImage } from '/@/api/tb/images';
   import { Icon } from '/@/components/Icon';
+  import { useMessage } from '/@/hooks/web/useMessage';
   import type { MapTopBarActionConfig, MapTopBarActionType, MapTopBarConfig } from '../mapTemplateConfig';
+  import { resolveMapLogoImageSrc } from '../services/mapLogoImageService';
 
   const props = defineProps<{
     modelValue: MapTopBarConfig;
@@ -172,8 +241,39 @@
     close: [];
   }>();
 
+  const LOGO_MAX_FILE_SIZE = 2 * 1024 * 1024;
+  const LOGO_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+  const LOGO_FILE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp']);
+  const logoFileInput = ref<HTMLInputElement | null>(null);
+  const logoUploading = ref(false);
+  const logoUploadError = ref('');
+  const logoPreviewFailed = ref(false);
+  const logoPreviewUrl = ref('');
+  let logoPreviewRequestId = 0;
+  const { showMessage } = useMessage();
+
   const orderedActions = computed(() =>
     props.modelValue.actions.slice().sort((left, right) => left.order - right.order),
+  );
+
+  watch(
+    () => props.modelValue.brand.logoUrl,
+    async (source) => {
+      const requestId = ++logoPreviewRequestId;
+      logoPreviewFailed.value = false;
+      logoPreviewUrl.value = '';
+      try {
+        const resolved = await resolveMapLogoImageSrc(source);
+        if (requestId === logoPreviewRequestId) {
+          logoPreviewUrl.value = resolved;
+        }
+      } catch {
+        if (requestId === logoPreviewRequestId) {
+          logoPreviewFailed.value = true;
+        }
+      }
+    },
+    { immediate: true },
   );
 
   function checkedValue(event: Event) {
@@ -194,6 +294,43 @@
 
   function patchBrand(patch: Partial<MapTopBarConfig['brand']>) {
     patchRoot({ brand: { ...props.modelValue.brand, ...patch } });
+  }
+
+  function validateLogoFile(file: File) {
+    const extension = String(file.name.split('.').pop() || '').toLowerCase();
+    if (!LOGO_MIME_TYPES.has(file.type) && !LOGO_FILE_EXTENSIONS.has(extension)) {
+      throw new Error('请选择 PNG、JPG 或 WebP 图片。');
+    }
+    if (file.size > LOGO_MAX_FILE_SIZE) {
+      throw new Error('Logo 图片不能超过 2MB。');
+    }
+  }
+
+  async function handleLogoFileChange(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    logoUploading.value = true;
+    logoUploadError.value = '';
+    try {
+      validateLogoFile(file);
+      const resource = await uploadImage(file, `大屏 Logo - ${file.name}`);
+      const logoUrl = String((resource as any)?.link || '').trim();
+      if (!logoUrl) throw new Error('图片上传成功，但没有返回可用的资源地址。');
+      patchBrand({ logoUrl });
+      showMessage('Logo 上传成功', 'success');
+    } catch (error: any) {
+      logoUploadError.value = error?.message || 'Logo 上传失败，请稍后重试。';
+    } finally {
+      logoUploading.value = false;
+      input.value = '';
+    }
+  }
+
+  function clearLogo() {
+    logoUploadError.value = '';
+    patchBrand({ logoUrl: '' });
   }
 
   function patchTitle(patch: Partial<MapTopBarConfig['title']>) {
@@ -341,6 +478,81 @@
   .map-top-bar-settings__field {
     display: grid;
     gap: 7px;
+  }
+
+  .map-top-bar-settings__logo-upload {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+  }
+
+  .map-top-bar-settings__logo-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 72px;
+    height: 72px;
+    overflow: hidden;
+    box-sizing: border-box;
+    color: rgba(186, 230, 253, 0.72);
+    background: rgba(15, 34, 51, 0.78);
+    border: 1px solid rgba(125, 211, 252, 0.22);
+    border-radius: 4px;
+  }
+
+  .map-top-bar-settings__logo-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .map-top-bar-settings__logo-controls {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  .map-top-bar-settings__file-input {
+    display: none;
+  }
+
+  .map-top-bar-settings__logo-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .map-top-bar-settings__logo-actions button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 32px;
+    padding: 0 10px;
+    color: #e0f2fe;
+    background: rgba(14, 116, 144, 0.4);
+    border: 1px solid rgba(56, 189, 248, 0.48);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  .map-top-bar-settings__logo-actions button.is-danger {
+    color: #fecaca;
+    background: rgba(127, 29, 29, 0.3);
+    border-color: rgba(248, 113, 113, 0.42);
+  }
+
+  .map-top-bar-settings__logo-actions button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .map-top-bar-settings__upload-error {
+    color: #fca5a5;
+    font-size: 11px;
+    line-height: 1.4;
   }
 
   .map-top-bar-settings__field > input,

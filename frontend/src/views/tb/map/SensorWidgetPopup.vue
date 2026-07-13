@@ -143,11 +143,11 @@
   .sensor-widget-popup {
     position: absolute;
     right: 16px;
-    top: 16px;
+    top: calc(var(--map-top-bar-offset, 0px) + 16px);
     z-index: 1600;
     width: min(720px, calc(100% - 32px));
     box-sizing: border-box;
-    max-height: calc(100% - 32px);
+    max-height: calc(100% - var(--map-top-bar-offset, 0px) - 32px);
     overflow: auto;
     padding: 16px;
     border-radius: 12px;
