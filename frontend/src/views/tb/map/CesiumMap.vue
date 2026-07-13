@@ -540,6 +540,23 @@
     });
   }
 
+  async function flyToOverview() {
+    if (!viewer) return;
+
+    const pointEntities = [...(sensorDataSource?.entities.values || []), ...(cameraDataSource?.entities.values || [])];
+    if (pointEntities.length) {
+      await viewer.flyTo(pointEntities, { duration: 1.2 });
+      return;
+    }
+
+    if (!props.globeOnly && sceneModelTilesets[0]) {
+      await viewer.flyTo(sceneModelTilesets[0], { duration: 1.2 });
+      return;
+    }
+
+    viewer.camera.flyHome(1.2);
+  }
+
   function parseDatasource(rawValue: unknown) {
     if (!rawValue) return undefined;
     try {
@@ -719,6 +736,7 @@
     renderSensorPoints,
     renderCameraPoints,
     flyToPoint,
+    flyToOverview,
     getViewer: () => viewer,
   });
 

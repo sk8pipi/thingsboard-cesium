@@ -62,6 +62,16 @@
           </button>
           <button
             class="mw-btn"
+            :class="{ active: pageSettingsVisible }"
+            type="button"
+            :disabled="editorMode !== 'editing'"
+            @click="togglePageSettingsPanel"
+          >
+            <Icon icon="ant-design:setting-outlined" :size="15" />
+            页面设置
+          </button>
+          <button
+            class="mw-btn"
             :class="{ active: appearancePanelVisible }"
             type="button"
             :disabled="editorMode !== 'editing'"
@@ -101,6 +111,20 @@
         @sensor-click="onSensorClick"
         @camera-click="onCameraClick"
         @map-click="onMapPicked"
+      />
+
+      <MapScreenTopBar
+        class="mw-top-bar"
+        :config="templateTopBar"
+        mode="editor"
+        :dashboard-title="dashboardTemplate?.title || ''"
+      />
+
+      <MapTopBarSettingsPanel
+        v-if="canEditTemplate && editorMode === 'editing' && pageSettingsVisible"
+        v-model="templateTopBar"
+        class="mw-page-settings-panel"
+        @close="pageSettingsVisible = false"
       />
 
       <div v-if="editorMode === 'pickingPoint'" class="mw-mode-banner">
@@ -487,11 +511,14 @@
   import { useRoute, useRouter } from 'vue-router';
   import { GridStack } from 'gridstack';
   import 'gridstack/dist/gridstack.min.css';
+  import { Icon } from '/@/components/Icon';
   import CesiumMap from './CesiumMap.vue';
   import SelectDeviceDialog from './SelectDeviceDialog.vue';
   import SensorWidgetPopup from './SensorWidgetPopup.vue';
   import SensorPopupWidgetEditor from './SensorPopupWidgetEditor.vue';
   import CameraMonitorPopup from './components/CameraMonitorPopup.vue';
+  import MapScreenTopBar from './components/MapScreenTopBar.vue';
+  import MapTopBarSettingsPanel from './components/MapTopBarSettingsPanel.vue';
   import { getMapWidgetStorageKey } from './mapWidgetStorage';
   import { loadMapPoints, saveMapPoints } from './mapPointStorage';
   import { useMapPointEditor } from './useMapPointEditor';
@@ -559,11 +586,13 @@
   import {
     DASHBOARD_MAP_WIDGET_CONFIG_KEY,
     createDefaultMapTemplateState,
+    createDefaultMapTopBarConfig,
     mapTemplateAppearanceStyle,
     normalizeMapTemplateState,
     type MapTemplateAppearance,
     type MapTemplateScene,
     type MapTemplateState,
+    type MapTopBarConfig,
     type SensorDeviceTypeStyles,
   } from './mapTemplateConfig';
   import {
@@ -582,6 +611,7 @@
     widgets: Record<string, WidgetData>;
     appearance: WidgetAppearance;
     sensorDeviceTypeStyles: SensorDeviceTypeStyles;
+    topBar: MapTopBarConfig;
   };
 
   type MapWidgetEditorState = MapTemplateState;
@@ -677,8 +707,10 @@
   const templateScene = ref<MapTemplateScene>(createDefaultMapTemplateState().scene);
   const templateAppearance = ref<MapTemplateAppearance>({ ...createDefaultMapTemplateState().appearance });
   const templateSensorDeviceTypeStyles = ref<SensorDeviceTypeStyles>({});
+  const templateTopBar = ref<MapTopBarConfig>(createDefaultMapTopBarConfig());
   const appearancePanelVisible = ref(false);
   const sensorStylePanelVisible = ref(false);
+  const pageSettingsVisible = ref(false);
   const sensorStyleLoading = ref(false);
   const sensorStyleError = ref('');
   const sensorStyleTab = ref<'point' | 'type'>('point');
@@ -1026,6 +1058,7 @@
     if (editorMode.value !== 'editing') editorMode.value = 'editing';
     addPanelVisible.value = false;
     appearancePanelVisible.value = false;
+    pageSettingsVisible.value = false;
     sensorStyleError.value = '';
     sensorStyleLoading.value = false;
     sensorStylePanelVisible.value = true;
@@ -1298,6 +1331,7 @@
     templateScene.value = cloneJson(normalized.scene);
     templateAppearance.value = cloneJson(normalized.appearance);
     templateSensorDeviceTypeStyles.value = cloneJson(normalized.sensorDeviceTypeStyles);
+    templateTopBar.value = cloneJson(normalized.topBar);
     layout.value = normalized.layout;
     widgets.value = normalizeWidgetState(normalized.widgets);
     originalMapPoints.value = cloneJson(normalized.mapPoints);
@@ -1312,6 +1346,7 @@
       scene: cloneJson(templateScene.value),
       appearance: cloneJson(templateAppearance.value),
       sensorDeviceTypeStyles: cloneJson(templateSensorDeviceTypeStyles.value),
+      topBar: cloneJson(templateTopBar.value),
       layout: cloneJson(layout.value),
       widgets: cloneJson(widgets.value),
       mapPoints: cloneJson(draftMapPoints.value),
@@ -1777,6 +1812,7 @@
     sensorPreviewVisible.value = false;
     sensorConfigVisible.value = false;
     sensorStylePanelVisible.value = false;
+    pageSettingsVisible.value = false;
     selectedSensor.value = null;
     closeCameraPopup();
   }
@@ -1864,6 +1900,7 @@
       widgets: cloneJson(widgets.value),
       appearance: cloneJson(templateAppearance.value),
       sensorDeviceTypeStyles: cloneJson(templateSensorDeviceTypeStyles.value),
+      topBar: cloneJson(templateTopBar.value),
     };
     draftMapPoints.value = cloneJson(originalMapPoints.value);
     draftSensorPopupBindings.value = cloneJson(originalSensorPopupBindings.value);
@@ -2082,13 +2119,23 @@
     if (editorMode.value !== 'editing') return;
     appearancePanelVisible.value = false;
     sensorStylePanelVisible.value = false;
+    pageSettingsVisible.value = false;
     addPanelVisible.value = !addPanelVisible.value;
+  }
+
+  function togglePageSettingsPanel() {
+    if (editorMode.value !== 'editing') return;
+    addPanelVisible.value = false;
+    appearancePanelVisible.value = false;
+    sensorStylePanelVisible.value = false;
+    pageSettingsVisible.value = !pageSettingsVisible.value;
   }
 
   function toggleAppearancePanel() {
     if (editorMode.value !== 'editing') return;
     addPanelVisible.value = false;
     sensorStylePanelVisible.value = false;
+    pageSettingsVisible.value = false;
     appearancePanelVisible.value = !appearancePanelVisible.value;
   }
 
@@ -2098,6 +2145,7 @@
     widgets.value = cloneJson(widgetSnapshot.widgets);
     templateAppearance.value = cloneJson(widgetSnapshot.appearance);
     templateSensorDeviceTypeStyles.value = cloneJson(widgetSnapshot.sensorDeviceTypeStyles);
+    templateTopBar.value = cloneJson(widgetSnapshot.topBar);
     renderGrid();
   }
 
@@ -2109,6 +2157,7 @@
     addPanelVisible.value = false;
     appearancePanelVisible.value = false;
     sensorStylePanelVisible.value = false;
+    pageSettingsVisible.value = false;
     pendingPointLocation.value = null;
     selectedWidgetId.value = '';
     closeAllOverlays();
@@ -2171,6 +2220,7 @@
       widgets: cloneJson(state.widgets),
       appearance: cloneJson(state.appearance),
       sensorDeviceTypeStyles: cloneJson(state.sensorDeviceTypeStyles),
+      topBar: cloneJson(state.topBar),
     };
 
     leaveEditMode();
@@ -2495,7 +2545,27 @@
     inset: 0;
     z-index: 1;
   }
+
+  .mw-top-bar {
+    position: absolute;
+    inset: 0 0 auto;
+    z-index: 20;
+  }
+
+  .mw-page-settings-panel {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    bottom: 12px;
+    z-index: 33;
+    max-height: calc(100% - 24px);
+  }
+
   .mw-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     border: 1px solid rgba(255, 255, 255, 0.55);
     background: rgba(25, 30, 40, 0.72);
     color: #fff;

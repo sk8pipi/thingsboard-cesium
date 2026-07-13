@@ -1,5 +1,15 @@
 <template>
-  <div class="map-home" :style="mapAppearanceStyle">
+  <div ref="mapHomeRef" class="map-home" :style="mapAppearanceStyle">
+    <MapScreenTopBar
+      class="map-top-bar"
+      :config="topBarConfig"
+      :actions="availableTopBarActions"
+      mode="runtime"
+      :dashboard-title="currentAssignedTemplateTitle"
+      :is-fullscreen="isMapFullscreen"
+      @action="handleTopBarAction"
+    />
+
     <CesiumMap
       ref="cesiumMapRef"
       class="map-canvas"
@@ -44,8 +54,6 @@
       :error="cameraRuntimeError"
       @close="closeCameraPopup"
     />
-
-    <button class="map-settings-btn" type="button" @click="openHome">设置</button>
   </div>
 </template>
 
@@ -63,6 +71,7 @@
   import { createDatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
   import SensorWidgetPopup from './SensorWidgetPopup.vue';
   import CameraMonitorPopup from './components/CameraMonitorPopup.vue';
+  import MapScreenTopBar from './components/MapScreenTopBar.vue';
   import { getMapWidgetStorageKey } from './mapWidgetStorage';
   import { resolveSensorDeviceType } from './services/sensorPointStyleService';
   import { getMapPointStorageKey, loadMapPoints } from './mapPointStorage';
@@ -90,10 +99,13 @@
   import type { PopupWidgetConfig } from './sensorPopupWidgetStorage';
   import {
     DASHBOARD_MAP_WIDGET_CONFIG_KEY,
+    createDefaultMapTopBarConfig,
     mapTemplateAppearanceStyle,
     normalizeMapTemplateState,
+    type MapTopBarActionType,
     type MapTemplateState,
   } from './mapTemplateConfig';
+  import { executeMapTopBarAction, getAvailableMapTopBarActions } from './mapTopBarActions';
   import {
     clearSelectedMapTemplateId,
     loadSelectedMapTemplateId,
@@ -104,6 +116,7 @@
   type AssignedTemplateState = MapTemplateState;
   type CesiumMapExpose = {
     flyToPoint: (point: MapPointLocation) => void;
+    flyToOverview: () => void | Promise<void>;
   };
 
   const router = useRouter();
@@ -125,7 +138,9 @@
   });
   watch(assignedTemplateRuntimeDeviceMap, () => datasourceRuntime.refreshExternalValues());
 
+  const mapHomeRef = ref<HTMLElement | null>(null);
   const cesiumMapRef = ref<CesiumMapExpose | null>(null);
+  const isMapFullscreen = ref(false);
 
   const selectedSensor = ref<SensorMapPoint | null>(null);
   const sensorPreviewVisible = ref(false);
@@ -143,6 +158,12 @@
   const isSysAdminMap = computed(() => userStore.getAuthority === Authority.SYS_ADMIN);
   const isCustomerUserMap = computed(() => userStore.getAuthority === Authority.CUSTOMER_USER);
   const assignedTemplateState = ref<AssignedTemplateState | null>(null);
+  const currentAssignedTemplateTitle = ref('');
+  const defaultTopBarConfig = createDefaultMapTopBarConfig();
+  const topBarConfig = computed(() => assignedTemplateState.value?.topBar || defaultTopBarConfig);
+  const availableTopBarActions = computed(() =>
+    getAvailableMapTopBarActions(topBarConfig.value.actions, userStore.getAuthority),
+  );
   const mapAppearanceStyle = computed(() => mapTemplateAppearanceStyle(assignedTemplateState.value?.appearance));
   const currentAssignedTemplateDashboardId = ref('');
   const storageKey = computed(() => getMapWidgetStorageKey());
@@ -406,6 +427,7 @@
 
   async function loadAssignedTemplateFromDashboard(dashboardId: string) {
     const dashboard = await getDashboardById(dashboardId);
+    currentAssignedTemplateTitle.value = dashboard.title || '';
     assignedTemplateState.value = normalizeMapTemplateState(dashboard.configuration?.[DASHBOARD_MAP_WIDGET_CONFIG_KEY]);
     await refreshAssignedTemplatePointStatuses();
   }
@@ -486,6 +508,7 @@
     if (!isCustomerUserMap.value) return;
 
     assignedTemplateState.value = null;
+    currentAssignedTemplateTitle.value = '';
     assignedTemplateRuntimeDeviceMap.value = {};
 
     const customerId = userStore.getUserInfo?.customerId?.id || '';
@@ -680,12 +703,32 @@
     };
   }
 
+  function syncMapFullscreenState() {
+    isMapFullscreen.value = Boolean(document.fullscreenElement);
+  }
+
   function openHome() {
     router.push(homePath.value);
   }
 
+  async function handleTopBarAction(type: MapTopBarActionType) {
+    const result = await executeMapTopBarAction(type, {
+      authority: userStore.getAuthority,
+      fullscreenTarget: mapHomeRef.value,
+      handlers: {
+        overview: () => cesiumMapRef.value?.flyToOverview(),
+        settings: openHome,
+      },
+    });
+
+    if (typeof result.fullscreen === 'boolean') {
+      isMapFullscreen.value = result.fullscreen;
+    }
+  }
+
   onMounted(async () => {
     window.addEventListener('storage', onStorage);
+    document.addEventListener('fullscreenchange', syncMapFullscreenState);
     datasourceRuntime.connect();
     await loadAssignedCustomerTemplate();
     if (!isSysAdminMap.value && !isCustomerUserMap.value) {
@@ -696,6 +739,7 @@
 
   onBeforeUnmount(() => {
     window.removeEventListener('storage', onStorage);
+    document.removeEventListener('fullscreenchange', syncMapFullscreenState);
     if (devicePointRefreshTimer) {
       window.clearInterval(devicePointRefreshTimer);
       devicePointRefreshTimer = undefined;
@@ -719,17 +763,10 @@
     inset: 0;
   }
 
-  .map-settings-btn {
+  .map-top-bar {
     position: absolute;
-    left: 12px;
-    top: 12px;
+    inset: 0 0 auto;
     z-index: 2000;
-    padding: 8px 12px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.7);
-    background: rgba(22, 100, 145, 0.92);
-    color: #fff;
-    cursor: pointer;
   }
 
   .map-widgets {
