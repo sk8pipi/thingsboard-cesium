@@ -584,6 +584,7 @@
   import { Authority } from '/@/enums/authorityEnum';
   import { Scope } from '/@/enums/telemetryEnum';
   import { usePermission } from '/@/hooks/web/usePermission';
+  import { useUserStore } from '/@/store/modules/user';
   import {
     DASHBOARD_MAP_WIDGET_CONFIG_KEY,
     createDefaultMapTemplateState,
@@ -651,6 +652,7 @@
   const router = useRouter();
   const route = useRoute();
   const { hasPermission } = usePermission();
+  const userStore = useUserStore();
 
   const pendingImportedConfig = ref<Record<string, any> | null>(null);
   const pendingWidgetKey = ref<LocalWidgetKey | ''>('');
@@ -1138,7 +1140,7 @@
   );
   const dashboardId = computed(() => String(route.query.dashboardId || ''));
   const isDashboardTemplateMode = computed(() => Boolean(dashboardId.value));
-  const canEditTemplate = computed(() => !isDashboardTemplateMode.value || hasPermission(Authority.TENANT_ADMIN));
+  const canEditTemplate = computed(() => isDashboardTemplateMode.value && hasPermission(Authority.TENANT_ADMIN));
   const templateGlobeOnly = computed(() =>
     isDashboardTemplateMode.value ? templateScene.value.globeOnly !== false : false,
   );
@@ -1385,7 +1387,9 @@
 
   async function loadEditorState() {
     if (isDashboardTemplateMode.value) {
+      assertTenantAdminAccess();
       const dashboard = await getDashboardById(dashboardId.value);
+      assertDashboardTenantOwnership(dashboard);
       dashboardTemplate.value = dashboard;
       applyEditorState(dashboard.configuration?.[DASHBOARD_MAP_WIDGET_CONFIG_KEY]);
       return;
@@ -1425,15 +1429,42 @@
     }
   }
 
-  async function persistEditorState(state = getEditorState()) {
+  function assertTenantAdminAccess() {
+    if (!hasPermission(Authority.TENANT_ADMIN)) {
+      throw new Error('\u53ea\u6709\u79df\u6237\u7ba1\u7406\u5458\u53ef\u4ee5\u7f16\u8f91\u7528\u6237\u5927\u5c4f');
+    }
+    if (!dashboardId.value) {
+      throw new Error('\u7f3a\u5c11\u5927\u5c4f\u6a21\u677f dashboardId');
+    }
+  }
+
+  function assertDashboardTenantOwnership(dashboard: Dashboard) {
+    const currentTenantId = String(userStore.getUserInfo?.tenantId?.id || '');
+    const dashboardTenantId = String(dashboard?.tenantId?.id || '');
+    if (!currentTenantId || !dashboardTenantId || currentTenantId !== dashboardTenantId) {
+      throw new Error('\u5f53\u524d\u5927\u5c4f\u4e0d\u5c5e\u4e8e\u6b64\u79df\u6237\uff0c\u65e0\u6cd5\u7f16\u8f91');
+    }
+  }
+
+  async function getWritableDashboard() {
+    assertTenantAdminAccess();
+    const dashboard = await getDashboardById(dashboardId.value);
+    assertDashboardTenantOwnership(dashboard);
+    return dashboard;
+  }
+
+  async function persistEditorState(state = getEditorState(), writableDashboard?: Dashboard) {
     if (isDashboardTemplateMode.value) {
+      assertTenantAdminAccess();
+      const latest = writableDashboard || (await getWritableDashboard());
+      assertDashboardTenantOwnership(latest);
+
       const deviceAccess = await inspectMapTemplateDeviceAccess(state);
       const inaccessibleDevices = deviceAccess.filter((item) => !item.device);
       if (inaccessibleDevices.length) {
         throw new Error('Template contains inaccessible devices: ' + formatTemplateDeviceNames(inaccessibleDevices));
       }
 
-      const latest = await getDashboardById(dashboardId.value);
       latest.configuration = latest.configuration || {};
       latest.configuration[DASHBOARD_MAP_WIDGET_CONFIG_KEY] = state;
       await saveDashboard(latest);
@@ -2208,10 +2239,11 @@
     const changedDeviceLocationPoints = getChangedDeviceLocationPoints(state.mapPoints);
     isSavingEdit.value = true;
     try {
+      const writableDashboard = await getWritableDashboard();
       if (changedDeviceLocationPoints.length) {
         await saveDeviceMapPointLocations(changedDeviceLocationPoints);
       }
-      await persistEditorState(state);
+      await persistEditorState(state, writableDashboard);
     } catch (error: any) {
       errorMsg.value = error?.message || '鐐逛綅淇濆瓨澶辫触锛岃妫€鏌ヨ澶囦綅缃俊鎭悗閲嶈瘯';
       return;
@@ -2421,6 +2453,15 @@
   );
 
   onMounted(async () => {
+    if (!hasPermission(Authority.TENANT_ADMIN)) {
+      await router.replace('/map-home');
+      return;
+    }
+    if (!dashboardId.value) {
+      await router.replace('/dashboard/list');
+      return;
+    }
+
     await nextTick();
     if (!gridEl.value) return;
 
@@ -2560,11 +2601,11 @@
 
   .mw-page-settings-panel {
     position: absolute;
-    top: 12px;
+    top: calc(var(--map-top-bar-offset, 0px) + 12px);
     right: 12px;
     bottom: 12px;
     z-index: 33;
-    max-height: calc(100% - 24px);
+    max-height: calc(100% - var(--map-top-bar-offset, 0px) - 24px);
   }
 
   .mw-btn {
@@ -2600,7 +2641,7 @@
 
   .mw-appearance-panel {
     position: absolute;
-    top: 12px;
+    top: calc(var(--map-top-bar-offset, 0px) + 12px);
     left: 12px;
     z-index: 28;
     width: min(380px, calc(100vw - 24px));
@@ -2654,7 +2695,7 @@
 
   .mw-mode-banner {
     position: absolute;
-    top: 12px;
+    top: calc(var(--map-top-bar-offset, 0px) + 12px);
     left: 12px;
     z-index: 25;
     display: flex;
@@ -2797,11 +2838,11 @@
 
   .mw-sensor-style-panel {
     position: absolute;
-    top: 12px;
+    top: calc(var(--map-top-bar-offset, 0px) + 12px);
     right: 12px;
     z-index: 31;
     width: min(860px, calc(100vw - 24px));
-    max-height: calc(100vh - 96px);
+    max-height: calc(100% - var(--map-top-bar-offset, 0px) - 24px);
     overflow: hidden;
     box-sizing: border-box;
     display: grid;
@@ -3098,11 +3139,11 @@
   }
   .mw-add-panel {
     position: absolute;
-    top: 58px;
+    top: calc(var(--map-top-bar-offset, 0px) + 12px);
     left: 12px;
     z-index: 30;
     width: min(620px, calc(100vw - 24px));
-    max-height: calc(100vh - 96px);
+    max-height: calc(100% - var(--map-top-bar-offset, 0px) - 24px);
     overflow: hidden;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.18);
@@ -3267,7 +3308,7 @@
 
   .mw-control-editor {
     position: absolute;
-    top: 58px;
+    top: calc(var(--map-top-bar-offset, 0px) + 12px);
     right: 12px;
     z-index: 30;
     width: min(420px, calc(100vw - 24px));
@@ -3398,5 +3439,67 @@
 
   .mw-grid--editing :deep(.mw-del::after) {
     transform: rotate(-45deg);
+  }
+
+  @media (max-width: 960px) {
+    .mw-editbar {
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 8px 12px;
+      padding: 8px 10px;
+    }
+
+    .mw-editbar-center {
+      text-align: left;
+    }
+
+    .mw-editbar-right {
+      grid-column: 1 / -1;
+      justify-content: flex-start;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: thin;
+    }
+
+    .mw-editbar-right .mw-btn {
+      flex: 0 0 auto;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .mw-editbar {
+      gap: 6px 8px;
+      padding: 7px 8px;
+    }
+
+    .mw-btn {
+      padding: 7px 9px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .mw-page-settings-panel,
+    .mw-appearance-panel,
+    .mw-sensor-style-panel,
+    .mw-add-panel,
+    .mw-control-editor {
+      right: 8px;
+      left: 8px;
+      width: auto;
+    }
+
+    .mw-mode-banner {
+      right: 8px;
+      left: 8px;
+      flex-wrap: wrap;
+    }
+
+    .mw-widget-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .mw-widget-card--import {
+      grid-template-columns: 72px minmax(0, 1fr);
+    }
   }
 </style>

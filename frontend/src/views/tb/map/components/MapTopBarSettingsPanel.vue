@@ -625,4 +625,31 @@
     opacity: 0.35;
     cursor: not-allowed;
   }
+
+  @media (max-width: 420px) {
+    .map-top-bar-settings__header {
+      gap: 10px;
+      padding: 9px 12px;
+    }
+
+    .map-top-bar-settings__section {
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .map-top-bar-settings__logo-upload {
+      grid-template-columns: 56px minmax(0, 1fr);
+      gap: 10px;
+    }
+
+    .map-top-bar-settings__logo-preview {
+      width: 56px;
+      height: 56px;
+    }
+
+    .map-top-bar-settings__action {
+      grid-template-columns: 18px 18px minmax(0, 1fr) auto;
+      gap: 6px;
+    }
+  }
 </style>

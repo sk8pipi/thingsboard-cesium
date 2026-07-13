@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div v-if="visible" class="sensor-widget-popup tb-widget-surface">
     <div class="sensor-widget-popup__header">
       <div>
@@ -162,6 +162,11 @@
     margin-bottom: 14px;
   }
 
+  .sensor-widget-popup__header > div:first-child {
+    min-width: 0;
+    flex: 1 1 240px;
+  }
+
   .sensor-widget-popup__title {
     font-size: 16px;
     font-weight: 600;
@@ -225,5 +230,33 @@
   .sensor-widget-popup__empty {
     font-size: 13px;
     opacity: 0.8;
+  }
+
+  @media (max-width: 640px) {
+    .sensor-widget-popup {
+      top: calc(var(--map-top-bar-offset, 0px) + 12px);
+      right: 12px;
+      left: 12px;
+      width: auto;
+      max-height: calc(100% - var(--map-top-bar-offset, 0px) - 24px);
+      padding: 12px;
+    }
+
+    .sensor-widget-popup__header {
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .sensor-widget-popup__header > div:first-child {
+      flex-basis: 100%;
+    }
+
+    .sensor-widget-popup__export {
+      margin-left: 0;
+    }
+
+    .sensor-widget-popup__info {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

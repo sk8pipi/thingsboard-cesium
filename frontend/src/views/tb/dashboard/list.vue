@@ -318,7 +318,19 @@
   }
 
   function handleOpenDashboard(record: Recordable) {
-    router.push({ path: '/map-widget', query: { dashboardId: record.id.id } });
+    const dashboardId = record?.id?.id;
+    if (!dashboardId) return;
+
+    if (hasPermission(Authority.TENANT_ADMIN)) {
+      router.push({ path: '/map-widget', query: { dashboardId } });
+      return;
+    }
+
+    if (hasPermission(Authority.CUSTOMER_USER)) {
+      selectedMapTemplateId.value = dashboardId;
+      saveSelectedMapTemplateId(currentUserId, dashboardId);
+      router.push('/map-home');
+    }
   }
 
   function isSelectedMapTemplate(record: Recordable) {
