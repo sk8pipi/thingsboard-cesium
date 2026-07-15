@@ -1,5 +1,5 @@
 <template>
-  <ResourceUsagePanel
+  <ElectricityUsagePanel
     :config="config"
     :ctx="ctx"
     telemetry-key="electricityConsumption"
@@ -11,7 +11,7 @@
 </template>
 
 <script setup lang="ts">
-  import ResourceUsagePanel from './ResourceUsagePanel.vue';
+  import ElectricityUsagePanel from './ElectricityUsagePanel.vue';
   import type { TemplateRuntimeDevices } from './templateAggregate';
 
   defineProps<{
