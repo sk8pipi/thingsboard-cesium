@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b1524"/><stop offset="1" stop-color="#101c2c"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#000" flood-opacity=".28"/></filter>
+  </defs>
+  <rect width="1200" height="420" fill="#07101d"/>
+  <rect x="24" y="24" width="1152" height="372" rx="8" fill="url(#bg)" stroke="#26364b" filter="url(#shadow)"/>
+  <text x="58" y="75" fill="#eef6ff" font-family="Microsoft YaHei, sans-serif" font-size="24" font-weight="700">设备运行总览</text>
+  <text x="1142" y="73" text-anchor="end" fill="#7890aa" font-family="Microsoft YaHei, sans-serif" font-size="14">实时状态</text>
+  <line x1="58" y1="98" x2="1142" y2="98" stroke="#24354a"/>
+  <g font-family="Microsoft YaHei, sans-serif">
+    <rect x="58" y="128" width="250" height="220" rx="7" fill="#101f31" stroke="#263c55"/>
+    <circle cx="104" cy="176" r="22" fill="#163c5b"/><path d="M93 166h22v18H93zM97 161h14v5H97z" fill="#58c7ff"/>
+    <text x="90" y="231" fill="#8da3ba" font-size="16">设备总数</text><text x="90" y="292" fill="#f6fbff" font-size="48" font-weight="700">101</text><text x="181" y="291" fill="#71879e" font-size="15">台</text>
+    <rect x="326" y="128" width="250" height="220" rx="7" fill="#101f31" stroke="#263c55"/>
+    <circle cx="372" cy="176" r="22" fill="#174838"/><circle cx="372" cy="176" r="8" fill="#54e39b"/><circle cx="372" cy="176" r="14" fill="none" stroke="#54e39b" opacity=".35"/>
+    <text x="358" y="231" fill="#8da3ba" font-size="16">在线设备</text><text x="358" y="292" fill="#54e39b" font-size="48" font-weight="700">96</text><text x="419" y="291" fill="#71879e" font-size="15">台</text>
+    <rect x="594" y="128" width="250" height="220" rx="7" fill="#101f31" stroke="#263c55"/>
+    <circle cx="640" cy="176" r="22" fill="#143c52"/><path d="M630 181a13 13 0 1 1 20 0" fill="none" stroke="#52d7e8" stroke-width="4"/><path d="M640 177l8-9" stroke="#52d7e8" stroke-width="3" stroke-linecap="round"/>
+    <text x="626" y="231" fill="#8da3ba" font-size="16">在线率</text><text x="626" y="292" fill="#52d7e8" font-size="48" font-weight="700">95.05</text><text x="769" y="291" fill="#71879e" font-size="18">%</text>
+    <rect x="862" y="128" width="280" height="220" rx="7" fill="#101f31" stroke="#513441"/>
+    <circle cx="908" cy="176" r="22" fill="#512a33"/><path d="M908 161l17 30h-34z" fill="#ff647c"/><rect x="906.5" y="170" width="3" height="10" fill="#fff"/><circle cx="908" cy="185" r="2" fill="#fff"/>
+    <text x="894" y="231" fill="#8da3ba" font-size="16">当前报警</text><text x="894" y="292" fill="#ff647c" font-size="48" font-weight="700">5</text><text x="928" y="291" fill="#71879e" font-size="15">条</text>
+  </g>
+</svg>

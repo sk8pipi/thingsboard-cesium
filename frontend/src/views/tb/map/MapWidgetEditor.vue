@@ -8,6 +8,13 @@
       @ok="onWidgetDevicePicked"
     />
 
+    <AreaKeyCompareConfigDialog
+      :visible="areaKeyCompareConfigVisible"
+      :default-title="pendingWidgetTitle || '区域 key 对比'"
+      @cancel="cancelAreaKeyCompareConfig"
+      @ok="confirmAreaKeyCompareConfig"
+    />
+
     <SelectDeviceDialog
       :visible="sensorPointDialogVisible"
       :require-keys="false"
@@ -518,6 +525,7 @@
   import SensorWidgetPopup from './SensorWidgetPopup.vue';
   import SensorPopupWidgetEditor from './SensorPopupWidgetEditor.vue';
   import CameraMonitorPopup from './components/CameraMonitorPopup.vue';
+  import AreaKeyCompareConfigDialog from './AreaKeyCompareConfigDialog.vue';
   import MapScreenTopBar from './components/MapScreenTopBar.vue';
   import MapTopBarSettingsPanel from './components/MapTopBarSettingsPanel.vue';
   import { getMapWidgetStorageKey } from './mapWidgetStorage';
@@ -662,6 +670,7 @@
   const sensorPointDialogVisible = ref(false);
   const cameraPointDialogVisible = ref(false);
   const aggregateConfigVisible = ref(false);
+  const areaKeyCompareConfigVisible = ref(false);
   const aggregateKey = ref('');
   const aggregateKeySearch = ref('');
   const aggregateAvailableKeys = ref<string[]>([]);
@@ -1715,6 +1724,51 @@
     pendingWidgetTitle.value = '';
   }
 
+  function cancelAreaKeyCompareConfig() {
+    areaKeyCompareConfigVisible.value = false;
+    pendingWidgetKey.value = '';
+    pendingWidgetTitle.value = '';
+  }
+
+  function confirmAreaKeyCompareConfig(payload: {
+    title: string;
+    devices: Array<{ id: string; name: string }>;
+    keys: string[];
+    timeRange: string;
+  }) {
+    const key = pendingWidgetKey.value;
+    const definition = key ? widgetRegistry[key] : null;
+    if (!key || !definition || !payload.devices.length || !payload.keys.length) return;
+
+    const config = cloneJson(definition.defaultConfig || {});
+    const defaultCumulativeKeys = ['electricityConsumption', 'waterConsumption'];
+    const selectedCumulativeKeys = payload.keys.filter((item) => defaultCumulativeKeys.includes(item));
+    const cumulativeKeys = Array.from(new Set([...(config.settings?.cumulativeKeys || []), ...selectedCumulativeKeys]));
+    const datasources = payload.devices.map((device) => ({
+      type: 'device',
+      entityType: 'DEVICE',
+      entityId: device.id,
+      entityName: device.name,
+      keys: payload.keys,
+      dataKeys: payload.keys.map((name) => ({ name, type: 'timeseries' })),
+      pollMs: 60000,
+    }));
+
+    config.title = payload.title;
+    config.settings = {
+      ...(config.settings || {}),
+      title: payload.title,
+      deviceSelector: { mode: 'manual', devices: payload.devices },
+      keys: payload.keys,
+      cumulativeKeys,
+      timeRange: payload.timeRange,
+    };
+    config.datasource = datasources[0] || null;
+    config.datasources = datasources;
+
+    createWidgetAndAddToGrid(key, payload.title || definition.title, config);
+    cancelAreaKeyCompareConfig();
+  }
   function addWidgetByKey(key: LocalWidgetKey) {
     if (!grid || editorMode.value !== 'editing') return;
 
@@ -1725,6 +1779,14 @@
     }
 
     const title = def.title;
+
+    if (key === 'iotAreaKeyCompareBar') {
+      pendingWidgetKey.value = key;
+      pendingWidgetTitle.value = title;
+      addPanelVisible.value = false;
+      areaKeyCompareConfigVisible.value = true;
+      return;
+    }
 
     if (def.editor === 'aggregate') {
       pendingWidgetKey.value = key;
@@ -1846,6 +1908,7 @@
   function closeAllOverlays() {
     addPanelVisible.value = false;
     aggregateConfigVisible.value = false;
+    areaKeyCompareConfigVisible.value = false;
     sensorPreviewVisible.value = false;
     sensorConfigVisible.value = false;
     sensorStylePanelVisible.value = false;

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560">
+  <rect width="1200" height="560" fill="#07101d"/><rect x="24" y="24" width="1152" height="512" rx="8" fill="#0e1a2a" stroke="#26364b"/>
+  <text x="58" y="75" fill="#eef6ff" font-family="Microsoft YaHei, sans-serif" font-size="24" font-weight="700">设备类型与在线状态</text>
+  <text x="1142" y="73" text-anchor="end" fill="#7890aa" font-family="Microsoft YaHei, sans-serif" font-size="14">共 101 台设备</text><line x1="58" y1="98" x2="1142" y2="98" stroke="#24354a"/>
+  <g transform="translate(340 310) rotate(-90)">
+    <circle r="142" fill="none" stroke="#18283a" stroke-width="52"/>
+    <circle r="142" fill="none" stroke="#42c7eb" stroke-width="52" pathLength="101" stroke-dasharray="28 73" stroke-dashoffset="0"/>
+    <circle r="142" fill="none" stroke="#5fe09b" stroke-width="52" pathLength="101" stroke-dasharray="18 83" stroke-dashoffset="-28"/>
+    <circle r="142" fill="none" stroke="#ffc85a" stroke-width="52" pathLength="101" stroke-dasharray="16 85" stroke-dashoffset="-46"/>
+    <circle r="142" fill="none" stroke="#ff7b78" stroke-width="52" pathLength="101" stroke-dasharray="14 87" stroke-dashoffset="-62"/>
+    <circle r="142" fill="none" stroke="#a893ff" stroke-width="52" pathLength="101" stroke-dasharray="13 88" stroke-dashoffset="-76"/>
+    <circle r="142" fill="none" stroke="#6e879e" stroke-width="52" pathLength="101" stroke-dasharray="12 89" stroke-dashoffset="-89"/>
+  </g>
+  <g font-family="Microsoft YaHei, sans-serif" text-anchor="middle"><text x="340" y="298" fill="#f4f9ff" font-size="42" font-weight="700">101</text><text x="340" y="328" fill="#8096ac" font-size="15">设备总数</text></g>
+  <g font-family="Microsoft YaHei, sans-serif">
+    <text x="640" y="145" fill="#8198af" font-size="14">设备类型</text><text x="960" y="145" fill="#8198af" font-size="14">设备数</text><text x="1080" y="145" fill="#8198af" font-size="14">在线</text>
+    <g font-size="17"><circle cx="650" cy="190" r="7" fill="#42c7eb"/><text x="672" y="196" fill="#dce8f4">温湿度传感器</text><text x="974" y="196" fill="#f2f7fb">28</text><text x="1080" y="196" fill="#5fe09b">27</text></g>
+    <g font-size="17"><circle cx="650" cy="246" r="7" fill="#5fe09b"/><text x="672" y="252" fill="#dce8f4">智能电表</text><text x="974" y="252" fill="#f2f7fb">18</text><text x="1080" y="252" fill="#5fe09b">18</text></g>
+    <g font-size="17"><circle cx="650" cy="302" r="7" fill="#ffc85a"/><text x="672" y="308" fill="#dce8f4">智能水表</text><text x="974" y="308" fill="#f2f7fb">16</text><text x="1080" y="308" fill="#5fe09b">15</text></g>
+    <g font-size="17"><circle cx="650" cy="358" r="7" fill="#ff7b78"/><text x="672" y="364" fill="#dce8f4">烟感传感器</text><text x="974" y="364" fill="#f2f7fb">14</text><text x="1080" y="364" fill="#5fe09b">13</text></g>
+    <g font-size="17"><circle cx="650" cy="414" r="7" fill="#a893ff"/><text x="672" y="420" fill="#dce8f4">压力传感器</text><text x="974" y="420" fill="#f2f7fb">13</text><text x="1080" y="420" fill="#5fe09b">12</text></g>
+    <g font-size="17"><circle cx="650" cy="470" r="7" fill="#6e879e"/><text x="672" y="476" fill="#dce8f4">其他设备</text><text x="974" y="476" fill="#f2f7fb">12</text><text x="1080" y="476" fill="#5fe09b">11</text></g>
+  </g>
+</svg>

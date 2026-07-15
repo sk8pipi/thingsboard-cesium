@@ -2,7 +2,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 import { EntityType } from '/@/enums/entityTypeEnum';
 import { getLatestTimeseries, getTimeseries } from '/@/api/tb/telemetry';
 import { fetchAlarmPage } from '../alarm/api';
-import type { AlarmItem } from '../alarm/types';
+import type { AlarmItem, AlarmPage } from '../alarm/types';
+import { mapAggregateSettled, runAggregateRequest } from './aggregateRequestCoordinator';
 
 export type TemplateRuntimeDevices = Record<string, Record<string, unknown>>;
 
@@ -33,6 +34,9 @@ export type TemplateAlarmSummary = {
 };
 
 export type AggregatePoint = { ts: number; value: number };
+
+const ALARM_SUMMARY_CACHE_TTL_MS = 15000;
+let alarmSummaryPageCache: { expiresAt: number; value?: AlarmPage; promise?: Promise<AlarmPage> } | null = null;
 
 function numberValue(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
@@ -146,6 +150,7 @@ export function useTemplateKeySnapshot(key: Ref<string>, devices: Ref<TemplateRu
   const signature = computed(() => deviceSignature(devices.value));
 
   async function reload() {
+    if (loading.value) return;
     const currentKey = key.value.trim();
     const ids = Object.keys(devices.value);
     const currentRequest = ++requestId;
@@ -156,8 +161,8 @@ export function useTemplateKeySnapshot(key: Ref<string>, devices: Ref<TemplateRu
     }
 
     loading.value = true;
-    const results = await Promise.allSettled(
-      ids.map((id) => getLatestTimeseries({ entityType: EntityType.DEVICE, id }, currentKey, true)),
+    const results = await mapAggregateSettled(ids, (id) =>
+      runAggregateRequest(() => getLatestTimeseries({ entityType: EntityType.DEVICE, id }, currentKey, true)),
     );
     if (currentRequest !== requestId) return;
     values.value = results.flatMap((result) => {
@@ -191,6 +196,7 @@ export function useTemplateKeyTrend(key: Ref<string>, devices: Ref<TemplateRunti
   const signature = computed(() => deviceSignature(devices.value));
 
   async function reload() {
+    if (loading.value) return;
     const currentKey = key.value.trim();
     const ids = Object.keys(devices.value);
     const currentRequest = ++requestId;
@@ -204,8 +210,8 @@ export function useTemplateKeyTrend(key: Ref<string>, devices: Ref<TemplateRunti
     const endTs = Date.now();
     const windowMs = Math.max(300000, Number(timeWindowMs.value || 3600000));
     const interval = Math.max(60000, Math.floor(windowMs / 48));
-    const results = await Promise.allSettled(
-      ids.map((entityId) =>
+    const results = await mapAggregateSettled(ids, (entityId) =>
+      runAggregateRequest(() =>
         getTimeseries({
           entityType: EntityType.DEVICE,
           entityId,
@@ -253,36 +259,54 @@ export function useTemplateAlarmSummary(devices: Ref<TemplateRuntimeDevices>) {
   const error = ref('');
   let timer: number | undefined;
   let requestId = 0;
+  let running = false;
+  let rerun = false;
+  let stopped = false;
   const signature = computed(() => deviceSignature(devices.value));
 
   async function reload() {
-    const ids = new Set(Object.keys(devices.value));
-    const currentRequest = ++requestId;
-    if (!ids.size) {
-      summary.value = { active: 0, unacknowledged: 0, severe: 0, today: 0 };
+    if (stopped) return;
+    if (running) {
+      rerun = true;
       return;
     }
 
-    loading.value = true;
+    running = true;
     try {
-      const page = await fetchAlarmPage({ page: 0, pageSize: 1000, sortOrder: 'DESC' });
-      if (currentRequest !== requestId) return;
-      const rows = page.data.filter((item) => item.originator?.id && ids.has(item.originator.id));
-      summary.value = summarizeAlarms(rows);
-      error.value = '';
-    } catch (reason: any) {
-      if (currentRequest !== requestId) return;
-      error.value = reason?.message || '暂时无法读取报警数据';
+      do {
+        rerun = false;
+        const ids = new Set(Object.keys(devices.value));
+        const currentRequest = ++requestId;
+        if (!ids.size) {
+          summary.value = { active: 0, unacknowledged: 0, severe: 0, today: 0 };
+          error.value = '';
+          continue;
+        }
+
+        loading.value = true;
+        try {
+          const page = await fetchSharedAlarmSummaryPage();
+          if (stopped || currentRequest !== requestId) return;
+          const rows = page.data.filter((item) => item.originator?.id && ids.has(item.originator.id));
+          summary.value = summarizeAlarms(rows);
+          error.value = '';
+        } catch (reason: any) {
+          if (stopped || currentRequest !== requestId) return;
+          error.value = reason?.message || 'Unable to load alarm data';
+        }
+      } while (rerun && !stopped);
     } finally {
-      if (currentRequest === requestId) loading.value = false;
+      running = false;
+      if (!stopped) loading.value = false;
     }
   }
 
-  watch(signature, reload, { immediate: true });
+  watch(signature, () => void reload(), { immediate: true });
   onMounted(() => {
-    timer = window.setInterval(reload, 30000);
+    timer = window.setInterval(() => void reload(), 30000);
   });
   onBeforeUnmount(() => {
+    stopped = true;
     requestId += 1;
     if (timer) window.clearInterval(timer);
   });
@@ -290,6 +314,25 @@ export function useTemplateAlarmSummary(devices: Ref<TemplateRuntimeDevices>) {
   return { summary, loading, error, reload };
 }
 
+async function fetchSharedAlarmSummaryPage() {
+  const now = Date.now();
+  if (alarmSummaryPageCache?.value && alarmSummaryPageCache.expiresAt > now) {
+    return alarmSummaryPageCache.value;
+  }
+  if (alarmSummaryPageCache?.promise) return alarmSummaryPageCache.promise;
+
+  const promise = fetchAlarmPage({ page: 0, pageSize: 1000, sortOrder: 'DESC' })
+    .then((value) => {
+      alarmSummaryPageCache = { value, expiresAt: Date.now() + ALARM_SUMMARY_CACHE_TTL_MS };
+      return value;
+    })
+    .catch((error) => {
+      alarmSummaryPageCache = null;
+      throw error;
+    });
+  alarmSummaryPageCache = { promise, expiresAt: 0 };
+  return promise;
+}
 function summarizeAlarms(rows: AlarmItem[]): TemplateAlarmSummary {
   const todayStart = new Date().setHours(0, 0, 0, 0);
   const active = rows.filter((item) => String(item.status).startsWith('ACTIVE'));

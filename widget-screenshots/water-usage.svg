@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680">
+  <defs><linearGradient id="area2" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#42c7eb" stop-opacity=".35"/><stop offset="1" stop-color="#42c7eb" stop-opacity="0"/></linearGradient></defs>
+  <rect width="1200" height="680" fill="#07101d"/><rect x="24" y="24" width="1152" height="632" rx="8" fill="#0e1a2a" stroke="#26364b"/>
+  <text x="58" y="75" fill="#eef6ff" font-family="Microsoft YaHei, sans-serif" font-size="24" font-weight="700">用水量统计</text><text x="1142" y="73" text-anchor="end" fill="#7890aa" font-family="Microsoft YaHei, sans-serif" font-size="14">累计表读数差值统计 · 演示数据</text><line x1="58" y1="98" x2="1142" y2="98" stroke="#24354a"/>
+  <g font-family="Microsoft YaHei, sans-serif">
+    <rect x="58" y="124" width="202" height="118" rx="6" fill="#121f30"/><text x="78" y="156" fill="#8ba0b5" font-size="14">今日用水量</text><text x="78" y="205" fill="#42c7eb" font-size="32" font-weight="700">368.4</text><text x="178" y="205" fill="#70869d" font-size="13">m³</text>
+    <rect x="274" y="124" width="202" height="118" rx="6" fill="#121f30"/><text x="294" y="156" fill="#8ba0b5" font-size="14">昨日同期用水量</text><text x="294" y="205" fill="#f2f7fb" font-size="32" font-weight="700">341.7</text><text x="394" y="205" fill="#70869d" font-size="13">m³</text>
+    <rect x="490" y="124" width="182" height="118" rx="6" fill="#121f30"/><text x="510" y="156" fill="#8ba0b5" font-size="14">较昨日变化率</text><text x="510" y="205" fill="#5fe09b" font-size="32" font-weight="700">+7.8%</text>
+    <rect x="686" y="124" width="202" height="118" rx="6" fill="#121f30"/><text x="706" y="156" fill="#8ba0b5" font-size="14">本月累计用水量</text><text x="706" y="205" fill="#f2f7fb" font-size="32" font-weight="700">5,892.3</text><text x="824" y="205" fill="#70869d" font-size="13">m³</text>
+    <rect x="902" y="124" width="240" height="118" rx="6" fill="#121f30"/><text x="922" y="156" fill="#8ba0b5" font-size="14">当前小时用水量</text><text x="922" y="205" fill="#f2f7fb" font-size="32" font-weight="700">14.2</text><text x="993" y="205" fill="#70869d" font-size="13">m³</text>
+    <rect x="58" y="260" width="1084" height="82" rx="6" fill="#1b202c" stroke="#543441"/><circle cx="92" cy="301" r="18" fill="#512a33"/><path d="M92 282c-8 12-13 18-13 25a13 13 0 0 0 26 0c0-7-5-13-13-25z" fill="#ff647c"/><text x="124" y="292" fill="#879caf" font-size="14">异常持续用水设备</text><text x="124" y="320" fill="#f4f8fc" font-size="19" font-weight="700">石油科技大楼 · 水表 02</text><text x="1110" y="310" text-anchor="end" fill="#ff647c" font-size="16" font-weight="700">已持续 3 小时 26 分钟</text>
+    <text x="58" y="384" fill="#dce7f2" font-size="17" font-weight="700">最近 24 小时用水趋势</text>
+    <g stroke="#233449"><line x1="80" y1="430" x2="1120" y2="430"/><line x1="80" y1="490" x2="1120" y2="490"/><line x1="80" y1="550" x2="1120" y2="550"/></g>
+    <path d="M80 548 L125 554 L170 541 L215 523 L260 529 L305 501 L350 514 L395 486 L440 495 L485 468 L530 479 L575 452 L620 465 L665 432 L710 446 L755 418 L800 438 L845 405 L890 420 L935 392 L980 406 L1025 372 L1070 388 L1120 360 L1120 590 L80 590Z" fill="url(#area2)"/>
+    <path d="M80 548 L125 554 L170 541 L215 523 L260 529 L305 501 L350 514 L395 486 L440 495 L485 468 L530 479 L575 452 L620 465 L665 432 L710 446 L755 418 L800 438 L845 405 L890 420 L935 392 L980 406 L1025 372 L1070 388 L1120 360" fill="none" stroke="#42c7eb" stroke-width="3" stroke-linejoin="round"/>
+    <g fill="#70869d" font-size="12"><text x="78" y="620">00:00</text><text x="330" y="620">06:00</text><text x="590" y="620">12:00</text><text x="850" y="620">18:00</text><text x="1082" y="620">现在</text></g>
+  </g>
+</svg>
