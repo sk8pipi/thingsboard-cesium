@@ -3,19 +3,24 @@
     :config="config"
     :ctx="ctx"
     telemetry-key="electricityConsumption"
-    label="今日用电量"
+    usage-label="用电量"
     unit="kWh"
     top-label="用电最高设备"
-    :show-seven-day-trend="true"
+    device-category="electricity_consumption"
   />
 </template>
 
 <script setup lang="ts">
   import ElectricityUsagePanel from './ElectricityUsagePanel.vue';
-  import type { TemplateRuntimeDevices } from './templateAggregate';
+  import type { TemplatePointLike, TemplateRuntimeDevices } from './templateDeviceResolver';
+  import type { TemplateTelemetryHub } from './templateTelemetryHub';
 
   defineProps<{
     config?: Record<string, any>;
-    ctx?: { runtimeDevices?: TemplateRuntimeDevices | null };
+    ctx?: {
+      runtimeDevices?: TemplateRuntimeDevices | null;
+      templatePoints?: TemplatePointLike[] | null;
+      templateTelemetryHub?: TemplateTelemetryHub | null;
+    };
   }>();
 </script>

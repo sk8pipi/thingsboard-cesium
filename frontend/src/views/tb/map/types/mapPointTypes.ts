@@ -24,6 +24,9 @@ export interface BaseMapPoint extends MapPointLocation {
   entityType: MapPointEntityType;
   entityId: string;
   entityName: string;
+  deviceCategory?: string;
+  deviceProfile?: string;
+  telemetryKeys?: string[];
   online?: boolean;
   statusText?: string;
   source?: 'manual' | 'device';

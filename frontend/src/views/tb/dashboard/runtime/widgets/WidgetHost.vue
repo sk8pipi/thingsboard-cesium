@@ -18,6 +18,8 @@
   import { widgetRegistry } from './registry/widgetRegistry';
   import type { DashboardWidget, LocalWidgetKey, TbWidgetConfig, WidgetHostKind } from '../types';
   import type { WidgetRuntimeData } from '../datasourceRuntime';
+  import type { TemplateTelemetryHub } from './aggregate/templateTelemetryHub';
+  import type { TemplatePointLike } from './aggregate/templateDeviceResolver';
 
   const props = defineProps<{
     widget: DashboardWidget & {
@@ -27,12 +29,14 @@
     runtime: {
       mountWidgetRuntime: (widget: any) => WidgetRuntimeData;
       unmountWidgetRuntime: (widgetId: string) => void;
+      templateTelemetryHub?: TemplateTelemetryHub;
     };
     context?: {
       host: WidgetHostKind;
       readonly?: boolean;
       entity?: Record<string, any> | null;
       runtimeDevices?: Record<string, Record<string, unknown>> | null;
+      templatePoints?: TemplatePointLike[] | null;
       emit?: (event: string, payload?: unknown) => void;
     };
   }>();
@@ -53,6 +57,8 @@
     readonly: props.context?.readonly ?? true,
     entity: props.context?.entity || null,
     runtimeDevices: props.context?.runtimeDevices || null,
+    templatePoints: props.context?.templatePoints || null,
+    templateTelemetryHub: props.runtime.templateTelemetryHub || null,
     data: runtimeData.value,
     emit: (event: string, payload?: unknown) => props.context?.emit?.(event, payload),
   }));

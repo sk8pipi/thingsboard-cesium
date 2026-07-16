@@ -24,6 +24,10 @@ export type UsageDeviceValue = {
   value: number;
 };
 
+export type UsageDeviceReading = UsageDeviceValue & {
+  ts: number;
+};
+
 export type UsageSummary = {
   today: number;
   yesterdaySameTime: number;
@@ -34,6 +38,8 @@ export type UsageSummary = {
   trend24h: UsagePoint[];
   trend7d: UsagePoint[];
   continuousDevices: UsageDeviceValue[];
+  deviceTodayValues: UsageDeviceValue[];
+  latestDeviceReadings: UsageDeviceReading[];
   updatedAt: number;
 };
 
@@ -43,9 +49,14 @@ const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const USAGE_CACHE_TTL_MS = 30000;
 const MISSING_KEY_RECHECK_MS = 5 * 60 * 1000;
+const USAGE_PROGRESS_INTERVAL_MS = 120;
 
 type UsageQueryDevice = { id: string; name: string };
 type DeviceUsageSeries = { device: UsageQueryDevice; points: UsagePoint[] };
+export type FetchUsageSummaryOptions = {
+  force?: boolean;
+  onProgress?: (summary: UsageSummary, completed: number, total: number) => void;
+};
 type UsageSummaryCacheEntry = {
   expiresAt: number;
   value?: UsageSummary;
@@ -234,17 +245,23 @@ export function resolveTimeRange(range: string, now = Date.now()) {
   return { startTs: todayStart, endTs: now };
 }
 
-export async function fetchUsageSummary(devices: UsageQueryDevice[], key: string): Promise<UsageSummary> {
+export async function fetchUsageSummary(
+  devices: UsageQueryDevice[],
+  key: string,
+  options: boolean | FetchUsageSummaryOptions = {},
+): Promise<UsageSummary> {
+  const normalizedOptions = typeof options === 'boolean' ? { force: options } : options;
   const normalizedKey = key.trim();
   const cacheKey = `${normalizedKey}::${devices
     .map((device) => device.id)
     .sort()
     .join(',')}`;
+  if (normalizedOptions.force) usageSummaryCache.delete(cacheKey);
   const cached = usageSummaryCache.get(cacheKey);
   if (cached?.value && cached.expiresAt > Date.now()) return cached.value;
   if (cached?.promise) return cached.promise;
 
-  const promise = buildUsageSummary(devices, normalizedKey)
+  const promise = buildUsageSummary(devices, normalizedKey, normalizedOptions.onProgress)
     .then((value) => {
       usageSummaryCache.set(cacheKey, { value, expiresAt: Date.now() + USAGE_CACHE_TTL_MS });
       pruneUsageSummaryCache();
@@ -259,12 +276,14 @@ export async function fetchUsageSummary(devices: UsageQueryDevice[], key: string
   return promise;
 }
 
-async function buildUsageSummary(devices: UsageQueryDevice[], key: string): Promise<UsageSummary> {
+async function buildUsageSummary(
+  devices: UsageQueryDevice[],
+  key: string,
+  onProgress?: FetchUsageSummaryOptions['onProgress'],
+): Promise<UsageSummary> {
   const now = Date.now();
-  const todayRange = resolveTimeRange('today', now);
   const yesterdayRange = resolveTimeRange('yesterdaySameTime', now);
   const monthRange = resolveTimeRange('month', now);
-  const hourRange = resolveTimeRange('currentHour', now);
   const queryStart = Math.max(0, Math.min(monthRange.startTs, now - 8 * DAY_MS, yesterdayRange.startTs) - HOUR_MS);
   const limit = Math.ceil((now - queryStart) / HOUR_MS) + 4;
   const queryDevices = devices.filter((device) => {
@@ -272,39 +291,69 @@ async function buildUsageSummary(devices: UsageQueryDevice[], key: string): Prom
     return !support || support.hasData || support.expiresAt <= now;
   });
 
+  const progressiveSeries: DeviceUsageSeries[] = [];
+  let completed = 0;
+  let lastProgressAt = 0;
   const results = await mapAggregateSettled(queryDevices, async (device) => {
-    const response = await runAggregateRequest(() =>
-      getTimeseries({
-        entityType: EntityType.DEVICE,
-        entityId: device.id,
-        keys: key,
-        startTs: queryStart,
-        endTs: now,
-        interval: HOUR_MS,
-        limit,
-        agg: 'MAX',
-        orderBy: 'ASC',
-        useStrictDataTypes: true,
-      }),
-    );
-    return { device, points: extractPoints(response, key) } satisfies DeviceUsageSeries;
+    try {
+      const response = await runAggregateRequest(() =>
+        getTimeseries({
+          entityType: EntityType.DEVICE,
+          entityId: device.id,
+          keys: key,
+          startTs: queryStart,
+          endTs: now,
+          interval: HOUR_MS,
+          limit,
+          agg: 'MAX',
+          orderBy: 'ASC',
+          useStrictDataTypes: true,
+        }),
+      );
+      const item = { device, points: extractPoints(response, key) } satisfies DeviceUsageSeries;
+      deviceKeySupportCache.set(`${device.id}::${key}`, {
+        hasData: item.points.length > 0,
+        expiresAt: item.points.length ? Number.POSITIVE_INFINITY : now + MISSING_KEY_RECHECK_MS,
+      });
+      if (item.points.length) progressiveSeries.push(item);
+      return item;
+    } finally {
+      completed += 1;
+      const progressAt = Date.now();
+      const shouldEmitProgress =
+        completed === 1 ||
+        completed === queryDevices.length ||
+        progressAt - lastProgressAt >= USAGE_PROGRESS_INTERVAL_MS;
+      if (onProgress && shouldEmitProgress) {
+        lastProgressAt = progressAt;
+        try {
+          onProgress(summarizeUsageSeries(progressiveSeries, key, now), completed, queryDevices.length);
+        } catch {
+          // Rendering progress must never turn a successful telemetry request into a failure.
+        }
+      }
+    }
   });
 
   if (queryDevices.length && !results.some((result) => result.status === 'fulfilled')) {
     throw new Error('Unable to load resource usage telemetry');
   }
 
-  results.forEach((result) => {
-    if (result.status !== 'fulfilled') return;
-    deviceKeySupportCache.set(`${result.value.device.id}::${key}`, {
-      hasData: result.value.points.length > 0,
-      expiresAt: result.value.points.length ? Number.POSITIVE_INFINITY : now + MISSING_KEY_RECHECK_MS,
-    });
-  });
-
   const series = results.flatMap((result) =>
     result.status === 'fulfilled' && result.value.points.length ? [result.value] : [],
   );
+  return summarizeUsageSeries(series, key, now);
+}
+
+function summarizeUsageSeries(series: DeviceUsageSeries[], key: string, now: number): UsageSummary {
+  const todayRange = resolveTimeRange('today', now);
+  const yesterdayRange = resolveTimeRange('yesterdaySameTime', now);
+  const monthRange = resolveTimeRange('month', now);
+  const hourRange = resolveTimeRange('currentHour', now);
+  const latestDeviceReadings = series.flatMap(({ device, points }): UsageDeviceReading[] => {
+    const latest = points.at(-1);
+    return latest ? [{ deviceId: device.id, deviceName: device.name, key, ts: latest.ts, value: latest.value }] : [];
+  });
   const todayValues = buildDeviceValues(series, key, todayRange.startTs, todayRange.endTs);
   const yesterdayValues = buildDeviceValues(series, key, yesterdayRange.startTs, yesterdayRange.endTs);
   const monthValues = buildDeviceValues(series, key, monthRange.startTs, monthRange.endTs);
@@ -332,10 +381,11 @@ async function buildUsageSummary(devices: UsageQueryDevice[], key: string): Prom
     trend24h,
     trend7d,
     continuousDevices,
+    deviceTodayValues: todayValues,
+    latestDeviceReadings,
     updatedAt: now,
   };
 }
-
 function buildDeviceValues(series: DeviceUsageSeries[], key: string, startTs: number, endTs: number) {
   return series.map(({ device, points }) => ({
     deviceId: device.id,

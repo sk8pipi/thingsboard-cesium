@@ -30,6 +30,14 @@ function normalizeMapPoint(point: unknown): MapPoint | null {
     entityType: (isCameraPoint ? 'DEVICE' : String(rawPoint.entityType || 'DEVICE')) as MapPointEntityType,
     entityId: normalizedEntityId,
     entityName: String(rawPoint.entityName || rawPoint.name || ''),
+    deviceCategory: rawPoint.deviceCategory ? String(rawPoint.deviceCategory) : undefined,
+    deviceProfile: rawPoint.deviceProfile ? String(rawPoint.deviceProfile) : undefined,
+    telemetryKeys: Array.isArray(rawPoint.telemetryKeys)
+      ? rawPoint.telemetryKeys
+          .map(String)
+          .map((key) => key.trim())
+          .filter(Boolean)
+      : undefined,
     online: rawPoint.online === undefined ? undefined : Boolean(rawPoint.online),
     statusText: rawPoint.statusText ? String(rawPoint.statusText) : undefined,
     source: rawPoint.source === 'device' ? 'device' : 'manual',

@@ -2,7 +2,7 @@
   <div ref="containerRef" class="usage-bar-chart">
     <div class="usage-bar-chart__canvas">
       <button class="usage-bar-chart__mode" type="button" @click="emit('toggle')">
-        <span>{{ mode === 'sevenDays' ? '近7天用电量' : '近24小时用电量' }}</span>
+        <span>{{ mode === 'sevenDays' ? '近7天' + metricLabel : '近24小时' + metricLabel }}</span>
         <span class="usage-bar-chart__switch" aria-hidden="true">⇄</span>
       </button>
       <svg viewBox="0 0 1000 360" preserveAspectRatio="none" role="img" :aria-label="chartAriaLabel">
@@ -11,7 +11,7 @@
             <line :x1="plot.left" :x2="plot.right" :y1="tick.y" :y2="tick.y" />
             <text :x="plot.left - 12" :y="tick.y + 4" text-anchor="end">{{ formatAxisValue(tick.value) }}</text>
           </template>
-          <text x="16" y="22">kWh</text>
+          <text x="16" y="22">{{ unit }}</text>
         </g>
 
         <g v-for="bar in bars" :key="bar.key" class="usage-bar-chart__bar-group">
@@ -52,14 +52,14 @@
         <line class="usage-bar-chart__axis" :x1="plot.left" :x2="plot.right" :y1="plot.bottom" :y2="plot.bottom" />
       </svg>
 
-      <div v-if="!points.length" class="usage-bar-chart__empty">暂无用电量数据</div>
+      <div v-if="!points.length" class="usage-bar-chart__empty">暂无{{ metricLabel }}数据</div>
       <div
         v-if="tooltip.visible"
         class="usage-bar-chart__tooltip"
         :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
       >
         <span>{{ tooltip.label }}</span>
-        <strong>{{ tooltip.value }} kWh</strong>
+        <strong>{{ tooltip.value }} {{ unit }}</strong>
       </div>
     </div>
   </div>
@@ -71,11 +71,19 @@
 
   export type UsageBarChartMode = 'sevenDays' | 'twentyFourHours';
 
-  const props = defineProps<{
-    points: UsagePoint[];
-    mode: UsageBarChartMode;
-    decimals?: number;
-  }>();
+  const props = withDefaults(
+    defineProps<{
+      points: UsagePoint[];
+      mode: UsageBarChartMode;
+      decimals?: number;
+      metricLabel?: string;
+      unit?: string;
+    }>(),
+    {
+      metricLabel: '用电量',
+      unit: 'kWh',
+    },
+  );
 
   const emit = defineEmits<{ toggle: [] }>();
   const containerRef = ref<HTMLElement | null>(null);
@@ -123,7 +131,12 @@
   });
 
   const chartAriaLabel = computed(
-    () => (props.mode === 'sevenDays' ? '近7天' : '近24小时') + '用电量柱状图，共' + props.points.length + '个数据点',
+    () =>
+      (props.mode === 'sevenDays' ? '近7天' : '近24小时') +
+      props.metricLabel +
+      '柱状图，共' +
+      props.points.length +
+      '个数据点',
   );
 
   function niceAxisMax(value: number) {

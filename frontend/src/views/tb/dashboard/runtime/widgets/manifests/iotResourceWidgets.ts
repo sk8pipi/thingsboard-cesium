@@ -4,6 +4,8 @@ import TbElectricityUsage from '../aggregate/TbElectricityUsage.vue';
 import TbWaterUsage from '../aggregate/TbWaterUsage.vue';
 import TbAreaKeyCompareBar from '../aggregate/TbAreaKeyCompareBar.vue';
 import type { WidgetDefinition } from '../core/widgetDefinition';
+import AggregateMetricWidget from '../aggregate/AggregateMetricWidget.vue';
+import { TOTAL_ELECTRICITY_AGGREGATE_CONFIG } from '../aggregate/aggregateMetricTypes';
 
 export const widgets: WidgetDefinition[] = [
   {
@@ -35,6 +37,28 @@ export const widgets: WidgetDefinition[] = [
     previewKind: 'pie',
     defaultConfig: { showTitle: true, settings: {} },
     dashboardPlacement: { width: 4, height: 4 },
+  },
+  {
+    key: 'iotTotalElectricity',
+    typeFullFqn: 'system.iot_total_electricity',
+    category: 'aggregate',
+    title: '\u603b\u7528\u7535\u91cf',
+    component: AggregateMetricWidget,
+    editor: 'aggregate',
+    supportsTimewindow: false,
+    allowedKeyTypes: ['timeseries'],
+    hosts: ['dashboard', 'editor'],
+    dataProvider: 'static',
+    previewKind: 'card',
+    defaultConfig: {
+      showTitle: true,
+      settings: {
+        key: 'electricityConsumption',
+        decimals: 2,
+        aggregateMetric: TOTAL_ELECTRICITY_AGGREGATE_CONFIG,
+      },
+    },
+    dashboardPlacement: { width: 4, height: 3 },
   },
   {
     key: 'iotElectricityUsage',

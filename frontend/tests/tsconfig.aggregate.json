@@ -1,0 +1,21 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "../src/views/tb/map/tbWsTelemetry.ts",
+    "../src/views/tb/dashboard/runtime/widgets/aggregate/AggregateMetricWidget.vue",
+    "../src/views/tb/dashboard/runtime/widgets/aggregate/aggregateMetricTypes.ts",
+    "../src/views/tb/dashboard/runtime/widgets/aggregate/incrementalAggregation.ts",
+    "../src/views/tb/dashboard/runtime/widgets/aggregate/cumulativeUsageAccumulator.ts",
+    "../src/views/tb/dashboard/runtime/widgets/aggregate/useTemplateCumulativeUsage.ts",
+    "../src/views/tb/dashboard/runtime/widgets/aggregate/templateDeviceResolver.ts",
+    "../src/views/tb/dashboard/runtime/widgets/aggregate/useTemplateAggregate.ts",
+    "../src/views/tb/dashboard/runtime/widgets/aggregate/templateTelemetryHub.ts",
+    "./templateAggregateCore.test.ts",
+    "./cumulativeUsageAccumulator.test.ts",
+    "./templateTelemetryHub.test.ts"
+  ]
+}

@@ -1,19 +1,23 @@
 <template>
   <div class="electricity-usage">
-    <div v-if="error" class="electricity-usage__state is-error">{{ error }}</div>
-    <div v-else-if="loading && !summary" class="electricity-usage__state">正在计算今日用电量...</div>
+    <div v-if="error && !summary" class="electricity-usage__state is-error">{{ error }}</div>
+    <div v-else-if="loading && !summary" class="electricity-usage__state">正在计算今日{{ usageLabel }}...</div>
     <template v-else>
       <div class="electricity-usage__summary">
         <div class="electricity-usage__primary">
-          <span>今日用电量</span>
-          <strong>{{ formatValue(summary?.today) }} <small>kWh</small></strong>
+          <span>今日{{ usageLabel }}</span>
+          <strong
+            >{{ formatValue(summary?.today) }} <small>{{ unit }}</small></strong
+          >
         </div>
         <div class="electricity-usage__metric">
           <span>本月累计</span>
-          <strong>{{ formatValue(summary?.month) }} <small>kWh</small></strong>
+          <strong
+            >{{ formatValue(summary?.month) }} <small>{{ unit }}</small></strong
+          >
         </div>
         <div class="electricity-usage__metric">
-          <span>用电最高设备</span>
+          <span>{{ topLabel }}</span>
           <strong :title="summary?.topDevice?.deviceName || '-'">{{ summary?.topDevice?.deviceName || '-' }}</strong>
         </div>
       </div>
@@ -23,6 +27,8 @@
         :points="chartPoints"
         :mode="chartMode"
         :decimals="decimals"
+        :metric-label="usageLabel"
+        :unit="unit"
         @toggle="toggleChartMode"
       />
     </template>
@@ -31,66 +37,68 @@
 
 <script setup lang="ts">
   import { computed, ref } from 'vue';
-  import type { TemplateRuntimeDevices } from './templateAggregate';
-  import { formatUsageNumber, listRuntimeDevices, useUsageSummary } from './resourceUsage';
+  import { formatUsageNumber } from './resourceUsage';
+  import { normalizeUsageTrend } from './cumulativeUsageAccumulator';
+  import {
+    resolveTemplateDevices,
+    type TemplatePointLike,
+    type TemplateRuntimeDevices,
+  } from './templateDeviceResolver';
+  import type { TemplateTelemetryHub } from './templateTelemetryHub';
+  import { useTemplateCumulativeUsage } from './useTemplateCumulativeUsage';
   import UsageBarChart, { type UsageBarChartMode } from './UsageBarChart.vue';
 
   const props = withDefaults(
     defineProps<{
       config?: Record<string, any>;
-      ctx?: { runtimeDevices?: TemplateRuntimeDevices | null };
+      ctx?: {
+        runtimeDevices?: TemplateRuntimeDevices | null;
+        templatePoints?: TemplatePointLike[] | null;
+        templateTelemetryHub?: TemplateTelemetryHub | null;
+      };
       telemetryKey?: string;
-      label?: string;
+      usageLabel?: string;
       unit?: string;
       topLabel?: string;
-      showSevenDayTrend?: boolean;
+      deviceCategory?: string;
     }>(),
     {
       telemetryKey: 'electricityConsumption',
+      usageLabel: '用电量',
+      unit: 'kWh',
+      topLabel: '用电最高设备',
+      deviceCategory: 'electricity_consumption',
     },
   );
 
   const chartMode = ref<UsageBarChartMode>('sevenDays');
   const keyName = computed(() => String(props.config?.settings?.key || props.telemetryKey));
-  const pollMs = computed(() => Number(props.config?.settings?.pollMs || 60000));
   const decimals = computed(() => Number(props.config?.settings?.decimals ?? 1));
-  const devices = computed(() =>
-    listRuntimeDevices(props.ctx?.runtimeDevices).map((device) => ({ id: device.id, name: device.name })),
+  const deviceBindings = computed(() =>
+    resolveTemplateDevices({
+      runtimeDevices: props.ctx?.runtimeDevices || {},
+      templatePoints: props.ctx?.templatePoints || [],
+      selector: { type: 'device-category', deviceCategory: props.deviceCategory },
+      telemetryKey: keyName.value,
+    }),
   );
-  const { summary, loading, error } = useUsageSummary(keyName, devices, pollMs);
-  const HOUR_MS = 60 * 60 * 1000;
-  const DAY_MS = 24 * HOUR_MS;
-  const chartPoints = computed(() => {
-    const points = chartMode.value === 'sevenDays' ? summary.value?.trend7d || [] : summary.value?.trend24h || [];
-    return normalizeChartPoints(points, chartMode.value);
+  const devices = computed(() =>
+    deviceBindings.value.map((device) => ({
+      id: device.deviceId,
+      name: device.deviceName || device.deviceId,
+    })),
+  );
+  const hub = computed(() => props.ctx?.templateTelemetryHub || null);
+  const { summary, loading, error } = useTemplateCumulativeUsage({
+    key: keyName,
+    devices,
+    hub,
   });
-
-  function normalizeChartPoints(
-    points: Array<{ ts: number; value: number }>,
-    mode: UsageBarChartMode,
-    now = Date.now(),
-  ) {
-    const current = new Date(now);
-    if (mode === 'sevenDays') current.setHours(0, 0, 0, 0);
-    else current.setMinutes(0, 0, 0);
-
-    const bucketMs = mode === 'sevenDays' ? DAY_MS : HOUR_MS;
-    const bucketCount = mode === 'sevenDays' ? 7 : 24;
-    const firstBucket = current.getTime() - (bucketCount - 1) * bucketMs;
-    const values = new Map<number, number>();
-
-    points.forEach((point) => {
-      const date = new Date(point.ts);
-      if (mode === 'sevenDays') date.setHours(0, 0, 0, 0);
-      else date.setMinutes(0, 0, 0);
-      values.set(date.getTime(), Math.max(0, Number(point.value) || 0));
-    });
-
-    return Array.from({ length: bucketCount }, (_, index) => {
-      const ts = firstBucket + index * bucketMs;
-      return { ts, value: values.get(ts) || 0 };
-    });
-  }
+  const chartPoints = computed(() => {
+    if (!summary.value) return [];
+    const points = chartMode.value === 'sevenDays' ? summary.value.trend7d : summary.value.trend24h;
+    return normalizeUsageTrend(points, chartMode.value, Date.now());
+  });
 
   function formatValue(value: number | null | undefined) {
     return formatUsageNumber(value, decimals.value);

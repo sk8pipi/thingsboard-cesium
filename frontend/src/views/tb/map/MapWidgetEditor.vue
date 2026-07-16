@@ -1522,6 +1522,7 @@
             host: 'editor',
             readonly: editorMode.value === 'view',
             runtimeDevices: templateRuntimeDevices.value,
+            templatePoints: draftMapPoints.value,
             emit: (event: string, payload?: unknown) => {
               if (event === 'alarm-focus') onAlarmFocus(payload as AlarmFocusPayload);
             },

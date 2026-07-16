@@ -1,9 +1,17 @@
 type TelemetryCallback = (payload: any) => void;
 
+export type EntityDataLatestOptions = {
+  entityType: string;
+  entityIds: string[];
+  keys: string[];
+  onData: TelemetryCallback;
+};
+
 type SubscriptionRecord = {
   command: Record<string, any>;
   onData: TelemetryCallback;
   resubscribe: boolean;
+  unsubscribeCommand?: Record<string, any>;
 };
 
 const RECONNECT_MIN_MS = 1000;
@@ -18,6 +26,7 @@ export class TbWsTelemetryClient {
   private reconnectDelayMs = RECONNECT_MIN_MS;
   private reconnectTimer?: number;
   private readonly subscriptions = new Map<number, SubscriptionRecord>();
+  private readonly connectionListeners = new Set<(connected: boolean) => void>();
 
   private readonly getToken: () => string;
 
@@ -36,6 +45,7 @@ export class TbWsTelemetryClient {
     socket.onopen = () => {
       if (this.ws !== socket) return;
       this.opened = true;
+      this.emitConnectionState(true);
       this.reconnectDelayMs = RECONNECT_MIN_MS;
       this.sendRaw({ authCmd: { cmdId: 0, token: this.getToken() } });
       this.subscriptions.forEach((subscription) => {
@@ -62,6 +72,7 @@ export class TbWsTelemetryClient {
       if (this.ws !== socket) return;
       this.ws = null;
       this.opened = false;
+      this.emitConnectionState(false);
       if (!this.manuallyClosed && this.hasActiveSubscriptions()) this.scheduleReconnect();
     };
 
@@ -75,6 +86,7 @@ export class TbWsTelemetryClient {
     this.clearReconnectTimer();
     this.subscriptions.clear();
     this.opened = false;
+    this.emitConnectionState(false);
     const socket = this.ws;
     this.ws = null;
     try {
@@ -82,13 +94,72 @@ export class TbWsTelemetryClient {
     } catch {}
   }
 
+  onConnectionState(callback: (connected: boolean) => void) {
+    this.connectionListeners.add(callback);
+    callback(this.opened);
+    return () => {
+      this.connectionListeners.delete(callback);
+    };
+  }
+
   unsubscribe(cmdId: number) {
     const subscription = this.subscriptions.get(cmdId);
     if (!subscription) return;
+    if (subscription.unsubscribeCommand) {
+      if (this.opened) this.sendCommand(subscription.unsubscribeCommand);
+      this.subscriptions.delete(cmdId);
+      return;
+    }
     if (subscription.resubscribe && this.opened) {
       this.sendCommand({ ...subscription.command, unsubscribe: true });
     }
     this.subscriptions.delete(cmdId);
+  }
+
+  subscribeEntityDataLatest(opts: EntityDataLatestOptions): number {
+    const entityIds = Array.from(new Set(opts.entityIds.map((id) => String(id || '').trim()).filter(Boolean))).sort();
+    const keys = Array.from(new Set(opts.keys.map((key) => String(key || '').trim()).filter(Boolean))).sort();
+    if (!entityIds.length || !keys.length) {
+      throw new Error('ENTITY_DATA latest subscription requires entityIds and keys');
+    }
+
+    const cmdId = ++this.cmdId;
+    const latestKeys = keys.map((key) => ({ type: 'TIME_SERIES', key }));
+    const command = {
+      cmdId,
+      type: 'ENTITY_DATA',
+      query: {
+        entityFilter: {
+          type: 'entityList',
+          entityType: String(opts.entityType).toUpperCase(),
+          entityList: entityIds,
+        },
+        pageLink: {
+          pageSize: entityIds.length,
+          page: 0,
+          sortOrder: {
+            key: {
+              type: 'ENTITY_FIELD',
+              key: 'createdTime',
+            },
+            direction: 'DESC',
+          },
+        },
+        latestValues: latestKeys,
+      },
+      latestCmd: {
+        keys: latestKeys,
+      },
+    };
+    this.subscriptions.set(cmdId, {
+      command,
+      onData: opts.onData,
+      resubscribe: true,
+      unsubscribeCommand: { cmdId, type: 'ENTITY_DATA_UNSUBSCRIBE' },
+    });
+    if (this.opened) this.sendCommand(command);
+    else this.connect();
+    return cmdId;
   }
 
   subscribeLatest(opts: { entityType: string; entityId: string; keys: string[]; onData: TelemetryCallback }): number {
@@ -192,6 +263,11 @@ export class TbWsTelemetryClient {
     return Array.from(this.subscriptions.values()).some((subscription) => subscription.resubscribe);
   }
 
+  private emitConnectionState(connected: boolean) {
+    this.connectionListeners.forEach((listener) => {
+      listener(connected);
+    });
+  }
   private scheduleReconnect() {
     if (this.reconnectTimer || this.manuallyClosed) return;
     const delay = this.reconnectDelayMs;

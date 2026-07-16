@@ -2,6 +2,8 @@ import { shallowReactive } from 'vue';
 import { getLatestTimeseries } from '/@/api/tb/telemetry';
 import { EntityType } from '/@/enums/entityTypeEnum';
 import { TbWsTelemetryClient } from '../../map/tbWsTelemetry';
+import { TemplateTelemetryHub, type FallbackTelemetryValue } from './widgets/aggregate/templateTelemetryHub';
+import { mapAggregateSettled, runAggregateRequest } from './widgets/aggregate/aggregateRequestCoordinator';
 
 export type Point = { ts: number; value: number | string | null };
 
@@ -345,10 +347,60 @@ function appendRealtime(d: WidgetRuntimeData, keys: string[], payload: any) {
   d.updatedAt = Date.now();
 }
 
+function latestPoint(input: unknown): { ts: number; value: unknown } | undefined {
+  if (input === null || input === undefined) return undefined;
+  if (Array.isArray(input)) {
+    if (input.length >= 2 && !Array.isArray(input[0]) && Number.isFinite(Number(input[0]))) {
+      return { ts: Number(input[0]), value: input[1] };
+    }
+    for (let index = input.length - 1; index >= 0; index -= 1) {
+      const point = latestPoint(input[index]);
+      if (point) return point;
+    }
+    return undefined;
+  }
+  if (typeof input !== 'object') return undefined;
+  const record = input as Record<string, unknown>;
+  if (Number.isFinite(Number(record.ts))) {
+    return {
+      ts: Number(record.ts),
+      value: record.value ?? record.latestValue ?? record.v,
+    };
+  }
+  return latestPoint(record.data);
+}
+
+async function loadLatestTelemetryFallback(
+  entityType: 'DEVICE' | 'ASSET',
+  entityIds: string[],
+  keys: string[],
+): Promise<FallbackTelemetryValue[]> {
+  const results = await mapAggregateSettled(entityIds, async (entityId) => {
+    const response = await runAggregateRequest(() =>
+      getLatestTimeseries({ entityType: entityTypeToEnum(entityType), id: entityId } as any, keys.join(','), true),
+    );
+    const root =
+      response && typeof response === 'object' && 'data' in response
+        ? ((response as Record<string, unknown>).data as Record<string, unknown>)
+        : (response as Record<string, unknown>);
+    return keys.flatMap((key): FallbackTelemetryValue[] => {
+      const point = latestPoint(root?.[key]);
+      return point ? [{ entityId, key, ...point }] : [];
+    });
+  });
+  const fulfilled = results.filter((result) => result.status === 'fulfilled');
+  if (!fulfilled.length && results.length) throw new Error('Unable to load template telemetry fallback');
+  return fulfilled.flatMap((result) => result.value);
+}
+
 export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) {
   const wsClient = new TbWsTelemetryClient(() => localStorage.getItem('jwt_token') || '');
 
   const runtimeDataMap = new Map<string, WidgetRuntimeData>();
+  const templateTelemetryHub = new TemplateTelemetryHub(wsClient, {
+    loadLatestFallback: loadLatestTelemetryFallback,
+  });
+
   const mountedWidgetMap = new Map<string, RuntimeWidgetLike>();
   const providerCleanupMap = new Map<string, () => void>();
 
@@ -385,6 +437,7 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
     providerCleanupMap.forEach((_cleanup, widgetId) => clearProvider(widgetId));
     runtimeDataMap.clear();
     mountedWidgetMap.clear();
+    templateTelemetryHub.close();
     wsClient.close();
   }
 
@@ -657,6 +710,7 @@ export function createDatasourceRuntime(options: DatasourceRuntimeOptions = {}) 
   return {
     connect,
     close,
+    templateTelemetryHub,
     ensureRuntimeData,
     mountWidgetRuntime,
     unmountWidgetRuntime,

@@ -1,21 +1,26 @@
 <template>
-  <ResourceUsagePanel
+  <ElectricityUsagePanel
     :config="config"
     :ctx="ctx"
     telemetry-key="waterConsumption"
-    label="今日用水量"
+    usage-label="用水量"
     unit="m³"
     top-label="用水最高设备"
-    :show-seven-day-trend="false"
+    device-category="water_consumption"
   />
 </template>
 
 <script setup lang="ts">
-  import ResourceUsagePanel from './ResourceUsagePanel.vue';
-  import type { TemplateRuntimeDevices } from './templateAggregate';
+  import ElectricityUsagePanel from './ElectricityUsagePanel.vue';
+  import type { TemplatePointLike, TemplateRuntimeDevices } from './templateDeviceResolver';
+  import type { TemplateTelemetryHub } from './templateTelemetryHub';
 
   defineProps<{
     config?: Record<string, any>;
-    ctx?: { runtimeDevices?: TemplateRuntimeDevices | null };
+    ctx?: {
+      runtimeDevices?: TemplateRuntimeDevices | null;
+      templatePoints?: TemplatePointLike[] | null;
+      templateTelemetryHub?: TemplateTelemetryHub | null;
+    };
   }>();
 </script>

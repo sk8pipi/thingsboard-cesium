@@ -15,6 +15,7 @@
   import type { DashboardWidget, GridItem, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
   import type { AlarmFocusPayload } from '../dashboard/runtime/widgets/alarm/focus';
   import type { MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
+  import type { MapPoint } from './types/mapPointTypes';
 
   type WidgetData = DashboardWidget & {
     type?: LocalWidgetKey;
@@ -24,6 +25,7 @@
   type WidgetLayerData = {
     layout?: GridItem[];
     widgets?: Record<string, any>;
+    mapPoints?: MapPoint[];
   };
 
   const props = defineProps<{
@@ -123,6 +125,7 @@
             host: 'dashboard',
             readonly: true,
             runtimeDevices: props.runtimeDevices,
+            templatePoints: props.data?.mapPoints || null,
             emit: (event: string, payload?: unknown) => {
               if (event === 'alarm-focus') emit('alarm-focus', payload as AlarmFocusPayload);
             },
