@@ -10,7 +10,7 @@
 
     <AreaKeyCompareConfigDialog
       :visible="areaKeyCompareConfigVisible"
-      :default-title="pendingWidgetTitle || '区域 key 对比'"
+      :default-title="pendingWidgetTitle || '资产 Key 趋势'"
       @cancel="cancelAreaKeyCompareConfig"
       @ok="confirmAreaKeyCompareConfig"
     />
@@ -1817,39 +1817,38 @@
 
   function confirmAreaKeyCompareConfig(payload: {
     title: string;
-    devices: Array<{ id: string; name: string }>;
-    keys: string[];
-    timeRange: string;
+    asset: { id: string; name: string };
+    key: string;
+    unit: string;
+    timeRange: 'last24h' | 'last7d';
   }) {
     const key = pendingWidgetKey.value;
     const definition = key ? widgetRegistry[key] : null;
-    if (!key || !definition || !payload.devices.length || !payload.keys.length) return;
+    if (!key || !definition || !payload.asset.id || !payload.key) return;
 
     const config = cloneJson(definition.defaultConfig || {});
-    const defaultCumulativeKeys = ['electricityConsumption', 'waterConsumption'];
-    const selectedCumulativeKeys = payload.keys.filter((item) => defaultCumulativeKeys.includes(item));
-    const cumulativeKeys = Array.from(new Set([...(config.settings?.cumulativeKeys || []), ...selectedCumulativeKeys]));
-    const datasources = payload.devices.map((device) => ({
-      type: 'device',
-      entityType: 'DEVICE',
-      entityId: device.id,
-      entityName: device.name,
-      keys: payload.keys,
-      dataKeys: payload.keys.map((name) => ({ name, type: 'timeseries' })),
+    const datasource = {
+      type: 'entity',
+      entityType: 'ASSET',
+      entityId: payload.asset.id,
+      entityName: payload.asset.name,
+      keys: [payload.key],
+      dataKeys: [{ name: payload.key, type: 'timeseries', units: payload.unit }],
       pollMs: 60000,
-    }));
+    };
 
     config.title = payload.title;
     config.settings = {
       ...(config.settings || {}),
       title: payload.title,
-      deviceSelector: { mode: 'manual', devices: payload.devices },
-      keys: payload.keys,
-      cumulativeKeys,
+      sourceAssetId: payload.asset.id,
+      sourceAssetName: payload.asset.name,
+      sourceTelemetryKey: payload.key,
+      unit: payload.unit,
       timeRange: payload.timeRange,
     };
-    config.datasource = datasources[0] || null;
-    config.datasources = datasources;
+    config.datasource = datasource;
+    config.datasources = [datasource];
 
     createWidgetAndAddToGrid(key, payload.title || definition.title, config);
     cancelAreaKeyCompareConfig();

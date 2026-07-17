@@ -2,7 +2,7 @@ import TbDeviceKpiOverview from '../aggregate/TbDeviceKpiOverview.vue';
 import TbDeviceTypeDonut from '../aggregate/TbDeviceTypeDonut.vue';
 import TbElectricityUsage from '../aggregate/TbElectricityUsage.vue';
 import TbWaterUsage from '../aggregate/TbWaterUsage.vue';
-import TbAreaKeyCompareBar from '../aggregate/TbAreaKeyCompareBar.vue';
+import TbAssetKeyTrendLine from '../aggregate/TbAssetKeyTrendLine.vue';
 import type { WidgetDefinition } from '../core/widgetDefinition';
 import AggregateMetricWidget from '../aggregate/AggregateMetricWidget.vue';
 import { TOTAL_ELECTRICITY_AGGREGATE_CONFIG } from '../aggregate/aggregateMetricTypes';
@@ -108,24 +108,28 @@ export const widgets: WidgetDefinition[] = [
   },
   {
     key: 'iotAreaKeyCompareBar',
+    version: 2,
     typeFullFqn: 'system.iot_area_key_compare_bar',
     category: 'aggregate',
-    title: '区域 key 对比柱状图',
-    component: TbAreaKeyCompareBar,
+    title: '资产 Key 趋势折线图',
+    component: TbAssetKeyTrendLine,
     editor: 'aggregate',
     supportsTimewindow: true,
     allowedKeyTypes: ['timeseries'],
     hosts: ['dashboard', 'editor'],
     dataProvider: 'static',
-    previewKind: 'bar',
+    previewKind: 'line',
     defaultConfig: {
       showTitle: true,
       settings: {
-        title: '区域 key 对比',
-        deviceSelector: { mode: 'manual', devices: [] },
-        keys: [],
-        cumulativeKeys: ['electricityConsumption', 'waterConsumption'],
-        timeRange: 'today',
+        title: '资产 Key 趋势',
+        sourceAssetId: '',
+        sourceAssetName: '',
+        sourceTelemetryKey: '',
+        unit: '',
+        timeRange: 'last24h',
+        pollMs: 60000,
+        decimals: 2,
       },
     },
     dashboardPlacement: { width: 7, height: 5 },
