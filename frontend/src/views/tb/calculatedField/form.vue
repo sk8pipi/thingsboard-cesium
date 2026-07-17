@@ -184,6 +184,9 @@
   import { FormInstance } from 'ant-design-vue/lib/form';
   import { Authority } from '/@/enums/authorityEnum';
   import { Argument, CalculatedField, getCalculatedFieldById, saveCalculatedField } from '/@/api/tb/calculatedField';
+  import { getDeviceInfoById } from '/@/api/tb/device';
+  import { getAssetById } from '/@/api/tb/asset';
+  import { getCustomerById } from '/@/api/tb/customer';
   import { cloneDeep } from 'lodash-es';
   import { SCOPE_OPTIONS_SERVER } from '/@/enums/telemetryEnum';
   import { CodeEditor, MODE } from '/@/components/CodeEditor';
@@ -228,6 +231,29 @@
     value: record.value.id?.id ? t('tb.calculatedField.action.edit') : t('tb.calculatedField.action.add'),
   }));
 
+  async function resolveTargetEntityName(refEntityId: any) {
+    const entityId = String(refEntityId?.id || '').trim();
+    if (!entityId) return '';
+
+    try {
+      let entity: any;
+      switch (refEntityId.entityType) {
+        case EntityType.DEVICE:
+          entity = await getDeviceInfoById(entityId);
+          return entity?.name || entityId;
+        case EntityType.ASSET:
+          entity = await getAssetById(entityId);
+          return entity?.name || entityId;
+        case EntityType.CUSTOMER:
+          entity = await getCustomerById(entityId);
+          return entity?.title || entity?.name || entityId;
+        default:
+          return entityId;
+      }
+    } catch {
+      return entityId;
+    }
+  }
   const formState = reactive<Partial<CalculatedField>>(cloneDeep(DEFAULT_FORM));
   const argumentsList = ref<any[]>([]);
 
@@ -311,31 +337,39 @@
       console.log('record.value :>> ', record.value);
       // 转换 arguments Map 为数组
       if (formState.configuration?.arguments) {
-        argumentsList.value = Object.entries(formState.configuration.arguments).map(([key, value]: [string, any]) => {
-          const argument: any = {
-            name: key,
-            defaultValue: value.defaultValue,
-            refEntityId: value.refEntityId, // 保留完整的对象
-            refEntityKey: value.refEntityKey,
-            type: value.refEntityKey?.type,
-            key: value.refEntityKey?.key || '',
-            scope: value.refEntityKey?.scope, // 保存 scope 用于编辑
-          };
+        const restoredArguments = Object.entries(formState.configuration.arguments).map(
+          ([key, value]: [string, any]) => {
+            const argument: any = {
+              name: key,
+              defaultValue: value.defaultValue,
+              refEntityId: value.refEntityId, // 保留完整的对象
+              refEntityKey: value.refEntityKey,
+              type: value.refEntityKey?.type,
+              key: value.refEntityKey?.key || '',
+              scope: value.refEntityKey?.scope, // 保存 scope 用于编辑
+            };
 
-          // 根据 refEntityId 判断实体类型
-          if (!value.refEntityId) {
-            argument.entityType = ArgumentEntityType.CURRENT_ENTITY;
-          } else if (value.refEntityId.entityType === EntityType.TENANT) {
-            argument.entityType = ArgumentEntityType.CURRENT_TENANT;
-          } else {
-            argument.entityType = value.refEntityId.entityType;
-          }
+            // 根据 refEntityId 判断实体类型
+            if (!value.refEntityId) {
+              argument.entityType = ArgumentEntityType.CURRENT_ENTITY;
+            } else if (value.refEntityId.entityType === EntityType.TENANT) {
+              argument.entityType = ArgumentEntityType.CURRENT_TENANT;
+            } else {
+              argument.entityType = value.refEntityId.entityType;
+            }
 
-          // targetEntityName 用于表格显示
-          argument.targetEntityName = '';
+            // targetEntityName 用于表格显示
+            argument.targetEntityName = value.refEntityId?.id || '';
 
-          return argument;
-        });
+            return argument;
+          },
+        );
+        await Promise.all(
+          restoredArguments.map(async (argument) => {
+            argument.targetEntityName = await resolveTargetEntityName(argument.refEntityId);
+          }),
+        );
+        argumentsList.value = restoredArguments;
         console.log('argumentsList.value :>> ', argumentsList.value);
       } else {
         argumentsList.value = [];

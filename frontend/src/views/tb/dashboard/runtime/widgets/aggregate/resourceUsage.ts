@@ -249,10 +249,11 @@ export async function fetchUsageSummary(
   devices: UsageQueryDevice[],
   key: string,
   options: boolean | FetchUsageSummaryOptions = {},
+  entityType: EntityType = EntityType.DEVICE,
 ): Promise<UsageSummary> {
   const normalizedOptions = typeof options === 'boolean' ? { force: options } : options;
   const normalizedKey = key.trim();
-  const cacheKey = `${normalizedKey}::${devices
+  const cacheKey = `${entityType}::${normalizedKey}::${devices
     .map((device) => device.id)
     .sort()
     .join(',')}`;
@@ -261,7 +262,7 @@ export async function fetchUsageSummary(
   if (cached?.value && cached.expiresAt > Date.now()) return cached.value;
   if (cached?.promise) return cached.promise;
 
-  const promise = buildUsageSummary(devices, normalizedKey, normalizedOptions.onProgress)
+  const promise = buildUsageSummary(devices, normalizedKey, normalizedOptions.onProgress, entityType)
     .then((value) => {
       usageSummaryCache.set(cacheKey, { value, expiresAt: Date.now() + USAGE_CACHE_TTL_MS });
       pruneUsageSummaryCache();
@@ -280,6 +281,7 @@ async function buildUsageSummary(
   devices: UsageQueryDevice[],
   key: string,
   onProgress?: FetchUsageSummaryOptions['onProgress'],
+  entityType: EntityType = EntityType.DEVICE,
 ): Promise<UsageSummary> {
   const now = Date.now();
   const yesterdayRange = resolveTimeRange('yesterdaySameTime', now);
@@ -298,7 +300,7 @@ async function buildUsageSummary(
     try {
       const response = await runAggregateRequest(() =>
         getTimeseries({
-          entityType: EntityType.DEVICE,
+          entityType,
           entityId: device.id,
           keys: key,
           startTs: queryStart,
@@ -451,6 +453,7 @@ export function useUsageSummary(
   key: Ref<string>,
   devices: Ref<Array<{ id: string; name: string }>>,
   pollMs: Ref<number>,
+  entityType: Ref<EntityType> = computed(() => EntityType.DEVICE),
 ) {
   const summary = ref<UsageSummary | null>(null);
   const loading = ref(false);
@@ -461,7 +464,7 @@ export function useUsageSummary(
   let stopped = false;
   const signature = computed(
     () =>
-      `${key.value}::${devices.value
+      `${entityType.value}::${key.value}::${devices.value
         .map((device) => device.id)
         .sort()
         .join(',')}`,
@@ -488,7 +491,7 @@ export function useUsageSummary(
 
         loading.value = true;
         try {
-          const nextSummary = await fetchUsageSummary(currentDevices, currentKey);
+          const nextSummary = await fetchUsageSummary(currentDevices, currentKey, {}, entityType.value);
           if (stopped) return;
           summary.value = nextSummary;
           error.value = '';

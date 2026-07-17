@@ -708,9 +708,10 @@
   }
 
   function bindOverlayHover() {
-    if (!viewer) return;
-
     hoverHandler?.destroy();
+    hoverHandler = undefined;
+    if (!viewer || props.mode === 'pickPoint') return;
+
     hoverHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
     hoverHandler.setInputAction((movement: { endPosition: Cesium.Cartesian2 }) => {
       const entity = resolveBaseOverlayEntity(movement.endPosition);
@@ -732,12 +733,17 @@
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
   }
 
+  function getPointEntity(pointId: string) {
+    return sensorDataSource?.entities.getById(pointId) || cameraDataSource?.entities.getById(pointId) || null;
+  }
+
   defineExpose({
     renderSensorPoints,
     renderCameraPoints,
     flyToPoint,
     flyToOverview,
     getViewer: () => viewer,
+    getPointEntity,
   });
 
   onMounted(async () => {
@@ -811,8 +817,12 @@
 
   watch(
     () => props.mode,
-    () => {
+    (mode) => {
+      if (mode === 'pickPoint') {
+        clearOverlayHover();
+      }
       bindOverlayClick();
+      bindOverlayHover();
     },
   );
 

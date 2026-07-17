@@ -351,6 +351,7 @@
         formState.value.key = arg.key || '';
         formState.value.defaultValue = arg.defaultValue || '';
         formState.value.refEntityId = arg.refEntityId;
+        formState.value.targetEntityName = arg.targetEntityName;
         formState.value.scope = arg.scope;
 
         console.log('编辑参数，formState.key:', formState.value.key, 'formState:', formState.value);
@@ -373,6 +374,7 @@
         formState.value.key = '';
         formState.value.defaultValue = '';
         formState.value.refEntityId = undefined;
+        formState.value.targetEntityName = undefined;
         formState.value.scope = undefined;
       }
 
@@ -389,7 +391,7 @@
       switch (entityType) {
         case ArgumentEntityType.DEVICE:
           const deviceListResult = await getTenantDeviceInfoList({
-            pageSize: 50,
+            pageSize: 500,
             page: 0,
             sortProperty: 'name',
             sortOrder: 'ASC',
@@ -403,7 +405,7 @@
 
         case ArgumentEntityType.ASSET:
           const assetListResult = await getTenantAssetInfoList({
-            pageSize: 50,
+            pageSize: 500,
             page: 0,
             sortProperty: 'name',
             sortOrder: 'ASC',
@@ -417,7 +419,7 @@
 
         case ArgumentEntityType.CUSTOMER:
           const customerListResult = await customerList({
-            pageSize: 50,
+            pageSize: 500,
             page: 0,
             sortProperty: 'title',
             sortOrder: 'ASC',
@@ -595,20 +597,22 @@
       ) {
         // 设备/资产/客户
         const selectedEntity = entityOptions.value.find((item) => item.value === formState.value.refEntityId);
-        if (selectedEntity) {
-          saveData.refEntityId = selectedEntity.entityData.id;
-          saveData.targetEntityName = selectedEntity.label;
+        const refEntityId = selectedEntity?.entityData?.id || {
+          entityType: formState.value.entityType,
+          id: String(formState.value.refEntityId),
+        };
+        saveData.refEntityId = refEntityId;
+        saveData.targetEntityName = selectedEntity?.label || formState.value.targetEntityName || refEntityId.id;
 
-          // 这些类型也需要 refEntityKey
-          saveData.refEntityKey = {
-            key: formState.value.key,
-            type: formState.value.type,
-          };
+        // 这些类型也需要 refEntityKey
+        saveData.refEntityKey = {
+          key: formState.value.key,
+          type: formState.value.type,
+        };
 
-          // 如果是属性且有 scope
-          if (formState.value.type === ArgumentType.ATTRIBUTE && formState.value.scope) {
-            saveData.refEntityKey.scope = formState.value.scope;
-          }
+        // 如果是属性且有 scope
+        if (formState.value.type === ArgumentType.ATTRIBUTE && formState.value.scope) {
+          saveData.refEntityKey.scope = formState.value.scope;
         }
       }
 

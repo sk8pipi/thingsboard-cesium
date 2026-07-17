@@ -5,7 +5,7 @@
         <span>{{ ARGUMENT_ENTITY_TYPE_MAP[record.entityType] || record.entityType }}</span>
       </template>
       <template v-else-if="column.key === 'targetEntity'">
-        <span>{{ record.targetEntityName || '-' }}</span>
+        <span>{{ record.targetEntityName || record.refEntityId?.id || record.refEntityId || '-' }}</span>
       </template>
       <template v-else-if="column.key === 'type'">
         <span>{{ record.type ? ARGUMENT_TYPE_MAP[record.type] || record.type : '-' }}</span>
@@ -40,6 +40,7 @@
   interface ArgumentRecord {
     name: string;
     entityType: string;
+    refEntityId?: { id?: string } | string;
     targetEntityName?: string;
     type?: string;
     key?: string;

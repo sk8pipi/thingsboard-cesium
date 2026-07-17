@@ -5,10 +5,12 @@ export const EDITABLE_MAP_POINT_DELETE_ENTITY_ID = '__editable_map_point_delete_
 const EDITABLE_MAP_POINT_DATASOURCE_NAME = '__editable_map_point_editor__';
 const DRAG_START_THRESHOLD = 4;
 
+const HOVER_PICK_INTERVAL_MS = 80;
 type UseMapPointEditorOptions = {
   getViewer: () => Cesium.Viewer | null | undefined;
   getPoints: () => MapPoint[];
   setPoints: (points: MapPoint[]) => void;
+  getPointEntity?: (pointId: string) => Cesium.Entity | null | undefined;
   onPointClick?: (point: MapPoint) => void;
   onPointDelete?: (point: MapPoint) => void;
   onPointDragEnd?: (point: MapPoint) => void;
@@ -113,11 +115,19 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
   let hoveredEntity: Cesium.Entity | null = null;
   let draggingPointId = '';
   let draggingEntity: Cesium.Entity | null = null;
+  let draggingCartesian: Cesium.Cartesian3 | null = null;
+  let pendingDragPosition: Cesium.Cartesian2 | null = null;
+  let dragFrameId: number | null = null;
   let candidatePointId = '';
   let candidateEntity: Cesium.Entity | null = null;
   let downPosition: Cesium.Cartesian2 | null = null;
   let movedAfterDown = false;
   let suppressNextClick = false;
+  let pendingHoverPosition: Cesium.Cartesian2 | null = null;
+  let hoverPickTimer: number | null = null;
+  let lastHoverPickAt = 0;
+  let deleteButtonVisible = false;
+  let cursorStyle = '';
   let cameraControllerState: CameraControllerState | null = null;
   let active = false;
 
@@ -137,7 +147,7 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
   }
 
   function getEntityByPointId(pointId: string) {
-    return dataSource?.entities.getById(pointId) || null;
+    return options.getPointEntity?.(pointId) || dataSource?.entities.getById(pointId) || null;
   }
 
   function getDeleteButtonEntity() {
@@ -168,30 +178,45 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
     }
   }
 
+  function setCursor(nextCursor: string) {
+    if (cursorStyle === nextCursor) return;
+    cursorStyle = nextCursor;
+
+    const viewer = getViewer();
+    if (viewer) {
+      (viewer.container as HTMLElement).style.cursor = nextCursor;
+    }
+  }
+
   function hideDeleteButton() {
+    if (!deleteButtonVisible) return;
+
     const deleteEntity = getDeleteButtonEntity();
     if (deleteEntity?.billboard) {
       deleteEntity.billboard.show = new Cesium.ConstantProperty(false);
     }
+    deleteButtonVisible = false;
   }
 
   function showDeleteButton(targetEntity: Cesium.Entity) {
     const deleteEntity = getDeleteButtonEntity();
     if (!deleteEntity?.billboard) return;
+
     deleteEntity.position = targetEntity.position;
-    deleteEntity.billboard.show = new Cesium.ConstantProperty(true);
+    if (!deleteButtonVisible) {
+      deleteEntity.billboard.show = new Cesium.ConstantProperty(true);
+      deleteButtonVisible = true;
+    }
   }
 
   function clearHoverState() {
-    resetEntityHighlight(hoveredEntity);
+    if (hoveredEntity) {
+      resetEntityHighlight(hoveredEntity);
+    }
     hoveredPointId = '';
     hoveredEntity = null;
     hideDeleteButton();
-
-    const viewer = getViewer();
-    if (viewer) {
-      (viewer.container as HTMLElement).style.cursor = '';
-    }
+    setCursor('');
   }
 
   function setHoverState(entity: Cesium.Entity | null) {
@@ -206,19 +231,14 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
       return;
     }
 
-    if (hoveredPointId !== nextPointId) {
-      resetEntityHighlight(hoveredEntity);
-      hoveredPointId = nextPointId;
-      hoveredEntity = entity;
-      applyEntityHighlight(entity);
-    }
+    if (hoveredPointId === nextPointId) return;
 
+    resetEntityHighlight(hoveredEntity);
+    hoveredPointId = nextPointId;
+    hoveredEntity = entity;
+    applyEntityHighlight(entity);
     showDeleteButton(entity);
-
-    const viewer = getViewer();
-    if (viewer) {
-      (viewer.container as HTMLElement).style.cursor = 'pointer';
-    }
+    setCursor('pointer');
   }
 
   function snapshotCameraController(viewer: Cesium.Viewer): CameraControllerState {
@@ -317,14 +337,14 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
     if (!viewer) return;
 
     const source = getEditableDataSource(viewer);
-    const points = options.getPoints();
     const previousHoveredPointId = hoveredPointId;
 
-    source.entities.removeAll();
-
-    points.forEach((point) => {
-      createPointEntity(source, point);
-    });
+    if (!options.getPointEntity) {
+      source.entities.removeAll();
+      options.getPoints().forEach((point) => {
+        createPointEntity(source, point);
+      });
+    }
 
     ensureDeleteButtonEntity(viewer);
 
@@ -353,12 +373,20 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
     return viewer.scene.globe.pick(ray, viewer.scene) || null;
   }
 
-  function updatePointPosition(pointId: string, cartesian: Cesium.Cartesian3) {
+  function updatePointEntityPosition(pointId: string, cartesian: Cesium.Cartesian3) {
     const entity = getEntityByPointId(pointId);
     if (!entity) return;
 
-    entity.position = new Cesium.ConstantPositionProperty(cartesian);
+    if (entity.position instanceof Cesium.ConstantPositionProperty) {
+      entity.position.setValue(cartesian);
+    } else {
+      entity.position = new Cesium.ConstantPositionProperty(cartesian);
+    }
 
+    draggingCartesian = cartesian;
+  }
+
+  function commitPointPosition(pointId: string, cartesian: Cesium.Cartesian3) {
     const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
     const nextPoints = clonePoints(options.getPoints());
     const target = nextPoints.find((point) => point.id === pointId);
@@ -386,26 +414,111 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
     renderPoints();
   }
 
-  function resolvePickedEntity(position: Cesium.Cartesian2, preferDeleteEntity = false) {
+  function resolvePickedEntity(position: Cesium.Cartesian2) {
     const viewer = getViewer();
     if (!viewer) return null;
 
-    const pickedObjects = viewer.scene.drillPick(position, 8);
-    if (!pickedObjects.length) return null;
+    const picked = viewer.scene.pick(position);
+    const entity = picked?.id ? (picked.id as Cesium.Entity) : null;
+    if (!entity) return null;
+    if (String(entity.id) === EDITABLE_MAP_POINT_DELETE_ENTITY_ID || isEditablePointEntity(entity)) return entity;
+    return null;
+  }
 
-    const pickedEntities = pickedObjects
-      .map((picked) => (picked?.id ? (picked.id as Cesium.Entity) : null))
-      .filter((entity): entity is Cesium.Entity => Boolean(entity));
+  function cloneScreenPosition(position: Cesium.Cartesian2) {
+    return new Cesium.Cartesian2(position.x, position.y);
+  }
 
-    const deleteEntity =
-      pickedEntities.find((entity) => String(entity.id) === EDITABLE_MAP_POINT_DELETE_ENTITY_ID) || null;
-    const pointEntity = pickedEntities.find((entity) => isEditablePointEntity(entity)) || null;
+  function processHoverPick(position: Cesium.Cartesian2) {
+    if (!active || draggingPointId) return;
 
-    if (preferDeleteEntity) {
-      return deleteEntity || pointEntity;
+    const viewer = getViewer();
+    if (!viewer) return;
+
+    const pickedEntity = resolvePickedEntity(position);
+    if (pickedEntity && String(pickedEntity.id) === EDITABLE_MAP_POINT_DELETE_ENTITY_ID) {
+      setCursor('pointer');
+      return;
     }
 
-    return pointEntity || deleteEntity;
+    if (pickedEntity && isEditablePointEntity(pickedEntity)) {
+      setHoverState(pickedEntity);
+      return;
+    }
+
+    clearHoverState();
+  }
+
+  function cancelHoverPick() {
+    if (hoverPickTimer !== null) {
+      window.clearTimeout(hoverPickTimer);
+      hoverPickTimer = null;
+    }
+    pendingHoverPosition = null;
+  }
+
+  function scheduleHoverPick(position: Cesium.Cartesian2) {
+    pendingHoverPosition = cloneScreenPosition(position);
+    if (hoverPickTimer !== null) return;
+
+    const elapsed = window.performance.now() - lastHoverPickAt;
+    const delay = Math.max(0, HOVER_PICK_INTERVAL_MS - elapsed);
+    hoverPickTimer = window.setTimeout(() => {
+      hoverPickTimer = null;
+      const nextPosition = pendingHoverPosition;
+      pendingHoverPosition = null;
+      if (!nextPosition) return;
+
+      lastHoverPickAt = window.performance.now();
+      processHoverPick(nextPosition);
+    }, delay);
+  }
+
+  function applyDragPosition(position: Cesium.Cartesian2) {
+    if (!active || !draggingPointId || !draggingEntity) return;
+
+    const cartesian = pickCartesian(position);
+    if (cartesian) {
+      updatePointEntityPosition(draggingPointId, cartesian);
+    }
+  }
+
+  function cancelDragFrame() {
+    if (dragFrameId !== null) {
+      window.cancelAnimationFrame(dragFrameId);
+      dragFrameId = null;
+    }
+    pendingDragPosition = null;
+  }
+
+  function scheduleDragPosition(position: Cesium.Cartesian2) {
+    pendingDragPosition = cloneScreenPosition(position);
+    if (dragFrameId !== null) return;
+
+    dragFrameId = window.requestAnimationFrame(() => {
+      dragFrameId = null;
+      const nextPosition = pendingDragPosition;
+      pendingDragPosition = null;
+      if (nextPosition) {
+        applyDragPosition(nextPosition);
+      }
+    });
+  }
+
+  function flushDragPosition(position?: Cesium.Cartesian2) {
+    if (position) {
+      pendingDragPosition = cloneScreenPosition(position);
+    }
+    if (dragFrameId !== null) {
+      window.cancelAnimationFrame(dragFrameId);
+      dragFrameId = null;
+    }
+
+    const nextPosition = pendingDragPosition;
+    pendingDragPosition = null;
+    if (nextPosition) {
+      applyDragPosition(nextPosition);
+    }
   }
 
   function bindEvents() {
@@ -424,6 +537,7 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
         return;
       }
 
+      cancelHoverPick();
       candidatePointId = getPointIdFromEntity(pickedEntity);
       candidateEntity = pickedEntity;
       downPosition = movement.position;
@@ -436,13 +550,7 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
       if (!viewerInstance) return;
 
       if (draggingPointId && draggingEntity) {
-        const cartesian = pickCartesian(movement.endPosition);
-        if (!cartesian) return;
-
-        movedAfterDown = true;
-        updatePointPosition(draggingPointId, cartesian);
-        draggingEntity.position = new Cesium.ConstantPositionProperty(cartesian);
-        showDeleteButton(draggingEntity);
+        scheduleDragPosition(movement.endPosition);
         return;
       }
 
@@ -451,42 +559,36 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
         if (distance >= DRAG_START_THRESHOLD) {
           draggingPointId = candidatePointId;
           draggingEntity = candidateEntity;
+          draggingCartesian = null;
           movedAfterDown = true;
           suppressNextClick = true;
           disableCameraController(viewerInstance);
-          hideDeleteButton();
+          cancelHoverPick();
+          clearHoverState();
+          scheduleDragPosition(movement.endPosition);
+          return;
         }
       }
 
-      if (draggingPointId && draggingEntity) {
-        const cartesian = pickCartesian(movement.endPosition);
-        if (!cartesian) return;
-
-        updatePointPosition(draggingPointId, cartesian);
-        draggingEntity.position = new Cesium.ConstantPositionProperty(cartesian);
-        return;
-      }
-
-      const pickedEntity = resolvePickedEntity(movement.endPosition, true);
-      if (pickedEntity && String(pickedEntity.id) === EDITABLE_MAP_POINT_DELETE_ENTITY_ID) {
-        (viewerInstance.container as HTMLElement).style.cursor = 'pointer';
-        return;
-      }
-
-      if (pickedEntity && isEditablePointEntity(pickedEntity)) {
-        setHoverState(pickedEntity);
-        return;
-      }
-
-      clearHoverState();
+      scheduleHoverPick(movement.endPosition);
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
-    handler.setInputAction(() => {
+    handler.setInputAction((movement: { position?: Cesium.Cartesian2 }) => {
+      if (draggingPointId) {
+        flushDragPosition(movement.position);
+      } else {
+        cancelDragFrame();
+      }
+
       const draggedPointId = draggingPointId;
       const shouldEmitDragEnd = Boolean(draggedPointId && movedAfterDown);
 
       if (draggingPointId && movedAfterDown) {
         suppressNextClick = true;
+      }
+
+      if (shouldEmitDragEnd && draggedPointId && draggingCartesian) {
+        commitPointPosition(draggedPointId, draggingCartesian);
       }
 
       if (shouldEmitDragEnd && draggedPointId) {
@@ -498,6 +600,7 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
 
       draggingPointId = '';
       draggingEntity = null;
+      draggingCartesian = null;
       candidatePointId = '';
       candidateEntity = null;
       downPosition = null;
@@ -506,16 +609,16 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
     }, Cesium.ScreenSpaceEventType.LEFT_UP);
 
     handler.setInputAction((movement: { position: Cesium.Cartesian2 }) => {
-      const pickedEntity = resolvePickedEntity(movement.position, true);
+      if (suppressNextClick) {
+        suppressNextClick = false;
+        return;
+      }
+
+      const pickedEntity = resolvePickedEntity(movement.position);
       if (!pickedEntity) return;
 
       if (String(pickedEntity.id) === EDITABLE_MAP_POINT_DELETE_ENTITY_ID) {
         deleteHoveredPoint();
-        return;
-      }
-
-      if (suppressNextClick) {
-        suppressNextClick = false;
         return;
       }
 
@@ -533,6 +636,9 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
     const viewer = getViewer();
     if (!viewer || active) return;
 
+    lastHoverPickAt = 0;
+    deleteButtonVisible = false;
+    cursorStyle = '';
     active = true;
     getEditableDataSource(viewer);
     ensureDeleteButtonEntity(viewer);
@@ -549,12 +655,16 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
 
   function stop() {
     active = false;
+    cancelHoverPick();
+    cancelDragFrame();
     handler?.destroy();
     handler = null;
     clearHoverState();
     restoreCameraController();
     draggingPointId = '';
     draggingEntity = null;
+    draggingCartesian = null;
+    pendingDragPosition = null;
     candidatePointId = '';
     candidateEntity = null;
     downPosition = null;

@@ -1,7 +1,7 @@
 <template>
   <div class="electricity-usage">
     <div v-if="error && !summary" class="electricity-usage__state is-error">{{ error }}</div>
-    <div v-else-if="loading && !summary" class="electricity-usage__state">正在计算今日{{ usageLabel }}...</div>
+    <div v-else-if="loading && !summary" class="electricity-usage__state">正在加载{{ usageLabel }}...</div>
     <template v-else>
       <div class="electricity-usage__summary">
         <div class="electricity-usage__primary">
@@ -16,12 +16,7 @@
             >{{ formatValue(summary?.month) }} <small>{{ unit }}</small></strong
           >
         </div>
-        <div class="electricity-usage__metric">
-          <span>{{ topLabel }}</span>
-          <strong :title="summary?.topDevice?.deviceName || '-'">{{ summary?.topDevice?.deviceName || '-' }}</strong>
-        </div>
       </div>
-
       <UsageBarChart
         class="electricity-usage__chart"
         :points="chartPoints"
@@ -37,63 +32,38 @@
 
 <script setup lang="ts">
   import { computed, ref } from 'vue';
-  import { formatUsageNumber } from './resourceUsage';
+  import { EntityType } from '/@/enums/entityTypeEnum';
+  import { formatUsageNumber, useUsageSummary } from './resourceUsage';
   import { normalizeUsageTrend } from './cumulativeUsageAccumulator';
-  import {
-    resolveTemplateDevices,
-    type TemplatePointLike,
-    type TemplateRuntimeDevices,
-  } from './templateDeviceResolver';
-  import type { TemplateTelemetryHub } from './templateTelemetryHub';
-  import { useTemplateCumulativeUsage } from './useTemplateCumulativeUsage';
   import UsageBarChart, { type UsageBarChartMode } from './UsageBarChart.vue';
 
   const props = withDefaults(
     defineProps<{
       config?: Record<string, any>;
-      ctx?: {
-        runtimeDevices?: TemplateRuntimeDevices | null;
-        templatePoints?: TemplatePointLike[] | null;
-        templateTelemetryHub?: TemplateTelemetryHub | null;
-      };
       telemetryKey?: string;
       usageLabel?: string;
       unit?: string;
-      topLabel?: string;
-      deviceCategory?: string;
     }>(),
     {
-      telemetryKey: 'electricityConsumption',
+      telemetryKey: 'totalElectricityConsumption',
       usageLabel: '用电量',
       unit: 'kWh',
-      topLabel: '用电最高设备',
-      deviceCategory: 'electricity_consumption',
     },
   );
 
   const chartMode = ref<UsageBarChartMode>('sevenDays');
-  const keyName = computed(() => String(props.config?.settings?.key || props.telemetryKey));
+  const sourceAssetId = computed(() => String(props.config?.settings?.sourceAssetId || '').trim());
+  const sourceAssetName = computed(() => String(props.config?.settings?.sourceAssetName || '').trim());
+  const keyName = computed(() => String(props.config?.settings?.sourceTelemetryKey || props.telemetryKey));
+
+  const pollMs = computed(() => Math.max(15000, Number(props.config?.settings?.pollMs || 60000)));
+  const sourceAssets = computed(() =>
+    sourceAssetId.value ? [{ id: sourceAssetId.value, name: sourceAssetName.value || sourceAssetId.value }] : [],
+  );
+  const sourceEntityType = computed(() => EntityType.ASSET);
+  const { summary, loading, error: usageError } = useUsageSummary(keyName, sourceAssets, pollMs, sourceEntityType);
+  const error = computed(() => usageError.value || (sourceAssetId.value ? '' : '请在添加部件时选择资产'));
   const decimals = computed(() => Number(props.config?.settings?.decimals ?? 1));
-  const deviceBindings = computed(() =>
-    resolveTemplateDevices({
-      runtimeDevices: props.ctx?.runtimeDevices || {},
-      templatePoints: props.ctx?.templatePoints || [],
-      selector: { type: 'device-category', deviceCategory: props.deviceCategory },
-      telemetryKey: keyName.value,
-    }),
-  );
-  const devices = computed(() =>
-    deviceBindings.value.map((device) => ({
-      id: device.deviceId,
-      name: device.deviceName || device.deviceId,
-    })),
-  );
-  const hub = computed(() => props.ctx?.templateTelemetryHub || null);
-  const { summary, loading, error } = useTemplateCumulativeUsage({
-    key: keyName,
-    devices,
-    hub,
-  });
   const chartPoints = computed(() => {
     if (!summary.value) return [];
     const points = chartMode.value === 'sevenDays' ? summary.value.trend7d : summary.value.trend24h;
@@ -126,7 +96,7 @@
     min-width: 0;
     min-height: 48px;
     display: grid;
-    grid-template-columns: minmax(160px, 1.6fr) minmax(120px, 1fr) minmax(150px, 1.4fr);
+    grid-template-columns: minmax(160px, 1.6fr) minmax(120px, 1fr);
     align-items: stretch;
     gap: 8px;
   }
@@ -210,7 +180,7 @@
   @container (max-width: 560px) {
     .electricity-usage__summary {
       min-height: 46px;
-      grid-template-columns: minmax(120px, 1.35fr) minmax(90px, 1fr) minmax(110px, 1.15fr);
+      grid-template-columns: minmax(120px, 1.35fr) minmax(90px, 1fr);
       gap: 4px;
     }
 

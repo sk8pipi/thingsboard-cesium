@@ -108,7 +108,6 @@
         :sensor-points="sensorPoints"
         :camera-points="cameraPoints"
         :mode="cesiumInteractionMode"
-        :hide-base-points="editorMode === 'pickingPoint'"
         :globe-only="templateGlobeOnly"
         :scene-models="templateScene.models"
         :enable-sensor-type-styles="true"
@@ -311,6 +310,17 @@
           <div class="mw-dialog-title">配置{{ pendingWidgetTitle }}</div>
           <div class="mw-dialog-sub">该 Key 将在模板全部设备中进行聚合，未包含此 Key 的设备会自动忽略。</div>
 
+          <label v-if="isResourceUsageWidget" class="mw-aggregate-field">
+            <span>汇总资产</span>
+            <select v-model="aggregateAssetId" :disabled="aggregateAssetsLoading" @change="onAggregateAssetChanged">
+              <option value="">请选择资产</option>
+              <option v-for="asset in aggregateAssetOptions" :key="asset.id" :value="asset.id">
+                {{ asset.name }}
+              </option>
+            </select>
+            <small v-if="aggregateAssetsLoading">正在读取资产...</small>
+          </label>
+
           <label class="mw-aggregate-field">
             <span>搜索模板 Key</span>
             <input v-model.trim="aggregateKeySearch" type="search" placeholder="输入 Key 名称筛选" />
@@ -359,7 +369,7 @@
             <button
               class="mw-btn primary"
               type="button"
-              :disabled="!aggregateKey"
+              :disabled="!aggregateKey || (isResourceUsageWidget && !aggregateAssetId)"
               @click="confirmAggregateWidgetConfig"
             >
               添加部件
@@ -515,6 +525,7 @@
 <script setup lang="ts">
   import { computed, createApp, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
   import { getAttributesByScope, getTimeseriesKeys } from '/@/api/tb/telemetry';
+  import { getTenantAssetInfoList } from '/@/api/tb/asset';
   import type * as Cesium from 'cesium';
   import { useRoute, useRouter } from 'vue-router';
   import { GridStack } from 'gridstack';
@@ -641,6 +652,7 @@
   };
   type CesiumMapExpose = {
     getViewer: () => Cesium.Viewer | undefined;
+    getPointEntity: (pointId: string) => Cesium.Entity | null;
     flyToPoint: (point: MapPointLocation) => void;
   };
 
@@ -677,7 +689,13 @@
   const aggregateKeysLoading = ref(false);
   const aggregateKeysError = ref('');
   const aggregateTimeWindowMs = ref(3600000);
+  const aggregateAssetId = ref('');
+  const aggregateAssetOptions = ref<Array<{ id: string; name: string }>>([]);
+  const aggregateAssetsLoading = ref(false);
   let aggregateKeysRequestId = 0;
+  const isResourceUsageWidget = computed(() =>
+    ['iotElectricityUsage', 'iotWaterUsage'].includes(pendingWidgetKey.value),
+  );
   const filteredAggregateKeys = computed(() => {
     const search = aggregateKeySearch.value.trim().toLowerCase();
     if (!search) return aggregateAvailableKeys.value;
@@ -761,6 +779,7 @@
   });
   const pointEditor = useMapPointEditor({
     getViewer: () => cesiumMapRef.value?.getViewer() || null,
+    getPointEntity: (pointId) => cesiumMapRef.value?.getPointEntity(pointId) || null,
     getPoints: () => draftMapPoints.value,
     setPoints: (points) => {
       draftMapPoints.value = cloneJson(points);
@@ -803,13 +822,20 @@
       .filter((binding): binding is DevicePointBindingInfo => Boolean(binding)),
   );
   const sensorPoints = computed(() =>
-    activeMapPoints.value.filter((point): point is SensorMapPoint => point.type === 'sensor'),
+    activeMapPoints.value
+      .filter((point): point is SensorMapPoint => point.type === 'sensor')
+      .map((point) => {
+        const deviceType = getSensorPointDeviceType(point);
+        return deviceType === resolveSensorDeviceType(point) ? point : { ...point, deviceType };
+      }),
   );
   const cameraPoints = computed(() =>
     activeMapPoints.value.filter((point): point is CameraMapPoint => point.type === 'camera'),
   );
   function getSensorPointDeviceType(point: SensorMapPoint) {
-    return resolveSensorDeviceType(point);
+    const runtimeDevice = templateRuntimeDevices.value[point.entityId];
+    const clientDeviceType = extractAttributeValue(runtimeDevice?.deviceType);
+    return clientDeviceType || resolveSensorDeviceType(point);
   }
 
   function getSensorDeviceTypeLabel(key: string, sampleLabel?: string) {
@@ -1145,7 +1171,10 @@
     sensorStylePanelVisible.value = false;
   }
   const canSaveEdit = computed(
-    () => canEditTemplate.value && (editorMode.value === 'editing' || editorMode.value === 'pickingPoint'),
+    () =>
+      !isSavingEdit.value &&
+      canEditTemplate.value &&
+      (editorMode.value === 'editing' || editorMode.value === 'pickingPoint'),
   );
   const dashboardId = computed(() => String(route.query.dashboardId || ''));
   const isDashboardTemplateMode = computed(() => Boolean(dashboardId.value));
@@ -1175,6 +1204,7 @@
     staticHtml: createWidgetPreviewSvg('HTML', 'static', '#475569', '#38bdf8'),
     alarmTable: createWidgetPreviewSvg('Alarm Table', 'table', '#dc2626', '#f97316'),
     alarmCard: createWidgetPreviewSvg('Alarm Card', 'card', '#dc2626', '#f59e0b'),
+    alarmTrend: createWidgetPreviewSvg('报警趋势', 'bar', '#38bdf8', '#7dd3fc'),
     controlSwitch: createWidgetPreviewSvg('Switch', 'switch', '#0284c7', '#22c55e'),
     templateDeviceOverview: createWidgetPreviewSvg('Device Overview', 'card', '#0284c7', '#22c55e'),
     templateAlarmOverview: createWidgetPreviewSvg('Alarm Overview', 'card', '#dc2626', '#f59e0b'),
@@ -1194,7 +1224,7 @@
     const map: Record<string, string> = {
       timeseries: 'Timeseries',
       latest: 'Latest',
-      alarm: 'Alarm',
+      alarm: '报警部件',
       aggregate: 'Aggregate',
       control: 'Control',
       static: 'Static',
@@ -1462,7 +1492,11 @@
     return dashboard;
   }
 
-  async function persistEditorState(state = getEditorState(), writableDashboard?: Dashboard) {
+  async function persistEditorState(
+    state = getEditorState(),
+    writableDashboard?: Dashboard,
+    refreshRuntimeAfterSave = true,
+  ) {
     if (isDashboardTemplateMode.value) {
       assertTenantAdminAccess();
       const latest = writableDashboard || (await getWritableDashboard());
@@ -1478,7 +1512,9 @@
       latest.configuration[DASHBOARD_MAP_WIDGET_CONFIG_KEY] = state;
       await saveDashboard(latest);
       dashboardTemplate.value = latest;
-      await refreshTemplateRuntime();
+      if (refreshRuntimeAfterSave) {
+        await refreshTemplateRuntime();
+      }
       return;
     }
 
@@ -1657,6 +1693,21 @@
 
   async function loadAggregateAvailableKeys() {
     const requestId = ++aggregateKeysRequestId;
+    if (isResourceUsageWidget.value) {
+      aggregateAssetsLoading.value = true;
+      try {
+        const page = await getTenantAssetInfoList({ page: 0, pageSize: 500, sortProperty: 'name', sortOrder: 'ASC' });
+        if (requestId !== aggregateKeysRequestId) return;
+        aggregateAssetOptions.value = (page.data || []).map((asset: any) => ({ id: asset.id.id, name: asset.name }));
+        aggregateKey.value =
+          pendingWidgetKey.value === 'iotWaterUsage' ? 'totalWaterConsumption' : 'totalElectricityConsumption';
+      } catch {
+        aggregateKeysError.value = '读取资产列表失败，请稍后重试。';
+      } finally {
+        aggregateAssetsLoading.value = false;
+      }
+      return;
+    }
     const deviceRefs = collectMapTemplateDeviceRefs(getEditorState());
     aggregateAvailableKeys.value = [];
     aggregateKeysError.value = '';
@@ -1699,9 +1750,27 @@
     aggregateKeysLoading.value = false;
   }
 
+  async function onAggregateAssetChanged() {
+    aggregateAvailableKeys.value = [];
+    const assetId = aggregateAssetId.value;
+    if (!assetId) return;
+    aggregateKeysLoading.value = true;
+    try {
+      aggregateAvailableKeys.value = await getTimeseriesKeys({ entityType: 'ASSET', id: assetId } as any);
+      if (aggregateAvailableKeys.value.length && !aggregateAvailableKeys.value.includes(aggregateKey.value)) {
+        aggregateKey.value = aggregateAvailableKeys.value[0];
+      }
+    } catch {
+      aggregateKeysError.value = '读取资产时序 Key 失败，请稍后重试。';
+    } finally {
+      aggregateKeysLoading.value = false;
+    }
+  }
   function cancelAggregateWidgetConfig() {
     aggregateKeysRequestId += 1;
     aggregateKeysLoading.value = false;
+    aggregateAssetsLoading.value = false;
+    aggregateAssetId.value = '';
     aggregateConfigVisible.value = false;
     pendingWidgetKey.value = '';
     pendingWidgetTitle.value = '';
@@ -1710,6 +1779,21 @@
   function confirmAggregateWidgetConfig() {
     const key = pendingWidgetKey.value;
     const definition = key ? widgetRegistry[key] : null;
+    if (isResourceUsageWidget.value) {
+      const asset = aggregateAssetOptions.value.find((item) => item.id === aggregateAssetId.value);
+      const telemetryKey = aggregateKey.value.trim();
+      if (!key || !definition || !asset || !telemetryKey) return;
+      const config = cloneJson(definition.defaultConfig || {});
+      config.settings = {
+        ...(config.settings || {}),
+        sourceAssetId: asset.id,
+        sourceAssetName: asset.name,
+        sourceTelemetryKey: telemetryKey,
+      };
+      createWidgetAndAddToGrid(key, pendingWidgetTitle.value || definition.title, config);
+      cancelAggregateWidgetConfig();
+      return;
+    }
     const telemetryKey = aggregateKey.value.trim();
     if (!key || !definition || !telemetryKey) return;
 
@@ -2307,7 +2391,7 @@
       if (changedDeviceLocationPoints.length) {
         await saveDeviceMapPointLocations(changedDeviceLocationPoints);
       }
-      await persistEditorState(state, writableDashboard);
+      await persistEditorState(state, writableDashboard, false);
     } catch (error: any) {
       errorMsg.value = error?.message || '鐐逛綅淇濆瓨澶辫触锛岃妫€鏌ヨ澶囦綅缃俊鎭悗閲嶈瘯';
       return;
