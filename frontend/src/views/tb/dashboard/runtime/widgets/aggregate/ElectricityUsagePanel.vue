@@ -33,8 +33,9 @@
 <script setup lang="ts">
   import { computed, ref } from 'vue';
   import { EntityType } from '/@/enums/entityTypeEnum';
-  import { formatUsageNumber, useUsageSummary } from './resourceUsage';
+  import { formatUsageNumber } from './resourceUsage';
   import { normalizeUsageTrend } from './cumulativeUsageAccumulator';
+  import { usePersistentUsageSummary } from './usePersistentUsageSummary';
   import UsageBarChart, { type UsageBarChartMode } from './UsageBarChart.vue';
 
   const props = withDefaults(
@@ -61,7 +62,16 @@
     sourceAssetId.value ? [{ id: sourceAssetId.value, name: sourceAssetName.value || sourceAssetId.value }] : [],
   );
   const sourceEntityType = computed(() => EntityType.ASSET);
-  const { summary, loading, error: usageError } = useUsageSummary(keyName, sourceAssets, pollMs, sourceEntityType);
+  const {
+    summary,
+    loading,
+    error: usageError,
+  } = usePersistentUsageSummary({
+    key: keyName,
+    entities: sourceAssets,
+    pollMs,
+    entityType: sourceEntityType,
+  });
   const error = computed(() => usageError.value || (sourceAssetId.value ? '' : '请在添加部件时选择资产'));
   const decimals = computed(() => Number(props.config?.settings?.decimals ?? 1));
   const chartPoints = computed(() => {

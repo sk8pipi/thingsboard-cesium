@@ -90,6 +90,7 @@ export class CumulativeUsageAccumulator {
     if (value === null || !Number.isFinite(latest.ts)) return false;
     const previous = this.latestReadings.get(device.id);
     if (previous && previous.ts > latest.ts) return false;
+    if (previous && previous.ts === latest.ts && previous.value === value) return false;
 
     this.advanceTo(latest.ts);
     this.latestReadings.set(device.id, {

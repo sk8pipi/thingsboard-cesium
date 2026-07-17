@@ -277,6 +277,50 @@ export async function fetchUsageSummary(
   return promise;
 }
 
+export async function fetchUsageReadingsSince(
+  devices: UsageQueryDevice[],
+  key: string,
+  startTs: number,
+  endTs = Date.now(),
+  entityType: EntityType = EntityType.DEVICE,
+): Promise<UsageDeviceReading[]> {
+  const normalizedKey = key.trim();
+  if (!normalizedKey || !devices.length || endTs <= startTs) return [];
+
+  const limit = Math.ceil((endTs - startTs) / HOUR_MS) + 4;
+  const results = await mapAggregateSettled(devices, async (device) => {
+    const response = await runAggregateRequest(() =>
+      getTimeseries({
+        entityType,
+        entityId: device.id,
+        keys: normalizedKey,
+        startTs,
+        endTs,
+        interval: HOUR_MS,
+        limit,
+        agg: 'MAX',
+        orderBy: 'ASC',
+        useStrictDataTypes: true,
+      }),
+    );
+    return extractPoints(response, normalizedKey).map((point) => ({
+      deviceId: device.id,
+      deviceName: device.name,
+      key: normalizedKey,
+      ts: point.ts,
+      value: point.value,
+    }));
+  });
+
+  if (!results.some((result) => result.status === 'fulfilled')) {
+    throw new Error('Unable to load incremental resource usage telemetry');
+  }
+
+  return results
+    .flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+    .sort((left, right) => left.ts - right.ts || left.deviceId.localeCompare(right.deviceId));
+}
+
 async function buildUsageSummary(
   devices: UsageQueryDevice[],
   key: string,
