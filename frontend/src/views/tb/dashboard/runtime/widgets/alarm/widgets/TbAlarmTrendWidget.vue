@@ -16,12 +16,25 @@
       </div>
     </header>
 
+    <div class="alarm-trend__legend" aria-label="报警严重度图例">
+      <span v-for="option in severityOptions" :key="option.key">
+        <i :style="{ backgroundColor: option.color }" aria-hidden="true"></i>
+        {{ option.label }}
+      </span>
+    </div>
+
     <div class="alarm-trend__canvas">
       <div v-if="loading && !hasLoaded" class="alarm-trend__state">正在统计报警趋势...</div>
       <div v-else-if="error && !hasLoaded" class="alarm-trend__state is-error">{{ error }}</div>
 
       <template v-else>
         <svg viewBox="0 0 1000 360" preserveAspectRatio="none" role="img" :aria-label="chartAriaLabel">
+          <defs>
+            <clipPath v-for="bar in bars" :id="bar.clipId" :key="bar.clipId">
+              <rect :x="bar.x" :y="bar.y" :width="bar.width" :height="bar.height" rx="3" />
+            </clipPath>
+          </defs>
+
           <g class="alarm-trend__grid">
             <template v-for="tick in yTicks" :key="tick.y">
               <line :x1="plot.left" :x2="plot.right" :y1="tick.y" :y2="tick.y" />
@@ -38,13 +51,25 @@
               :width="bar.slotWidth"
               :height="plot.bottom - plot.top"
               tabindex="0"
+              :aria-label="formatBarAriaLabel(bar.bucket)"
               @mouseenter="showTooltip($event, bar)"
               @mousemove="moveTooltip"
               @mouseleave="hideTooltip"
               @focus="showTooltip($event, bar)"
               @blur="hideTooltip"
             />
-            <rect class="alarm-trend__bar" :x="bar.x" :y="bar.y" :width="bar.width" :height="bar.height" rx="3" />
+            <g class="alarm-trend__stack" :clip-path="'url(#' + bar.clipId + ')'">
+              <rect
+                v-for="segment in bar.segments"
+                :key="segment.key"
+                class="alarm-trend__segment"
+                :x="bar.x"
+                :y="segment.y"
+                :width="bar.width"
+                :height="segment.height"
+                :style="{ fill: segment.color }"
+              />
+            </g>
             <text
               class="alarm-trend__value"
               :class="{ 'is-compact': mode === 'twentyFourHours' }"
@@ -76,20 +101,31 @@
         class="alarm-trend__tooltip"
         :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
       >
-        <span>{{ tooltip.label }}</span>
-        <strong>{{ tooltip.value }} 个报警</strong>
+        <div class="alarm-trend__tooltip-heading">
+          <span>{{ tooltip.label }}</span>
+          <strong>总计：{{ tooltip.value }}</strong>
+        </div>
+        <div class="alarm-trend__tooltip-rows">
+          <div v-for="row in tooltip.rows" :key="row.key" class="alarm-trend__tooltip-row">
+            <i :style="{ backgroundColor: row.color }" aria-hidden="true"></i>
+            <span>{{ row.label }}</span>
+            <strong>{{ row.count }}（{{ row.percentage }}）</strong>
+          </div>
+        </div>
       </div>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
+  import { ALARM_SEVERITY_COLORS, AlarmSeverity } from '/@/enums/alarmEnum';
   import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
   import {
     aggregateAlarmTrend,
     createAlarmTrendRange,
     type AlarmTrendBucket,
     type AlarmTrendMode,
+    type AlarmTrendSeverity,
   } from '../alarmTrend';
   import { fetchTenantAlarmsInRange } from '../alarmTrendApi';
 
@@ -98,18 +134,51 @@
     widget?: Record<string, any>;
   }>();
 
+  interface SeverityOption {
+    key: AlarmTrendSeverity;
+    label: string;
+    color: string;
+  }
+
+  interface TooltipSeverityRow extends SeverityOption {
+    count: number;
+    percentage: string;
+  }
+
+  interface AlarmTrendTooltip {
+    visible: boolean;
+    x: number;
+    y: number;
+    label: string;
+    value: number;
+    rows: TooltipSeverityRow[];
+  }
+
+  const severityOptions: SeverityOption[] = [
+    { key: 'CRITICAL', label: '严重', color: ALARM_SEVERITY_COLORS[AlarmSeverity.CRITICAL] },
+    { key: 'MAJOR', label: '高', color: ALARM_SEVERITY_COLORS[AlarmSeverity.MAJOR] },
+    { key: 'MINOR', label: '中', color: ALARM_SEVERITY_COLORS[AlarmSeverity.MINOR] },
+    { key: 'WARNING', label: '低', color: ALARM_SEVERITY_COLORS[AlarmSeverity.WARNING] },
+    {
+      key: 'INDETERMINATE',
+      label: '未定',
+      color: ALARM_SEVERITY_COLORS[AlarmSeverity.INDETERMINATE],
+    },
+  ];
+
   const modeOptions: Array<{ label: string; value: AlarmTrendMode }> = [
     { label: '近7天', value: 'sevenDays' },
     { label: '近24小时', value: 'twentyFourHours' },
   ];
   const plot = { left: 64, right: 982, top: 26, bottom: 314 };
+  const clipIdPrefix = 'alarm-trend-' + Math.random().toString(36).slice(2);
   const containerRef = ref<HTMLElement | null>(null);
   const mode = ref<AlarmTrendMode>('sevenDays');
   const buckets = ref(createAlarmTrendRange(mode.value).buckets);
   const loading = ref(false);
   const hasLoaded = ref(false);
   const error = ref('');
-  const tooltip = reactive({ visible: false, x: 0, y: 0, label: '', value: 0 });
+  const tooltip = reactive<AlarmTrendTooltip>({ visible: false, x: 0, y: 0, label: '', value: 0, rows: [] });
 
   let refreshTimer: number | undefined;
   let requestSequence = 0;
@@ -133,6 +202,7 @@
     const count = buckets.value.length;
     if (!count) return [];
     const chartWidth = plot.right - plot.left;
+    const plotHeight = plot.bottom - plot.top;
     const slotWidth = chartWidth / count;
     const widthRatio = mode.value === 'twentyFourHours' ? 0.58 : 0.52;
     const maxBarWidth = mode.value === 'twentyFourHours' ? 24 : 72;
@@ -140,11 +210,29 @@
 
     return buckets.value.map((bucket, index) => {
       const value = Math.max(0, bucket.total);
-      const height = axisMax.value ? (value / axisMax.value) * (plot.bottom - plot.top) : 0;
+      const height = axisMax.value ? (value / axisMax.value) * plotHeight : 0;
       const slotX = plot.left + index * slotWidth;
+      let segmentBottom = plot.bottom;
+      const segments = severityOptions
+        .map((option) => {
+          const segmentValue = Math.max(0, Number(bucket.severityCounts[option.key]) || 0);
+          const segmentHeight = axisMax.value ? (segmentValue / axisMax.value) * plotHeight : 0;
+          segmentBottom -= segmentHeight;
+          return {
+            ...option,
+            key: bucket.key + '-' + option.key,
+            value: segmentValue,
+            y: segmentBottom,
+            height: segmentHeight,
+          };
+        })
+        .filter((segment) => segment.value > 0);
+
       return {
         key: bucket.key,
+        clipId: clipIdPrefix + '-' + index,
         bucket,
+        segments,
         index,
         value,
         slotX,
@@ -176,15 +264,36 @@
     return String(Math.round(value));
   }
 
-  function formatTooltipLabel(startTs: number) {
-    const date = new Date(startTs);
+  function formatTooltipLabel(bucket: AlarmTrendBucket) {
+    const date = new Date(bucket.startTs);
     const dateText =
       date.getFullYear() +
       '-' +
       String(date.getMonth() + 1).padStart(2, '0') +
       '-' +
       String(date.getDate()).padStart(2, '0');
-    return mode.value === 'sevenDays' ? dateText : dateText + ' ' + String(date.getHours()).padStart(2, '0') + ':00';
+    if (mode.value === 'sevenDays') return dateText;
+
+    const endDate = new Date(bucket.endTs);
+    return (
+      dateText +
+      ' ' +
+      String(date.getHours()).padStart(2, '0') +
+      ':00–' +
+      String(endDate.getHours()).padStart(2, '0') +
+      ':00'
+    );
+  }
+
+  function formatPercent(count: number, total: number) {
+    if (!total) return '0%';
+    const percentage = (count / total) * 100;
+    return (Number.isInteger(percentage) ? percentage.toFixed(0) : percentage.toFixed(1)) + '%';
+  }
+
+  function formatBarAriaLabel(bucket: AlarmTrendBucket) {
+    const details = severityOptions.map((option) => option.label + bucket.severityCounts[option.key] + '个').join('，');
+    return formatTooltipLabel(bucket) + '，总计' + bucket.total + '个报警，' + details;
   }
 
   function shouldShowXAxisLabel(index: number) {
@@ -198,7 +307,8 @@
     if (!container) return;
     const rect = container.getBoundingClientRect();
     if (event instanceof MouseEvent) {
-      tooltip.x = Math.min(Math.max(event.clientX - rect.left, 82), rect.width - 82);
+      const edgePadding = Math.min(110, rect.width / 2);
+      tooltip.x = Math.min(Math.max(event.clientX - rect.left, edgePadding), rect.width - edgePadding);
       tooltip.y = Math.max(event.clientY - rect.top - 14, 54);
       return;
     }
@@ -207,8 +317,16 @@
   }
 
   function showTooltip(event: MouseEvent | FocusEvent, bar: { bucket: AlarmTrendBucket; value: number }) {
-    tooltip.label = formatTooltipLabel(bar.bucket.startTs);
+    tooltip.label = formatTooltipLabel(bar.bucket);
     tooltip.value = bar.value;
+    tooltip.rows = severityOptions.map((option) => {
+      const count = Math.max(0, Number(bar.bucket.severityCounts[option.key]) || 0);
+      return {
+        ...option,
+        count,
+        percentage: formatPercent(count, bar.value),
+      };
+    });
     tooltip.visible = true;
     updateTooltipPosition(event);
   }
@@ -297,7 +415,7 @@
     min-width: 0;
     min-height: 0;
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
     color: #e0f2fe;
   }
 
@@ -307,7 +425,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 0 4px 8px;
+    padding: 0 4px 4px;
   }
 
   .alarm-trend__header h3 {
@@ -319,6 +437,32 @@
     line-height: 28px;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .alarm-trend__legend {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    padding: 0 6px 5px 64px;
+    color: rgba(226, 242, 255, 0.64);
+    font-size: 10px;
+  }
+
+  .alarm-trend__legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+  }
+
+  .alarm-trend__legend i,
+  .alarm-trend__tooltip-row i {
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22);
   }
 
   .alarm-trend__modes {
@@ -390,10 +534,13 @@
     vector-effect: non-scaling-stroke;
   }
 
-  .alarm-trend__bar {
-    fill: #38bdf8;
-    opacity: 0.86;
+  .alarm-trend__stack {
     pointer-events: none;
+  }
+
+  .alarm-trend__segment {
+    opacity: 1;
+    transition: filter 0.16s ease;
   }
 
   .alarm-trend__hit-area {
@@ -401,10 +548,9 @@
     cursor: pointer;
   }
 
-  .alarm-trend__bar-group:hover .alarm-trend__bar,
-  .alarm-trend__bar-group:focus-within .alarm-trend__bar {
-    fill: #7dd3fc;
-    opacity: 1;
+  .alarm-trend__bar-group:hover .alarm-trend__segment,
+  .alarm-trend__bar-group:focus-within .alarm-trend__segment {
+    filter: brightness(1.08);
   }
 
   .alarm-trend__value {
@@ -442,7 +588,7 @@
   .alarm-trend__tooltip {
     position: absolute;
     z-index: 2;
-    min-width: 126px;
+    min-width: 196px;
     transform: translate(-50%, -100%);
     border: 1px solid rgba(125, 211, 252, 0.22);
     border-radius: 6px;
@@ -452,21 +598,55 @@
     pointer-events: none;
   }
 
-  .alarm-trend__tooltip span,
-  .alarm-trend__tooltip strong {
-    display: block;
+  .alarm-trend__tooltip-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid rgba(125, 211, 252, 0.14);
+  }
+
+  .alarm-trend__tooltip-heading span,
+  .alarm-trend__tooltip-heading strong,
+  .alarm-trend__tooltip-row span,
+  .alarm-trend__tooltip-row strong {
     white-space: nowrap;
   }
 
-  .alarm-trend__tooltip span {
-    color: rgba(226, 242, 255, 0.58);
+  .alarm-trend__tooltip-heading span {
+    color: rgba(226, 242, 255, 0.68);
     font-size: 10px;
   }
 
-  .alarm-trend__tooltip strong {
-    margin-top: 3px;
+  .alarm-trend__tooltip-heading strong {
     color: #e0f2fe;
-    font-size: 13px;
+    font-size: 12px;
+  }
+
+  .alarm-trend__tooltip-rows {
+    display: grid;
+    gap: 3px;
+    margin-top: 5px;
+  }
+
+  .alarm-trend__tooltip-row {
+    display: grid;
+    grid-template-columns: 8px minmax(36px, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    min-height: 17px;
+  }
+
+  .alarm-trend__tooltip-row span {
+    color: rgba(226, 242, 255, 0.68);
+    font-size: 10px;
+  }
+
+  .alarm-trend__tooltip-row strong {
+    color: #e0f2fe;
+    font-size: 10px;
+    font-weight: 600;
   }
 
   @container (max-width: 460px) {
@@ -483,6 +663,12 @@
     .alarm-trend__modes button {
       padding: 3px 6px;
       font-size: 10px;
+    }
+    .alarm-trend__legend {
+      gap: 3px 8px;
+      padding-right: 2px;
+      padding-left: 2px;
+      font-size: 9px;
     }
   }
 </style>

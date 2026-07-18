@@ -32,6 +32,13 @@ export enum AlarmSeverity {
   WARNING = 'WARNING',
   INDETERMINATE = 'INDETERMINATE',
 }
+export const ALARM_SEVERITY_COLORS: Record<AlarmSeverity, string> = {
+  [AlarmSeverity.CRITICAL]: '#FF0000',
+  [AlarmSeverity.MAJOR]: '#E37318',
+  [AlarmSeverity.MINOR]: '#FFA000',
+  [AlarmSeverity.WARNING]: '#FFCA3D',
+  [AlarmSeverity.INDETERMINATE]: '#8C8C8C',
+};
 
 export const ALARM_SHOW_STATUS_OPTIONS = [
   { value: ALarmShowStatus.ACTIVE_UNACK, label: t('tb.alarm.enums.showStatus.activeUnack') },
@@ -48,11 +55,31 @@ export const ALARM_STATUS_OPTIONS = [
 ];
 
 export const ALARM_SEVERITY_OPTIONS = [
-  { value: AlarmSeverity.CRITICAL, label: t('tb.alarm.enums.severity.critical'), color: '#FF0000' }, // 红色
-  { value: AlarmSeverity.MAJOR, label: t('tb.alarm.enums.severity.major'), color: '#E37318' }, // 橙色
-  { value: AlarmSeverity.MINOR, label: t('tb.alarm.enums.severity.minor'), color: '#FFA000' }, // 黄色
-  { value: AlarmSeverity.WARNING, label: t('tb.alarm.enums.severity.warning'), color: '#FFCA3D' }, //蓝色
-  { value: AlarmSeverity.INDETERMINATE, label: t('tb.alarm.enums.severity.indeterminate') }, //灰色
+  {
+    value: AlarmSeverity.CRITICAL,
+    label: t('tb.alarm.enums.severity.critical'),
+    color: ALARM_SEVERITY_COLORS[AlarmSeverity.CRITICAL],
+  },
+  {
+    value: AlarmSeverity.MAJOR,
+    label: t('tb.alarm.enums.severity.major'),
+    color: ALARM_SEVERITY_COLORS[AlarmSeverity.MAJOR],
+  },
+  {
+    value: AlarmSeverity.MINOR,
+    label: t('tb.alarm.enums.severity.minor'),
+    color: ALARM_SEVERITY_COLORS[AlarmSeverity.MINOR],
+  },
+  {
+    value: AlarmSeverity.WARNING,
+    label: t('tb.alarm.enums.severity.warning'),
+    color: ALARM_SEVERITY_COLORS[AlarmSeverity.WARNING],
+  },
+  {
+    value: AlarmSeverity.INDETERMINATE,
+    label: t('tb.alarm.enums.severity.indeterminate'),
+    color: ALARM_SEVERITY_COLORS[AlarmSeverity.INDETERMINATE],
+  },
 ];
 
 export enum AlarmConditionKeyType {

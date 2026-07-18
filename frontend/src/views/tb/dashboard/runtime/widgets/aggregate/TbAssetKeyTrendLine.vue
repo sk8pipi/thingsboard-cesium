@@ -1,7 +1,7 @@
 <template>
   <div class="asset-key-trend">
     <header class="asset-key-trend__head">
-      <strong class="asset-key-trend__title" :title="title">{{ title }}</strong>
+      <h3 class="asset-key-trend__title" :title="title">{{ title }}</h3>
       <div class="asset-key-trend__latest" :title="latestTooltip">
         <span>最新值</span><strong>{{ latestText }}</strong>
       </div>
@@ -21,7 +21,8 @@
       <div ref="chartEl" class="asset-key-trend__chart"></div>
       <div v-if="sourceError" class="asset-key-trend__state is-error">{{ sourceError }}</div>
       <div v-else-if="loading && !points.length" class="asset-key-trend__state">正在读取趋势数据...</div>
-      <div v-else-if="!loading && !points.length" class="asset-key-trend__state">暂无趋势数据</div>
+      <div v-else-if="error && !points.length" class="asset-key-trend__state is-error">{{ error }}</div>
+      <div v-else-if="!points.length" class="asset-key-trend__state">暂无趋势数据</div>
       <div v-if="error && points.length" class="asset-key-trend__notice">{{ error }}</div>
     </div>
   </div>
@@ -52,8 +53,8 @@
     last7d: { windowMs: 7 * DAY_MS, intervalMs: 3600000 },
   };
   const rangeOptions: Array<{ value: TrendRange; label: string }> = [
-    { value: 'last24h', label: '24小时' },
-    { value: 'last7d', label: '7天' },
+    { value: 'last7d', label: '近7天' },
+    { value: 'last24h', label: '近24小时' },
   ];
   const chartEl = ref<HTMLDivElement | null>(null);
   const points = ref<TrendPoint[]>([]);
@@ -314,6 +315,13 @@
         grid: { left: 48, right: 18, top: 16, bottom: 38 },
         tooltip: {
           trigger: 'axis',
+          confine: true,
+          backgroundColor: 'rgba(3, 18, 31, 0.94)',
+          borderColor: 'rgba(125, 211, 252, 0.22)',
+          borderWidth: 1,
+          padding: [7, 9],
+          textStyle: { color: '#e0f2fe', fontSize: 12 },
+          extraCssText: 'border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.28);',
           axisPointer: { type: 'line' },
           formatter: (params: any) => {
             const item = Array.isArray(params) ? params[0] : params;
@@ -327,8 +335,12 @@
         xAxis: {
           type: 'time',
           boundaryGap: false,
+          axisLine: { lineStyle: { color: 'rgba(148, 214, 255, 0.2)' } },
+          axisTick: { lineStyle: { color: 'rgba(148, 214, 255, 0.2)' } },
           axisLabel: {
             hideOverlap: true,
+            color: 'rgba(226, 242, 255, 0.52)',
+            fontSize: 11,
             formatter: (value: number) => {
               const date = new Date(value);
               return activeRange.value === 'last7d'
@@ -337,7 +349,18 @@
             },
           },
         },
-        yAxis: { type: 'value', name: unit.value, nameGap: 10, scale: true, splitNumber: 4 },
+        yAxis: {
+          type: 'value',
+          name: unit.value,
+          nameGap: 10,
+          nameTextStyle: { color: 'rgba(226, 242, 255, 0.52)', fontSize: 11 },
+          scale: true,
+          splitNumber: 4,
+          axisLabel: { color: 'rgba(226, 242, 255, 0.52)', fontSize: 11 },
+          axisLine: { show: false },
+          axisTick: { show: false },
+          splitLine: { lineStyle: { color: 'rgba(148, 214, 255, 0.12)' } },
+        },
         series: [
           {
             name: source.value?.key || '',
@@ -345,8 +368,13 @@
             showSymbol: false,
             connectNulls: false,
             sampling: 'lttb',
-            lineStyle: { width: 2 },
-            areaStyle: { opacity: 0.08 },
+            lineStyle: { width: 2, color: '#38bdf8', opacity: 0.86 },
+            itemStyle: { color: '#38bdf8' },
+            emphasis: {
+              lineStyle: { color: '#7dd3fc', opacity: 1 },
+              itemStyle: { color: '#7dd3fc' },
+            },
+            areaStyle: { color: 'rgba(56, 189, 248, 0.08)' },
             data: points.value.map((point) => [point.ts, point.value]),
           },
         ],
@@ -396,30 +424,38 @@
 
 <style scoped>
   .asset-key-trend {
+    container-type: inline-size;
     width: 100%;
     height: 100%;
     min-width: 0;
+    min-height: 0;
     display: grid;
-    grid-template-rows: 48px minmax(0, 1fr);
-    gap: 8px;
+    grid-template-rows: auto minmax(0, 1fr);
+    color: #e0f2fe;
   }
   .asset-key-trend__head {
     min-width: 0;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 14px;
+    padding: 0 4px 8px;
   }
   .asset-key-trend__title {
     min-width: 0;
     flex: 1 1 auto;
     overflow: hidden;
-    font-size: 15px;
+    margin: 0;
+    color: #dff8ff;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 28px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .asset-key-trend__latest {
-    min-width: 112px;
-    flex: 0 0 auto;
+    min-width: 108px;
+    flex: none;
     display: flex;
     align-items: baseline;
     justify-content: flex-end;
@@ -427,85 +463,91 @@
     white-space: nowrap;
   }
   .asset-key-trend__latest span {
+    color: rgba(226, 242, 255, 0.58);
     font-size: 11px;
-    opacity: 0.68;
   }
   .asset-key-trend__latest strong {
-    font-size: 16px;
+    color: #bae6fd;
+    font-size: 14px;
   }
   .asset-key-trend__range {
-    flex: 0 0 auto;
+    flex: none;
     display: inline-flex;
-    overflow: hidden;
-    border: 1px solid rgba(148, 163, 184, 0.32);
-    border-radius: 7px;
+    align-items: center;
+    border: 1px solid rgba(125, 211, 252, 0.18);
+    border-radius: 8px;
+    background: rgba(8, 47, 73, 0.12);
+    padding: 2px;
   }
   .asset-key-trend__range button {
-    min-width: 56px;
-    height: 30px;
+    appearance: none;
     border: 0;
-    border-left: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 6px;
     background: transparent;
-    color: inherit;
+    padding: 4px 9px;
+    color: rgba(226, 242, 255, 0.58);
+    font: inherit;
+    font-size: 11px;
+    line-height: 18px;
     cursor: pointer;
-    font-size: 12px;
   }
-  .asset-key-trend__range button:first-child {
-    border-left: 0;
+  .asset-key-trend__range button:hover,
+  .asset-key-trend__range button:focus-visible {
+    color: #e0f2fe;
+    outline: none;
   }
   .asset-key-trend__range button.active {
-    font-weight: 700;
-    background: rgba(125, 211, 252, 0.16);
+    background: rgba(56, 189, 248, 0.2);
+    color: #bae6fd;
+    box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.16);
   }
 
   .asset-key-trend__body {
     position: relative;
-    min-height: 0;
+    height: 100%;
+    min-height: 180px;
+    overflow: hidden;
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(14, 116, 144, 0.08), rgba(2, 6, 23, 0.04));
   }
   .asset-key-trend__chart {
     width: 100%;
     height: 100%;
+    min-height: 180px;
   }
   .asset-key-trend__state {
     position: absolute;
     inset: 0;
     display: grid;
     place-items: center;
+    color: rgba(226, 242, 255, 0.62);
     font-size: 12px;
-    opacity: 0.66;
   }
   .asset-key-trend__state.is-error {
-    padding: 16px;
     color: #fca5a5;
-    text-align: center;
-    opacity: 1;
   }
   .asset-key-trend__notice {
     position: absolute;
-    right: 8px;
+    right: 10px;
     bottom: 8px;
-    max-width: calc(100% - 16px);
-    overflow: hidden;
-    padding: 4px 7px;
-    border-radius: 5px;
-    background: rgba(127, 29, 29, 0.76);
-    color: #fee2e2;
-    font-size: 11px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    color: #fca5a5;
+    font-size: 10px;
   }
-  @media (max-width: 560px) {
+  @container (max-width: 520px) {
     .asset-key-trend__head {
-      gap: 8px;
+      gap: 6px;
+      padding-right: 0;
+      padding-left: 2px;
     }
-    .asset-key-trend__latest {
-      min-width: 0;
+    .asset-key-trend__title {
+      font-size: 14px;
     }
     .asset-key-trend__latest span {
       display: none;
     }
     .asset-key-trend__range button {
-      min-width: 48px;
+      padding: 3px 6px;
+      font-size: 10px;
     }
   }
 </style>
