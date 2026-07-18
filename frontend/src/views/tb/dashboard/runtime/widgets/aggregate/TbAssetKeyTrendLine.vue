@@ -3,7 +3,8 @@
     <header class="asset-key-trend__head">
       <h3 class="asset-key-trend__title" :title="title">{{ title }}</h3>
       <div class="asset-key-trend__latest" :title="latestTooltip">
-        <span>最新值</span><strong>{{ latestText }}</strong>
+        <span>{{ statisticLabel }}</span
+        ><strong>{{ latestText }}</strong>
       </div>
       <div class="asset-key-trend__range" role="group" aria-label="趋势时间范围">
         <button
@@ -34,10 +35,11 @@
   import { EntityType } from '/@/enums/entityTypeEnum';
 
   type TrendRange = 'last24h' | 'last7d';
+  type StatisticMode = 'latest' | 'todayUsage';
   type TrendPoint = { ts: number; value: number };
   type TrendSource = { entityType: EntityType; entityId: string; entityName: string; key: string };
   type TrendCache = {
-    version: 1;
+    version: 2;
     points: TrendPoint[];
     latestValue: number | null;
     latestTs: number | null;
@@ -98,16 +100,28 @@
       key,
     };
   });
+  const statisticMode = computed<StatisticMode>(() => {
+    const configured = String(settings.value.statisticMode || '');
+    if (configured === 'todayUsage' || configured === 'latest') return configured;
+    return isCumulativeConsumptionKey(source.value?.key) ? 'todayUsage' : 'latest';
+  });
   const sourceSignature = computed(() => {
     const value = source.value;
-    return value ? `${value.entityType}:${value.entityId}:${value.key}` : '';
+    return value ? `${value.entityType}:${value.entityId}:${value.key}:${statisticMode.value}` : '';
   });
   const configuredRange = computed<TrendRange>(() => (settings.value.timeRange === 'last7d' ? 'last7d' : 'last24h'));
   const activeRange = ref<TrendRange>(configuredRange.value);
   const unit = computed(() => {
-    if (settings.value.unit !== undefined && settings.value.unit !== null) return String(settings.value.unit).trim();
+    const configuredUnit =
+      settings.value.unit !== undefined && settings.value.unit !== null ? String(settings.value.unit).trim() : '';
     const dataKey = (datasource.value.dataKeys || []).find((item: any) => String(item?.name) === source.value?.key);
-    return String(dataKey?.units || '').trim();
+    const fallbackUnit = String(dataKey?.units || '').trim();
+    const selectedUnit = configuredUnit || fallbackUnit;
+    if (isElectricityConsumptionKey(source.value?.key) && (!selectedUnit || selectedUnit.toLowerCase() === 'kw')) {
+      return 'kWh';
+    }
+    if (isWaterConsumptionKey(source.value?.key) && !selectedUnit) return 'm³';
+    return selectedUnit;
   });
   const decimals = computed(() => {
     const value = Number(settings.value.decimals ?? 2);
@@ -119,8 +133,18 @@
     if (configured && !['区域 key 对比', '区域 key 对比柱状图'].includes(configured)) return configured;
     return source.value ? `${source.value.entityName} ${source.value.key}趋势` : '资产 Key 趋势';
   });
+  const seriesWithLatest = computed(() => mergeLatestPoint(points.value, latestValue.value, latestTs.value));
+  const displayPoints = computed(() =>
+    statisticMode.value === 'todayUsage' ? buildUsageDeltaPoints(seriesWithLatest.value) : points.value,
+  );
+  const displayLatestValue = computed(() =>
+    statisticMode.value === 'todayUsage'
+      ? sumPositiveDeltasSince(seriesWithLatest.value, startOfDay())
+      : latestValue.value,
+  );
+  const statisticLabel = computed(() => (statisticMode.value === 'todayUsage' ? '今日用量' : '最新值'));
   const latestText = computed(() => {
-    const value = formatNumber(latestValue.value);
+    const value = formatNumber(displayLatestValue.value);
     return unit.value && value !== '--' ? `${value} ${unit.value}` : value;
   });
   const latestTooltip = computed(() =>
@@ -136,6 +160,50 @@
   function formatNumber(value: number | null) {
     if (value === null || !Number.isFinite(value)) return '--';
     return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: decimals.value }).format(value);
+  }
+  function isElectricityConsumptionKey(key?: string) {
+    return String(key || '')
+      .toLowerCase()
+      .includes('electricityconsumption');
+  }
+  function isWaterConsumptionKey(key?: string) {
+    return String(key || '')
+      .toLowerCase()
+      .includes('waterconsumption');
+  }
+  function isCumulativeConsumptionKey(key?: string) {
+    return isElectricityConsumptionKey(key) || isWaterConsumptionKey(key);
+  }
+  function startOfDay(timestamp = Date.now()) {
+    const date = new Date(timestamp);
+    date.setHours(0, 0, 0, 0);
+    return date.getTime();
+  }
+  function mergeLatestPoint(data: TrendPoint[], value: number | null, timestamp: number | null) {
+    if (value === null || timestamp === null) return data;
+    return normalizePoints([...data, { ts: timestamp, value }]);
+  }
+  function buildUsageDeltaPoints(data: TrendPoint[]) {
+    let previous: TrendPoint | undefined;
+    return data.flatMap((point): TrendPoint[] => {
+      const delta = previous ? Math.max(0, point.value - previous.value) : null;
+      previous = point;
+      return delta === null ? [] : [{ ts: point.ts, value: delta }];
+    });
+  }
+  function sumPositiveDeltasSince(data: TrendPoint[], startTs: number, endTs = Date.now()) {
+    let previous: TrendPoint | undefined;
+    let total = 0;
+    data.forEach((point) => {
+      if (point.ts < startTs) {
+        previous = point;
+        return;
+      }
+      if (point.ts > endTs) return;
+      if (previous) total += Math.max(0, point.value - previous.value);
+      previous = point;
+    });
+    return total;
   }
   function normalizePoints(value: unknown): TrendPoint[] {
     if (!Array.isArray(value)) return [];
@@ -155,7 +223,13 @@
   function storageSuffix() {
     const value = source.value;
     return value
-      ? [props.widgetId || 'shared', value.entityType, value.entityId, encodeURIComponent(value.key)].join('.')
+      ? [
+          props.widgetId || 'shared',
+          value.entityType,
+          value.entityId,
+          encodeURIComponent(value.key),
+          statisticMode.value,
+        ].join('.')
       : '';
   }
   function rangeStorageKey() {
@@ -164,7 +238,7 @@
   }
   function cacheStorageKey(range: TrendRange) {
     const suffix = storageSuffix();
-    return suffix ? `tb.asset-key-trend.data.v1.${suffix}.${range}` : '';
+    return suffix ? `tb.asset-key-trend.data.v2.${suffix}.${range}` : '';
   }
   function readStoredRange(): TrendRange | null {
     try {
@@ -187,9 +261,9 @@
     try {
       const key = cacheStorageKey(range);
       const parsed = key ? JSON.parse(localStorage.getItem(key) || 'null') : null;
-      if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.points)) return null;
+      if (!parsed || parsed.version !== 2 || !Array.isArray(parsed.points)) return null;
       return {
-        version: 1,
+        version: 2,
         points: normalizePoints(parsed.points),
         latestValue: numericValue(parsed.latestValue),
         latestTs: numericValue(parsed.latestTs),
@@ -203,7 +277,7 @@
       const key = cacheStorageKey(range);
       if (!key) return;
       const payload: TrendCache = {
-        version: 1,
+        version: 2,
         points: points.value,
         latestValue: latestValue.value,
         latestTs: latestTs.value,
@@ -260,7 +334,7 @@
           endTs,
           interval: rangeConfig.intervalMs,
           limit,
-          agg: 'AVG',
+          agg: statisticMode.value === 'todayUsage' ? 'MAX' : 'AVG',
           orderBy: 'ASC',
           useStrictDataTypes: true,
         }),
@@ -303,7 +377,7 @@
   function renderChart() {
     if (!chartEl.value) return;
     if (!chart) chart = echarts.init(chartEl.value);
-    const signature = `${activeRange.value}:${unit.value}:${points.value
+    const signature = `${activeRange.value}:${statisticMode.value}:${unit.value}:${displayPoints.value
       .map((point) => `${point.ts}:${point.value}`)
       .join('|')}`;
     if (signature === lastRenderedSignature) return;
@@ -375,7 +449,7 @@
               itemStyle: { color: '#7dd3fc' },
             },
             areaStyle: { color: 'rgba(56, 189, 248, 0.08)' },
-            data: points.value.map((point) => [point.ts, point.value]),
+            data: displayPoints.value.map((point) => [point.ts, point.value]),
           },
         ],
       },

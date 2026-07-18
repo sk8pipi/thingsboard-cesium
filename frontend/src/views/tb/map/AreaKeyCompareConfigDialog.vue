@@ -30,7 +30,7 @@
             :key="key"
             type="button"
             :class="{ active: telemetryKey === key }"
-            @click="telemetryKey = key"
+            @click="selectTelemetryKey(key)"
             >{{ key }}</button
           >
         </div>
@@ -38,6 +38,13 @@
       </section>
 
       <div class="akt-row">
+        <label class="akt-field">
+          <span>统计方式</span>
+          <select v-model="statisticMode">
+            <option value="todayUsage">今日用量（累计差值）</option>
+            <option value="latest">当前累计值</option>
+          </select>
+        </label>
         <label class="akt-field">
           <span>单位</span>
           <select v-model="unitOption">
@@ -73,6 +80,7 @@
   import { useUserStoreWithOut } from '/@/store/modules/user';
 
   type TrendRange = 'last24h' | 'last7d';
+  type StatisticMode = 'latest' | 'todayUsage';
   type AssetOption = { id: string; name: string };
   const CUSTOM_UNIT = '__custom__';
   const props = withDefaults(defineProps<{ visible: boolean; defaultTitle?: string }>(), { defaultTitle: '' });
@@ -85,6 +93,7 @@
         asset: AssetOption;
         key: string;
         unit: string;
+        statisticMode: StatisticMode;
         timeRange: TrendRange;
       },
     ): void;
@@ -97,6 +106,7 @@
   const title = ref('');
   const unitOption = ref('');
   const customUnit = ref('');
+  const statisticMode = ref<StatisticMode>('latest');
   const timeRange = ref<TrendRange>('last24h');
   const assetsLoading = ref(false);
   const keysLoading = ref(false);
@@ -112,11 +122,13 @@
     { value: 'A', label: 'A' },
     { value: 'W', label: 'W' },
     { value: 'kW', label: 'kW' },
+    { value: 'kWh', label: 'kWh' },
     { value: 'Hz', label: 'Hz' },
     { value: 'rpm', label: 'rpm' },
     { value: 'm', label: 'm' },
     { value: 'm/s', label: 'm/s' },
     { value: 'L/min', label: 'L/min' },
+    { value: 'm³', label: 'm³' },
     { value: 'm³/h', label: 'm³/h' },
     { value: CUSTOM_UNIT, label: '自定义单位' },
   ];
@@ -173,6 +185,24 @@
     }
   }
 
+  function selectTelemetryKey(key: string) {
+    telemetryKey.value = key;
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey.includes('electricityconsumption')) {
+      statisticMode.value = 'todayUsage';
+      unitOption.value = 'kWh';
+      customUnit.value = '';
+    } else if (normalizedKey.includes('waterconsumption')) {
+      statisticMode.value = 'todayUsage';
+      unitOption.value = 'm³';
+      customUnit.value = '';
+    } else {
+      statisticMode.value = 'latest';
+      unitOption.value = '';
+      customUnit.value = '';
+    }
+  }
+
   function confirm() {
     if (!canConfirm.value || !selectedAsset.value) return;
     emit('ok', {
@@ -180,6 +210,7 @@
       asset: selectedAsset.value,
       key: telemetryKey.value,
       unit: selectedUnit.value,
+      statisticMode: statisticMode.value,
       timeRange: timeRange.value,
     });
   }
@@ -194,6 +225,7 @@
       telemetryKey.value = '';
       unitOption.value = '';
       customUnit.value = '';
+      statisticMode.value = 'latest';
       timeRange.value = 'last24h';
       error.value = '';
       void loadAssets();

@@ -1820,6 +1820,7 @@
     asset: { id: string; name: string };
     key: string;
     unit: string;
+    statisticMode: 'latest' | 'todayUsage';
     timeRange: 'last24h' | 'last7d';
   }) {
     const key = pendingWidgetKey.value;
@@ -1845,6 +1846,7 @@
       sourceAssetName: payload.asset.name,
       sourceTelemetryKey: payload.key,
       unit: payload.unit,
+      statisticMode: payload.statisticMode,
       timeRange: payload.timeRange,
     };
     config.datasource = datasource;

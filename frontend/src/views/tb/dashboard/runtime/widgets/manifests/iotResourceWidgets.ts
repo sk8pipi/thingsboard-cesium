@@ -127,6 +127,7 @@ export const widgets: WidgetDefinition[] = [
         sourceAssetName: '',
         sourceTelemetryKey: '',
         unit: '',
+        statisticMode: 'latest',
         timeRange: 'last24h',
         pollMs: 60000,
         decimals: 2,
