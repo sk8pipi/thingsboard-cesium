@@ -1,0 +1,5 @@
+services:
+  polaris-nginx:
+    build:
+      context: ..
+      dockerfile: deploy/wvp.web.Dockerfile

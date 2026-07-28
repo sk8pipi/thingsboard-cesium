@@ -1,0 +1,4 @@
+services:
+  polaris-nginx:
+    networks:
+      - video-net

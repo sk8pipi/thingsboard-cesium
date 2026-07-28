@@ -1,0 +1,32 @@
+services:
+  mysql:
+    profiles:
+      - disabled-mysql
+
+  polaris-wvp:
+    build:
+      context: ..
+      dockerfile: deploy/wvp.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      polaris-media:
+        condition: service_started
+    env_file:
+      - ../data/wvp.env
+    environment:
+      MEDIA_STREAM_IP: ${WVP_STREAM_IP:-127.0.0.1}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "127.0.0.1:18978:18978/tcp"
+      - "8160:8160/tcp"
+      - "8160:8160/udp"
+    volumes:
+      - ../config/wvp:/opt/wvp/config:ro
+      - ../logs/wvp:/opt/wvp/logs
+    networks:
+      - video-net
+      - video-iot
+

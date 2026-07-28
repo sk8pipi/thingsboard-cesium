@@ -1,0 +1,5 @@
+services:
+  polaris-wvp:
+    build:
+      context: ..
+      dockerfile: deploy/wvp.skipgit.Dockerfile

@@ -1,0 +1,9 @@
+.env
+deploy/.env
+source/
+data/
+logs/
+recordings/
+certs/
+*.log
+

@@ -1,0 +1,16 @@
+services:
+  polaris-nginx:
+    build:
+      context: ../source/wvp-GB28181-pro
+      dockerfile: docker/nginx/Dockerfile
+    depends_on:
+      polaris-wvp:
+        condition: service_started
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - ../source/wvp-GB28181-pro/docker/nginx/templates:/etc/nginx/templates:ro
+      - ../logs/nginx:/var/log/nginx
+    environment:
+      Stream_IP: "${WVP_PUBLIC_IP:-10.242.216.241}"

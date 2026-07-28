@@ -18,6 +18,15 @@ export default defineConfig(async ({ command, mode }: ConfigEnv) => {
   const env = loadEnv(mode, root);
   const viteEnv = wrapperEnv(env);
   const cameraStreamProxyTarget = env.VITE_CAMERA_STREAM_PROXY_TARGET || 'http://127.0.0.1:8888';
+  const wvpStreamProxyTarget = env.VITE_WVP_STREAM_PROXY_TARGET || 'http://127.0.0.1';
+  const rewriteWvpStreamPath = (path: string) => {
+    const [pathname, query = ''] = path.split('?', 2);
+    const searchParams = new URLSearchParams(query);
+    searchParams.delete('cookieCheck');
+    const rewrittenPath = pathname.replace(/^\/video-stream/, '');
+    const rewrittenQuery = searchParams.toString();
+    return rewrittenQuery ? `${rewrittenPath}?${rewrittenQuery}` : rewrittenPath;
+  };
   const pathResolve = (pathname: string) => resolve(root, '.', pathname);
   const config: UserConfig = {
     root,
@@ -37,6 +46,15 @@ export default defineConfig(async ({ command, mode }: ConfigEnv) => {
           target: 'ws://localhost:8080',
           ws: true,
           changeOrigin: true,
+        },
+
+        // WVP/ZLMediaKit HLS output. Keep this separate from the legacy
+        // MediaMTX /live proxy so the existing fallback remains available.
+        '/video-stream': {
+          target: wvpStreamProxyTarget,
+          changeOrigin: true,
+          secure: false,
+          rewrite: rewriteWvpStreamPath,
         },
 
         // Proxy the MediaMTX built-in preview page through HTTPS so the map popup

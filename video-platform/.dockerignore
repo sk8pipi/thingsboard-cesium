@@ -1,0 +1,10 @@
+.env
+deploy/.env
+data/
+logs/
+recordings/
+certs/
+source/wvp-GB28181-pro/.git/
+source/wvp-GB28181-pro/web/node_modules/
+source/wvp-GB28181-pro/target/
+

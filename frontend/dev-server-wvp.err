@@ -1,0 +1,10 @@
+
+ ERROR  [2m21:53:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /live/virtual-oilwell-cam-001/hls.m3u8[39m
+Error: connect ECONNREFUSED 127.0.0.1:80
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+
+
+ ERROR  [2m21:53:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /live/virtual-oilwell-cam-001/hls.m3u8[39m
+Error: connect ECONNREFUSED 127.0.0.1:80
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+

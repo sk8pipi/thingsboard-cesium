@@ -1,7 +1,7 @@
 import { buildCameraPoint, type CameraPoint } from './cameraTypes';
 
-const streamBaseUrl = (import.meta.env.VITE_CAMERA_STREAM_BASE_URL || '/live').replace(/\/+$/, '');
-const streamViewBaseUrl = (import.meta.env.VITE_CAMERA_STREAM_VIEW_BASE_URL || '/live-view').replace(/\/+$/, '');
+const streamBaseUrl = (import.meta.env.VITE_CAMERA_STREAM_BASE_URL || '/video-stream/live').replace(/\/+$/, '');
+
 const virtualOilwellCameraCode = 'virtual-oilwell-cam-001';
 
 export const mockVirtualCameras: CameraPoint[] = [
@@ -17,11 +17,11 @@ export const mockVirtualCameras: CameraPoint[] = [
     latitude: 37.50036,
     height: 20,
     rtspUrl: `rtsp://localhost:8554/${virtualOilwellCameraCode}`,
-    hlsUrl: `${streamBaseUrl}/${virtualOilwellCameraCode}/index.m3u8`,
-    monitorPageUrl: `${streamViewBaseUrl}/${virtualOilwellCameraCode}/?autoplay=1&muted=1&controls=1`,
-    webRtcUrl: `http://localhost:8889/${virtualOilwellCameraCode}`,
-    streamUrl: `${streamBaseUrl}/${virtualOilwellCameraCode}/index.m3u8`,
-    streamUrlMain: `${streamBaseUrl}/${virtualOilwellCameraCode}/index.m3u8`,
+    hlsUrl: `${streamBaseUrl}/${virtualOilwellCameraCode}/hls.m3u8`,
+    monitorPageUrl: '',
+    webRtcUrl: '',
+    streamUrl: `${streamBaseUrl}/${virtualOilwellCameraCode}/hls.m3u8`,
+    streamUrlMain: `${streamBaseUrl}/${virtualOilwellCameraCode}/hls.m3u8`,
     protocol: 'hls',
     streamType: 'hls',
     online: true,
@@ -43,11 +43,10 @@ export const mockVirtualCameras: CameraPoint[] = [
     previewOnly: true,
     dataSource: 'mock',
     locationText: 'Cesium 测试井场 / 虚拟监控点位',
-    description:
-      'TODO: 后续替换为 ThingsBoard Device attributes / latest telemetry 数据源；媒体流继续由前端直连 MediaMTX HLS 地址。',
+    description: 'TODO: Replace with ThingsBoard attributes and telemetry; media playback uses WVP/ZLMediaKit HLS.',
     metadata: {
       streamProfile: 'main',
-      mediaSource: 'mediamtx-local',
+      mediaSource: 'wvp-zlmediakit',
     },
   }),
 ];

@@ -191,7 +191,7 @@
   let hls: Hls | null = null;
 
   const playUrl = computed(() => normalizeHlsUrl(props.runtimeInfo?.hlsUrl || props.runtimeInfo?.streamUrl || ''));
-  const monitorPageUrl = computed(() => resolveMonitorPageUrl());
+  const monitorPageUrl = computed(() => '');
   const preferMonitorPage = computed(() => Boolean(monitorPageUrl.value));
   const loadingState = computed(() => Boolean(props.loading) || playerLoading.value);
   const displayMessage = computed(() => props.error || playerError.value);
@@ -309,35 +309,6 @@
     } catch {
       return value;
     }
-  }
-
-  function getStreamNameFromUrl(rawUrl?: string) {
-    const value = String(rawUrl || '').trim();
-    if (!value) return '';
-
-    try {
-      const parsed = new URL(value, window.location.origin);
-      const parts = parsed.pathname
-        .replace(/^\/live\/?/, '/')
-        .split('/')
-        .filter(Boolean);
-
-      if (!parts.length) return '';
-      return parts[0] || '';
-    } catch {
-      return '';
-    }
-  }
-
-  function resolveMonitorPageUrl() {
-    const streamName =
-      getStreamNameFromUrl(props.runtimeInfo?.webRtcUrl) ||
-      getStreamNameFromUrl(props.runtimeInfo?.hlsUrl) ||
-      getStreamNameFromUrl(props.runtimeInfo?.streamUrl) ||
-      getStreamNameFromUrl(props.runtimeInfo?.rtspUrl);
-
-    if (!streamName) return '';
-    return `http://localhost:8888/${streamName}/`;
   }
 
   function resolveTransportRpcMethod(actionMethod: string) {

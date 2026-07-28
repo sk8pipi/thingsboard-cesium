@@ -41,9 +41,7 @@
           @error="handleVideoError"
         ></video>
 
-        <div v-if="loading" class="camera-video-panel__overlay">
-          正在加载实时视频...
-        </div>
+        <div v-if="loading" class="camera-video-panel__overlay"> 正在加载实时视频... </div>
 
         <div v-else-if="errorMessage" class="camera-video-panel__overlay camera-video-panel__overlay--error">
           {{ errorMessage }}
@@ -101,7 +99,12 @@
       <div v-if="camera?.supportsPtz" class="camera-video-panel__section">
         <div class="camera-video-panel__section-title">云台控制</div>
         <div class="camera-video-panel__ptz-grid">
-          <button class="camera-video-panel__ptz-btn" type="button" :disabled="!ptzEnabled" @click="sendPtzCommand('up')">
+          <button
+            class="camera-video-panel__ptz-btn"
+            type="button"
+            :disabled="!ptzEnabled"
+            @click="sendPtzCommand('up')"
+          >
             上
           </button>
           <button
@@ -422,12 +425,11 @@
       const cameraCode = camera.cameraCode || camera.id;
       const cameraPathPrefix = `/${cameraCode}/`;
       const cameraProxyBasePath = `/live/${cameraCode}/`;
-      const cameraProxyBaseUrl = `${window.location.origin}${cameraProxyBasePath}`;
+      const cameraProxyBaseUrl = new URL('./', new URL(targetUrl, window.location.origin)).toString();
       const sessionByResource = new Map<string, string>();
       let primaryPlaylistUrl = '';
 
-      const normalizeResourcePath = (pathname: string) =>
-        pathname.replace(/^\/live/, '').replace(/\/+/, '/');
+      const normalizeResourcePath = (pathname: string) => pathname.replace(/^\/live/, '').replace(/\/+/, '/');
 
       const buildResourceKeys = (pathname: string) => {
         const normalizedPath = normalizeResourcePath(pathname);
@@ -460,13 +462,15 @@
         normalized.searchParams.delete('cookieCheck');
 
         if (normalized.origin === window.location.origin) {
-          if (normalized.pathname.startsWith(cameraPathPrefix)) {
-            normalized.pathname = `/live${normalized.pathname}`;
-          } else if (
-            !normalized.pathname.startsWith(cameraProxyBasePath) &&
-            !normalized.pathname.startsWith('/live/')
-          ) {
-            normalized.pathname = `${cameraProxyBasePath}${normalized.pathname.replace(/^\/+/, '')}`;
+          if (!normalized.pathname.startsWith('/video-stream/')) {
+            if (normalized.pathname.startsWith(cameraPathPrefix)) {
+              normalized.pathname = `/live${normalized.pathname}`;
+            } else if (
+              !normalized.pathname.startsWith(cameraProxyBasePath) &&
+              !normalized.pathname.startsWith('/live/')
+            ) {
+              normalized.pathname = `${cameraProxyBasePath}${normalized.pathname.replace(/^\/+/, '')}`;
+            }
           }
 
           if (!normalized.searchParams.has('session')) {
@@ -652,8 +656,7 @@
     width: min(440px, calc(100vw - 24px));
     border-radius: 14px;
     overflow: hidden;
-    background:
-      linear-gradient(180deg, rgba(15, 23, 42, 0.97) 0%, rgba(8, 15, 28, 0.95) 100%);
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.97) 0%, rgba(8, 15, 28, 0.95) 100%);
     color: #fff;
     border: 1px solid rgba(148, 163, 184, 0.28);
     box-shadow: 0 18px 40px rgba(15, 23, 42, 0.35);

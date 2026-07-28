@@ -1,0 +1,127 @@
+name: ${COMPOSE_PROJECT_NAME:-tb-video-validation}
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --default-time-zone=+08:00
+      - --lower-case-table-names=1
+    volumes:
+      - ../data/mysql:/var/lib/mysql
+      - ../source/wvp-GB28181-pro/数据库/2.7.4/初始化-mysql-2.7.4.sql:/docker-entrypoint-initdb.d/001-wvp.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - video-net
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TZ: Asia/Shanghai
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+    volumes:
+      - ../data/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - video-net
+
+  polaris-media:
+    image: zlmediakit/zlmediakit:master
+    restart: unless-stopped
+    ports:
+      - "${ZLM_PUBLIC_HTTP_PORT:-80}:80/tcp"
+      - "127.0.0.1:${ZLM_HTTP_PORT:-18081}:80/tcp"
+      - "${ZLM_RTMP_PORT:-10001}:10001/tcp"
+      - "${ZLM_RTSP_PORT:-10002}:10002/tcp"
+      - "${ZLM_RTSP_PORT:-10002}:10002/udp"
+      - "${ZLM_RTP_PORT:-10003}:10003/tcp"
+      - "${ZLM_RTP_PORT:-10003}:10003/udp"
+      - "${ZLM_RTC_PORT:-8000}:8000/udp"
+      - "30000-30020:30000-30020/tcp"
+      - "30000-30020:30000-30020/udp"
+    volumes:
+      - ../config/zlm/config.ini:/conf/config.ini:ro
+      - ../recordings:/opt/media/bin/www/record
+      - ../logs/zlm:/opt/media/log
+    command: ["MediaServer", "-c", "/conf/config.ini", "-l", "0"]
+    networks:
+      - video-net
+      - video-iot
+
+  virtual-camera-stream-registrar:
+    image: curlimages/curl:8.12.1
+    restart: unless-stopped
+    init: true
+    depends_on:
+      polaris-media:
+        condition: service_started
+    volumes:
+      - ../config/zlm/config.ini:/conf/zlm-config.ini:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        secret=$$(sed -n 's/^secret=//p' /conf/zlm-config.ini | head -n 1 | tr -d '\r\n')
+        if [ -z "$$secret" ]; then
+          echo "ZLMediaKit secret is missing"
+          exit 1
+        fi
+        while true; do
+          if curl -fsS --max-time 3 --get \
+            http://polaris-media/index/api/getMediaList \
+            --data-urlencode "secret=$$secret" \
+            --data-urlencode "app=live" \
+            --data-urlencode "stream=virtual-oilwell-cam-001" \
+            | grep -q 'virtual-oilwell-cam-001'; then
+            sleep 5
+            continue
+          fi
+          echo "Registering virtual camera RTSP stream in ZLMediaKit"
+          curl -fsS --max-time 10 --get \
+            http://polaris-media/index/api/addStreamProxy \
+            --data-urlencode "secret=$$secret" \
+            --data-urlencode "vhost=__defaultVhost__" \
+            --data-urlencode "app=live" \
+            --data-urlencode "stream=virtual-oilwell-cam-001" \
+            --data-urlencode "url=rtsp://mediamtx:8554/virtual-oilwell-cam-001" \
+            --data-urlencode "enable_hls=1" \
+            --data-urlencode "enable_mp4=0" \
+            --data-urlencode "rtp_type=0" \
+            --data-urlencode "timeout_sec=10" \
+            --data-urlencode "retry_count=-1" || true
+          echo
+          sleep 5
+        done
+    networks:
+      - video-net
+      - video-iot
+networks:
+  video-net:
+    name: tb-video-validation-net
+    driver: bridge
+  video-iot:
+    name: video-iot-net
+    external: true
+

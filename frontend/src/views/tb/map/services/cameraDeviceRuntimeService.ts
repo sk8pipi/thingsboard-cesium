@@ -171,10 +171,6 @@ function resolvePreferredHlsUrl(raw: {
   const explicitStreamUrl = raw.streamUrl;
   const explicitPreferredUrl = explicitHlsUrl || explicitMainStreamUrl || explicitStreamUrl;
 
-  if (explicitPreferredUrl?.includes('/live/') && directFallbackUrl && explicitPreferredUrl !== directFallbackUrl) {
-    return directFallbackUrl;
-  }
-
   return explicitPreferredUrl || directFallbackUrl;
 }
 

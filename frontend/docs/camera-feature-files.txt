@@ -360,3 +360,42 @@ Gateway 配置预留说明
 - 当前项目开发态 `/live` 代理默认应指向 `http://127.0.0.1:8888`，与本地 MediaMTX HLS 端口保持一致；如果后续换端口，再通过 `VITE_CAMERA_STREAM_PROXY_TARGET` 覆盖。
 - `/live` 代理必须同时做路径改写：`/live/virtual-oilwell-cam-001/index.m3u8 -> /virtual-oilwell-cam-001/index.m3u8`，否则 MediaMTX 会返回 `404 Not Found`。
 - 本地浏览器调试时，部分 HLS 请求可能直接落到 `/{cameraCode}/...`，例如 `/virtual-oilwell-cam-001/index.m3u8`；Vite 需要额外代理 `^/virtual-.*` 到 MediaMTX，避免播放器内部路径漂移导致 `404`。
+2026-07-27 WVP + ZLMediaKit HLS integration
+
+- The validated media chain is now: RTSP simulator -> WVP stream proxy -> ZLMediaKit -> HLS -> Vue hls.js.
+- `video-platform/config/zlm/config.ini` is the project-owned ZLMediaKit configuration and enables HLS output.
+- `frontend/vite.config.ts` adds `/video-stream`, targeting `VITE_WVP_STREAM_PROXY_TARGET` (default `http://127.0.0.1`).
+- The legacy MediaMTX `/live` and `/live-view` proxies remain available as compatibility fallbacks.
+- `mockVirtualCameras.ts` now uses `/video-stream/live/virtual-oilwell-cam-001/hls.m3u8` and no longer prefers the MediaMTX preview iframe.
+- Cesium point rendering, `CameraVideoPanel.vue`, `CameraMonitorPopup.vue`, and the runtime merge logic are reused without changing their core behavior.
+- Verified through the Vite HTTPS proxy: HLS manifest HTTP 200 and MPEG-TS segment HTTP 200.
+- Next step: replace the mock source inside `cameraDeviceService.ts` with the project-owned Video API while keeping the current mock as a fallback.
+2026-07-27 project-owned Video API first slice
+
+- Added `backend/application/.../controller/VideoController.java` with JWT-protected list and play endpoints.
+- Added the `VideoProvider` abstraction and `WvpVideoProvider`; future vendor integrations should add providers behind this boundary.
+- WVP credentials are read only from `VIDEO_WVP_*` backend environment variables and are never returned to the browser.
+- Added `frontend/src/api/tb/video.ts` for authenticated Video API calls.
+- `cameraDeviceService.ts` now prefers `/api/video/cameras` and falls back to `mockVirtualCameras` when the backend integration is disabled or unavailable.
+- The backend application module compiles successfully; the changed frontend modules pass ESLint and Vite transform checks.
+2026-07-28 simulated camera stream-status correction
+
+- Both `E:\simulationEquipment\virtual-devices\camera\send-camera-status.ps1` and `E:\simulationEquipment\virtual-camera\send-camera-status.ps1` now publish the same-origin HLS URL `/video-stream/live/virtual-oilwell-cam-001/hls.m3u8`.
+- The status publishers probe ZLMediaKit directly at `http://127.0.0.1/live/virtual-oilwell-cam-001/hls.m3u8` and validate the `#EXTM3U` manifest before reporting a healthy stream.
+- Device availability and stream availability are intentionally separate: `online=true` means the simulated device publisher is active; `streamOnline`, `recording`, and `videoLoss` reflect the real HLS probe result.
+- The Vite `/video-stream` proxy removes the browser-only `cookieCheck` query parameter before forwarding requests to WVP/ZLMediaKit.
+
+2026-07-28 containerized virtual camera runtime
+
+- `camera-simulator-local` replaces the host FFmpeg window and publishes H264/AAC to `rtsp://mediamtx:8554/virtual-oilwell-cam-001`.
+- `camera-status-publisher-local` replaces the host camera-status PowerShell window, probes ZLMediaKit HLS, and publishes directly to `mosquitto:1883`.
+- `virtual-camera-stream-registrar` automatically registers the MediaMTX RTSP source through the ZLMediaKit API and restores it after media-server restarts.
+- The `camera`, `simulation-equipment-flow`, and `tb-video-validation` Compose projects share the external `video-iot-net` network.
+- `E:\simulationEquipment\start-all.ps1` now starts the complete container-only validation stack and does not open FFmpeg/status PowerShell windows.
+- Runtime validation succeeded: MediaMTX received H264/AAC, ZLMediaKit returned an HLS manifest with HTTP 200 and `#EXTM3U`, and MQTT reported `online=true`, `streamOnline=true`, `recording=true`, `videoLoss=false`.
+2026-07-28 WVP playback path precedence fix
+
+- `cameraDeviceRuntimeService.ts` now always prefers explicit `hlsUrl`, `streamUrlMain`, or `streamUrl`; RTSP/WebRTC-derived MediaMTX URLs are fallback-only.
+- `CameraMonitorPopup.vue` no longer guesses a MediaMTX preview page from the first URL path segment. This prevents `/video-stream/...` from becoming `http://localhost:8888/video-stream/index.m3u8?cookieCheck=1`.
+- `CameraVideoPanel.vue` treats `/video-stream/` as an already-proxied WVP/ZLMediaKit path and resolves relative HLS segments from the selected playlist directory.
+- Verified against the running Vite server: `/video-stream/live/virtual-oilwell-cam-001/hls.m3u8?cookieCheck=1` returned HTTP 200 with `#EXTM3U`, and its MPEG-TS segment returned HTTP 200.

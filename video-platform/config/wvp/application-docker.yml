@@ -1,0 +1,57 @@
+spring:
+  cache:
+    type: redis
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      database: 6
+      password: ${REDIS_PASSWORD}
+      timeout: 10000
+  datasource:
+    type: com.zaxxer.hikari.HikariDataSource
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://${POSTGRES_HOST:host.docker.internal}:${POSTGRES_PORT:5432}/${POSTGRES_DATABASE:wvp}
+    username: ${POSTGRES_USER:wvp_user}
+    password: ${POSTGRES_PASSWORD}
+
+server:
+  port: 18978
+
+sip:
+  ip: 0.0.0.0
+  show-ip: ${WVP_PUBLIC_IP}
+  port: ${WVP_SIP_PORT:8160}
+  domain: ${WVP_SIP_DOMAIN:3502000000}
+  id: ${WVP_SIP_ID:35020000002000000001}
+  password: ${WVP_SIP_PASSWORD}
+
+ftp:
+  enable: false
+
+jt1078:
+  enable: false
+
+media:
+  id: polaris
+  ip: polaris-media
+  stream-ip: ${WVP_PUBLIC_IP}
+  sdp-ip: ${WVP_PUBLIC_IP}
+  hook-ip: polaris-wvp
+  http-port: 80
+  auto-config: true
+  secret: su6TiedN2rVAmBbIDX0aa0QTiBJLBdcf
+  record-path: ./www/record
+  record-day: 7
+  rtp:
+    enable: true
+    port-range: 30000,30020
+    send-port-range: 30021,30040
+  record-assist-port: 0
+
+user-settings:
+  record-push-live: false
+  record-sip: false
+  stream-on-demand: true
+  auto-apply-play: true
+
