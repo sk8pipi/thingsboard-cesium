@@ -12,18 +12,23 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */package org.thingsboard.server.service.video;
+ */
+package org.thingsboard.server.service.video;
 
-public record VideoCameraInfo(
-        String tbDeviceId,
-        String cameraCode,
-        String name,
-        String provider,
-        String sourceType,
-        String app,
-        String stream,
-        boolean enabled,
-        boolean online,
-        String hlsUrl,
-        String flvUrl) {
+import com.fasterxml.jackson.annotation.JsonValue;
+
+import java.util.Locale;
+
+public enum VideoStreamStatus {
+    OFFLINE,
+    STARTING,
+    READY,
+    DEGRADED,
+    STOPPING,
+    FAILED;
+
+    @JsonValue
+    public String value() {
+        return name().toLowerCase(Locale.ROOT);
+    }
 }

@@ -550,6 +550,7 @@
     type SensorPopupBinding,
   } from './sensorPopupWidgetStorage';
   import { loadCameraRuntimeInfo } from './services/cameraDeviceRuntimeService';
+  import { releaseCameraVideoSession } from './services/cameraVideoSessionService';
   import {
     applyDeviceInfoMapPointLocations,
     loadDeviceMapPointLocation,
@@ -2535,7 +2536,10 @@
 
     try {
       const runtime = await loadCameraRuntimeInfo(camera.entityId, camera.entityName || camera.name);
-      if (requestId !== cameraRuntimeRequestId) return;
+      if (requestId !== cameraRuntimeRequestId) {
+        void releaseCameraVideoSession(runtime);
+        return;
+      }
 
       selectedCameraRuntime.value = {
         ...runtime,
@@ -2654,6 +2658,7 @@
   });
 
   onBeforeUnmount(() => {
+    cameraRuntimeRequestId += 1;
     clearDragHint();
     pointEditor.destroy();
     gridEl.value?.removeEventListener('click', onGridClick, true);

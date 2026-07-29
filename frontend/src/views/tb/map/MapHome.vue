@@ -76,6 +76,7 @@
   import { resolveSensorDeviceType } from './services/sensorPointStyleService';
   import { getMapPointStorageKey, loadMapPoints } from './mapPointStorage';
   import { loadCameraRuntimeInfo } from './services/cameraDeviceRuntimeService';
+  import { releaseCameraVideoSession } from './services/cameraVideoSessionService';
   import {
     getAssignedMapTemplateRuntime,
     type MapTemplateRuntimeDevices,
@@ -624,7 +625,10 @@
 
     try {
       const runtime = await loadCameraRuntimeInfo(camera.entityId, camera.entityName || camera.name);
-      if (requestId !== cameraRuntimeRequestId) return;
+      if (requestId !== cameraRuntimeRequestId) {
+        void releaseCameraVideoSession(runtime);
+        return;
+      }
 
       selectedCameraRuntime.value = {
         ...runtime,
@@ -742,6 +746,7 @@
   });
 
   onBeforeUnmount(() => {
+    cameraRuntimeRequestId += 1;
     window.removeEventListener('storage', onStorage);
     document.removeEventListener('fullscreenchange', syncMapFullscreenState);
     if (devicePointRefreshTimer) {

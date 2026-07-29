@@ -18,8 +18,18 @@ import java.util.List;
 
 public interface VideoProvider {
 
+    String providerType();
+
     List<VideoCameraInfo> listCameras();
 
-    VideoPlaybackInfo startPlayback(String cameraCode);
+    VideoCameraInfo describe(VideoCameraBinding binding);
+
+    VideoPlaybackInfo startPlayback(VideoCameraBinding binding, VideoPlayRequest request);
+
+    VideoProviderStatus getStatus(VideoCameraBinding binding);
+
+    void stopPlayback(VideoCameraBinding binding);
+
+    VideoSnapshot getSnapshot(VideoCameraBinding binding);
 
 }

@@ -51,6 +51,12 @@ CREATE INDEX IF NOT EXISTS idx_device_type ON device(tenant_id, type);
 
 CREATE INDEX IF NOT EXISTS idx_device_device_profile_id ON device(tenant_id, device_profile_id);
 
+CREATE INDEX IF NOT EXISTS idx_video_camera_binding_tenant_id ON video_camera_binding(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_video_camera_binding_provider_stream ON video_camera_binding(provider, stream_app, stream_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_camera_binding_provider_channel_unq
+    ON video_camera_binding(tenant_id, provider, provider_device_id, provider_channel_id)
+    WHERE enabled = true AND provider_device_id IS NOT NULL AND provider_channel_id IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_asset_customer_id ON asset(tenant_id, customer_id);
 
 CREATE INDEX IF NOT EXISTS idx_asset_customer_id_and_type ON asset(tenant_id, customer_id, type);

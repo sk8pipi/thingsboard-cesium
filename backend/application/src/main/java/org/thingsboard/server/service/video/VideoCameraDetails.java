@@ -12,18 +12,19 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */package org.thingsboard.server.service.video;
+ */
+package org.thingsboard.server.service.video;
 
-public record VideoCameraInfo(
+public record VideoCameraDetails(
         String tbDeviceId,
         String cameraCode,
-        String name,
         String provider,
-        String sourceType,
+        String providerDeviceId,
+        String providerChannelId,
+        String mediaServerId,
         String app,
         String stream,
+        String preferredProtocol,
         boolean enabled,
-        boolean online,
-        String hlsUrl,
-        String flvUrl) {
+        VideoCameraStatus status) {
 }

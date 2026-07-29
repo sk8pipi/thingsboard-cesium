@@ -560,6 +560,33 @@ flowchart LR
 
 目标策略：
 
+
+### 11.1 UUID 绑定实现记录
+
+#### 2026-07-28
+
+- Added the PostgreSQL `video_camera_binding` table to the clean-install schema,
+  upgrade SQL, and an idempotent application-start initializer for existing local
+  databases.
+- Added tenant-scoped binding lookup, upsert, delete, and provider selection in
+  the ThingsBoard application module.
+- The canonical live-play route is now
+  `POST /api/video/cameras/{tbDeviceId}/play`.
+- `POST /api/video/devices/{tbDeviceId}/play` remains a temporary route alias.
+- A non-UUID value in the canonical route is accepted only as a migration fallback:
+  it must resolve through a tenant-owned `cameraCode` binding and still pass the
+  ThingsBoard device READ permission check.
+- Binding management routes are under
+  `/api/video/devices/{tbDeviceId}/binding`; writes require `TENANT_ADMIN`.
+- The playback response now exposes canonical `protocol` and `url` fields while
+  retaining `hlsUrl`, `flvUrl`, and `webRtcUrl` for compatibility.
+- Cesium camera runtime loading calls the Video API with the point's ThingsBoard
+  Device UUID. Legacy ThingsBoard URL attributes are fallback-only during migration.
+- Removed frontend RTSP/WebRTC-to-HLS derivation, localhost port rewriting, `/live`
+  guessing, MediaMTX session propagation, and HLS playlist text rewriting.
+- The local `sim-camera-001` ThingsBoard device UUID is bound to
+  `live/virtual-oilwell-cam-001`; its browser URL remains
+  `/video-stream/live/virtual-oilwell-cam-001/hls.m3u8`.
 - 第一个观看者请求播放时启动或复用视频流。
 - 有观看者时保持视频流。
 - 最后一个观看者离开后延迟停止。
@@ -815,3 +842,93 @@ http://127.0.0.1/live/virtual-oilwell-cam-001/hls.m3u8
 - Cesium 点位绑定 `tbDeviceId`，点击时调用 Video API 播放。
 - 当前模拟摄像头、状态发布器和流注册器完成容器化。
 
+
+## 21. Video API 第二阶段实施记录
+
+### 2026-07-29
+
+当前已经完成以 ThingsBoard Device UUID 为主键的视频核心 API：
+
+```text
+GET    /api/video/cameras
+GET    /api/video/cameras/{tbDeviceId}
+GET    /api/video/cameras/{tbDeviceId}/status
+POST   /api/video/cameras/{tbDeviceId}/play
+POST   /api/video/cameras/{tbDeviceId}/stop
+GET    /api/video/cameras/{tbDeviceId}/snapshot
+GET    /api/video/devices/{tbDeviceId}/binding
+PUT    /api/video/devices/{tbDeviceId}/binding
+DELETE /api/video/devices/{tbDeviceId}/binding
+```
+
+实现约束：
+
+- 所有单摄像头接口均校验 ThingsBoard JWT、租户/客户和 Device READ 权限。
+- `GET /api/video/cameras` 同时支持 `TENANT_ADMIN` 和 `CUSTOMER_USER`，客户用户只返回有权读取的设备。
+- `play` 接受可选的 `protocol` 和 `streamProfile`；当前只支持 `hls + main`，省略请求体时使用相同默认值。
+- `play` 返回 `sessionId`、`status`、`activeSessions`、`expiresAt` 和唯一同源 `url`。
+- 播放会话由当前 ThingsBoard 用户拥有，默认有效期为 900 秒。
+- 同一摄像头的多个用户会话共享 Provider 流，不按浏览器会话重复创建底层流。
+- `stop` 可以释放指定 `sessionId`，省略 ID 时释放当前用户在该摄像头上的全部会话。
+- 最后一个会话释放后默认延迟 20 秒调用 Provider 停流，避免频繁开关造成拉流抖动。
+- `force=true` 会清除全部会话并立即停流，只允许 `TENANT_ADMIN`。
+- 会话状态当前保存在 ThingsBoard 应用进程内；多节点部署前需要迁移到 Redis 或其他共享状态存储。
+
+状态与截图：
+
+- `status` 查询不启动流。
+- WVP Provider 优先通过 ZLMediaKit `getMediaList` 查询真实媒体状态和 `readerCount`。
+- 状态枚举为 `offline`、`starting`、`ready`、`degraded`、`stopping`、`failed`。
+- Provider 状态查询失败时 API 返回 `degraded` 状态描述，不向前端暴露 WVP/ZLMediaKit 凭证。
+- `snapshot` 通过 `VideoProvider` 调用 ZLMediaKit `getSnap`，ZLMediaKit Secret 只存在于后端。
+- 截图按 ThingsBoard Device UUID 缓存，默认缓存 5 秒。
+- 图片响应包含 `Content-Type`、私有缓存策略和 `X-Video-Captured-At`。
+
+前端会话闭环：
+
+- 摄像头运行时对象保存 `playbackSessionId`、`playbackExpiresAt`、`playbackStatus` 和协议。
+- Cesium 摄像头弹窗关闭、切换摄像头或组件卸载时调用 `stop(sessionId)`。
+- 旧摄像头异步 `play` 在页面切换后才返回时，立即释放该响应中的会话。
+- 同一个会话的重复释放在前端统一去重；网络失败时由后端 TTL 最终清理。
+- Video API 失败只影响视频区域，不删除 ThingsBoard 设备和 Cesium 点位。
+
+兼容性：
+
+- `POST /api/video/devices/{tbDeviceId}/play` 暂时保留为旧路由别名。
+- 正式业务调用必须使用 `/api/video/cameras/{tbDeviceId}/play`。
+- `hlsUrl`、`flvUrl` 和 `webRtcUrl` 暂时保留为响应兼容字段；新代码只使用 `protocol` 和 `url`。
+- `cameraCode` 播放解析只作为迁移回退，新的 API 和页面必须传 ThingsBoard Device UUID。
+
+后端环境变量：
+
+```text
+VIDEO_ZLM_ENABLED
+VIDEO_ZLM_BASE_URL
+VIDEO_ZLM_SECRET
+VIDEO_ZLM_RTSP_BASE_URL
+VIDEO_SESSION_TTL_SECONDS
+VIDEO_SESSION_STOP_DELAY_SECONDS
+VIDEO_SNAPSHOT_CACHE_SECONDS
+```
+
+## 22. Video API 调用文档
+
+每个接口的权限、请求体、响应字段、PowerShell 示例、前端 TypeScript 示例、错误码和推荐生命周期详见：
+
+```text
+docs/api/video-api.md
+```
+
+后续新增 PTZ、录像、回放、Hook 或播放 Ticket 时，必须同时更新该调用文档和本架构文档。
+
+## 23. 本地后端启动约定
+
+本地视频验证环境的 ThingsBoard 后端必须通过
+`scripts/start-thingsboard-video-local.ps1` 启动。脚本从仓库根目录下被
+Git 忽略的 `.env.video.local` 加载 PostgreSQL、WVP 和 ZLMediaKit 配置。
+
+- 可提交的 `.env.video.example` 只保留占位符，不保存密码或 Secret。
+- WVP 和 ZLMediaKit 默认保持关闭；非视频环境不会被本地验证配置污染。
+- 如果后端未加载 `VIDEO_WVP_ENABLED=true`，播放 API 应返回 `503`，不得由
+  前端绕过 Video API 拼接媒体地址。
+- `.env.video.local` 只用于当前开发机，不能提交，也不能下发到浏览器。

@@ -101,6 +101,10 @@ export interface CameraRuntimeInfo {
   rtspUrl?: string;
   flvUrl?: string;
   streamType?: string;
+  playbackSessionId?: string;
+  playbackExpiresAt?: number;
+  playbackStatus?: 'offline' | 'starting' | 'ready' | 'degraded' | 'stopping' | 'failed';
+  playbackProtocol?: 'hls';
   supportsLive?: boolean;
   supportsPlayback?: boolean;
   supportsPtz?: boolean;

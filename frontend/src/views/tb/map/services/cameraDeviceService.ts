@@ -17,7 +17,9 @@ export async function loadCameraDevices(): Promise<CameraDevice[]> {
       const seed = mockVirtualCameras.find((item) => item.cameraCode === camera.cameraCode);
       return buildCameraPoint({
         ...seed,
-        id: camera.cameraCode,
+        id: camera.tbDeviceId,
+        deviceId: camera.tbDeviceId,
+        entityId: camera.tbDeviceId,
         cameraId: camera.cameraCode,
         cameraCode: camera.cameraCode,
         cameraName: camera.name,
@@ -34,6 +36,7 @@ export async function loadCameraDevices(): Promise<CameraDevice[]> {
         dataSource: seed ? 'merged' : 'thingsboard',
         metadata: {
           ...(seed?.metadata || {}),
+          provider: camera.provider,
           sourceType: camera.sourceType,
           app: camera.app,
           stream: camera.stream,
@@ -45,8 +48,8 @@ export async function loadCameraDevices(): Promise<CameraDevice[]> {
   }
 }
 
-export async function startCameraPlayback(cameraCode: string): Promise<VideoPlaybackInfo> {
-  return startVideoPlayback(cameraCode);
+export async function startCameraPlayback(tbDeviceId: string): Promise<VideoPlaybackInfo> {
+  return startVideoPlayback(tbDeviceId);
 }
 
 export async function loadCameraPoints(): Promise<CameraPoint[]> {

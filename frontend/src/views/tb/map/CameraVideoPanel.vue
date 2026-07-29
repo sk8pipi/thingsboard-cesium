@@ -336,58 +336,6 @@
     }
   }
 
-  async function resolvePrimaryHlsUrl(
-    targetUrl: string,
-    normalizeHlsRequestUrl: (rawUrl: string) => string,
-    rememberSessionFromUrl: (rawUrl: string) => void,
-  ) {
-    const normalizedTargetUrl = normalizeHlsRequestUrl(targetUrl);
-
-    try {
-      const response = await fetch(normalizedTargetUrl, {
-        cache: 'no-store',
-      });
-
-      if (!response.ok) {
-        return normalizedTargetUrl;
-      }
-
-      const playlistText = await response.text();
-      if (!playlistText.includes('#EXTM3U') || !playlistText.includes('#EXT-X-STREAM-INF')) {
-        return normalizedTargetUrl;
-      }
-
-      const lines = playlistText.split(/\r?\n/);
-      for (let index = 0; index < lines.length; index += 1) {
-        const currentLine = lines[index]?.trim() || '';
-        if (currentLine.startsWith('#')) {
-          currentLine.replace(/URI="([^"]+)"/g, (_match, uri: string) => {
-            rememberSessionFromUrl(uri);
-            return '';
-          });
-        }
-
-        if (!lines[index]?.trim().startsWith('#EXT-X-STREAM-INF')) {
-          continue;
-        }
-
-        for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
-          const candidate = lines[nextIndex]?.trim();
-          if (!candidate || candidate.startsWith('#')) {
-            continue;
-          }
-
-          rememberSessionFromUrl(candidate);
-          return normalizeHlsRequestUrl(candidate);
-        }
-      }
-    } catch (error) {
-      console.warn('Failed to resolve primary HLS playlist, fallback to target URL:', error);
-    }
-
-    return normalizedTargetUrl;
-  }
-
   async function initPlayer() {
     const camera = props.camera;
     const video = videoEl.value;
@@ -422,145 +370,15 @@
     video.playsInline = true;
 
     if (Hls.isSupported()) {
-      const cameraCode = camera.cameraCode || camera.id;
-      const cameraPathPrefix = `/${cameraCode}/`;
-      const cameraProxyBasePath = `/live/${cameraCode}/`;
-      const cameraProxyBaseUrl = new URL('./', new URL(targetUrl, window.location.origin)).toString();
-      const sessionByResource = new Map<string, string>();
-      let primaryPlaylistUrl = '';
-
-      const normalizeResourcePath = (pathname: string) => pathname.replace(/^\/live/, '').replace(/\/+/, '/');
-
-      const buildResourceKeys = (pathname: string) => {
-        const normalizedPath = normalizeResourcePath(pathname);
-        const basename = normalizedPath.split('/').filter(Boolean).pop() || normalizedPath;
-        return [normalizedPath, basename];
-      };
-
-      const rememberSessionFromUrl = (rawUrl: string) => {
-        const resolved = new URL(rawUrl, cameraProxyBaseUrl);
-        const session = resolved.searchParams.get('session');
-        if (!session) return;
-
-        buildResourceKeys(resolved.pathname).forEach((key) => {
-          if (key) {
-            sessionByResource.set(key, session);
-          }
-        });
-      };
-
-      const resolveRememberedSession = (pathname: string) => {
-        for (const key of buildResourceKeys(pathname)) {
-          const session = sessionByResource.get(key);
-          if (session) return session;
-        }
-        return '';
-      };
-
-      const normalizeHlsRequestUrl = (rawUrl: string) => {
-        const normalized = new URL(rawUrl, cameraProxyBaseUrl);
-        normalized.searchParams.delete('cookieCheck');
-
-        if (normalized.origin === window.location.origin) {
-          if (!normalized.pathname.startsWith('/video-stream/')) {
-            if (normalized.pathname.startsWith(cameraPathPrefix)) {
-              normalized.pathname = `/live${normalized.pathname}`;
-            } else if (
-              !normalized.pathname.startsWith(cameraProxyBasePath) &&
-              !normalized.pathname.startsWith('/live/')
-            ) {
-              normalized.pathname = `${cameraProxyBasePath}${normalized.pathname.replace(/^\/+/, '')}`;
-            }
-          }
-
-          if (!normalized.searchParams.has('session')) {
-            const rememberedSession = resolveRememberedSession(normalized.pathname);
-            if (rememberedSession) {
-              normalized.searchParams.set('session', rememberedSession);
-            }
-          }
-
-          return `${normalized.pathname}${normalized.search}${normalized.hash}`;
-        }
-
-        return normalized.toString();
-      };
-
-      const isPrimaryPlaylistRequest = (rawUrl: string) => {
-        if (!primaryPlaylistUrl) {
-          return false;
-        }
-
-        const currentUrl = new URL(rawUrl, cameraProxyBaseUrl);
-        const primaryUrl = new URL(primaryPlaylistUrl, cameraProxyBaseUrl);
-        return currentUrl.pathname === primaryUrl.pathname;
-      };
-
-      const rewritePlaylistText = (playlistText: string) => {
-        return playlistText
-          .split(/\r?\n/)
-          .map((line) => {
-            const trimmed = line.trim();
-
-            if (!trimmed) {
-              return line;
-            }
-
-            if (trimmed.startsWith('#')) {
-              return line.replace(/URI="([^"]+)"/g, (_match, uri: string) => {
-                rememberSessionFromUrl(uri);
-                return `URI="${normalizeHlsRequestUrl(uri)}"`;
-              });
-            }
-
-            rememberSessionFromUrl(trimmed);
-            return normalizeHlsRequestUrl(trimmed);
-          })
-          .join('\n');
-      };
-
-      const BaseLoader = Hls.DefaultConfig.loader;
-      class CameraHlsLoader extends BaseLoader {
-        override load(context: any, config: any, callbacks: any) {
-          if (isPrimaryPlaylistRequest(String(context?.url || ''))) {
-            const currentUrl = new URL(String(context.url || ''), cameraProxyBaseUrl);
-            const currentHasSession = currentUrl.searchParams.has('session');
-            context.url = currentHasSession ? normalizeHlsRequestUrl(context.url) : primaryPlaylistUrl;
-          } else {
-            context.url = normalizeHlsRequestUrl(context.url);
-          }
-
-          const wrappedCallbacks = {
-            ...callbacks,
-            onSuccess: (response: any, stats: any, ctx: any, networkDetails: any) => {
-              if (typeof response?.data === 'string' && /\.m3u8(?:$|\?)/.test(String(ctx?.url || context.url || ''))) {
-                response.data = rewritePlaylistText(response.data);
-              }
-
-              callbacks.onSuccess(response, stats, ctx, networkDetails);
-            },
-          };
-
-          super.load(context, config, wrappedCallbacks);
-        }
-      }
-
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
         backBufferLength: 30,
-        loader: CameraHlsLoader,
       });
 
       hls.attachMedia(video);
-      hls.on(Hls.Events.MEDIA_ATTACHED, async () => {
-        const resolvedPlaybackUrl = await resolvePrimaryHlsUrl(
-          targetUrl,
-          normalizeHlsRequestUrl,
-          rememberSessionFromUrl,
-        );
-        primaryPlaylistUrl = resolvedPlaybackUrl;
-        hls?.loadSource(resolvedPlaybackUrl);
+      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+        hls?.loadSource(targetUrl);
       });
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {

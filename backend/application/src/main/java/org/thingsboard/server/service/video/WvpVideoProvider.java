@@ -45,6 +45,7 @@ import java.util.Map;
 public class WvpVideoProvider implements VideoProvider {
 
     private static final String ACCESS_TOKEN_HEADER = "access-token";
+    private static final String PROVIDER_TYPE = "WVP_STREAM_PROXY";
     private static final long TOKEN_CACHE_SECONDS = 600;
 
     private final RestTemplate restTemplate = new RestTemplate();
@@ -53,21 +54,29 @@ public class WvpVideoProvider implements VideoProvider {
     private final String username;
     private final String password;
     private final String defaultApp;
+    private final ZlmVideoClient zlmVideoClient;
 
     private volatile String accessToken;
     private volatile Instant accessTokenExpiresAt = Instant.EPOCH;
 
     public WvpVideoProvider(
+            ZlmVideoClient zlmVideoClient,
             @Value("${video.wvp.enabled:false}") boolean enabled,
             @Value("${video.wvp.base-url:http://127.0.0.1:18080}") String baseUrl,
             @Value("${video.wvp.username:admin}") String username,
             @Value("${video.wvp.password:}") String password,
             @Value("${video.wvp.default-app:live}") String defaultApp) {
+        this.zlmVideoClient = zlmVideoClient;
         this.enabled = enabled;
         this.baseUrl = stripTrailingSlash(baseUrl);
         this.username = username;
         this.password = password;
         this.defaultApp = defaultApp;
+    }
+
+    @Override
+    public String providerType() {
+        return PROVIDER_TYPE;
     }
 
     @Override
@@ -88,9 +97,11 @@ public class WvpVideoProvider implements VideoProvider {
             }
             String name = textOrDefault(proxy, "gbName", stream);
             cameras.add(new VideoCameraInfo(
+                    null,
                     stream,
                     name,
-                    "WVP_STREAM_PROXY",
+                    PROVIDER_TYPE,
+                    PROVIDER_TYPE,
                     app,
                     stream,
                     proxy.path("enable").asBoolean(false),
@@ -102,29 +113,97 @@ public class WvpVideoProvider implements VideoProvider {
     }
 
     @Override
-    public VideoPlaybackInfo startPlayback(String cameraCode) {
+    public VideoCameraInfo describe(VideoCameraBinding binding) {
         ensureEnabled();
-        if (cameraCode == null || cameraCode.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cameraCode must not be blank");
-        }
+        JsonNode proxy = authenticatedGet("/api/proxy/one", Map.of(
+                "app", binding.streamApp(),
+                "stream", binding.streamId()));
+        boolean exists = proxy.path("id").asInt(0) > 0;
+        String name = textOrDefault(proxy, "gbName", binding.cameraCode());
+        VideoProviderStatus providerStatus = getStatus(binding);
+        return new VideoCameraInfo(
+                binding.tbDeviceId().toString(),
+                binding.cameraCode(),
+                name,
+                binding.provider(),
+                PROVIDER_TYPE,
+                binding.streamApp(),
+                binding.streamId(),
+                binding.enabled(),
+                exists && providerStatus.online(),
+                hlsUrl(binding.streamApp(), binding.streamId()),
+                flvUrl(binding.streamApp(), binding.streamId()));
+    }
 
-        JsonNode proxy = authenticatedGet("/api/proxy/one", Map.of("app", defaultApp, "stream", cameraCode));
+    @Override
+    public VideoPlaybackInfo startPlayback(VideoCameraBinding binding, VideoPlayRequest request) {
+        ensureEnabled();
+        JsonNode proxy = authenticatedGet("/api/proxy/one", Map.of(
+                "app", binding.streamApp(),
+                "stream", binding.streamId()));
         int proxyId = proxy.path("id").asInt(0);
         if (proxyId <= 0) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Camera stream proxy was not found: " + cameraCode);
+            throw new ResponseStatusException(
+                    HttpStatus.NOT_FOUND,
+                    "Camera stream proxy was not found: " + binding.streamApp() + "/" + binding.streamId());
         }
 
         JsonNode playback = authenticatedGet("/api/proxy/start", Map.of("id", proxyId));
-        String app = textOrDefault(playback, "app", defaultApp);
-        String stream = textOrDefault(playback, "stream", cameraCode);
+        String app = textOrDefault(playback, "app", binding.streamApp());
+        String stream = textOrDefault(playback, "stream", binding.streamId());
         return new VideoPlaybackInfo(
-                cameraCode,
+                binding.tbDeviceId().toString(),
+                binding.cameraCode(),
+                binding.provider(),
                 app,
                 stream,
                 playback.hasNonNull("mediaInfo"),
                 hlsUrl(app, stream),
+                request.protocol(),
+                hlsUrl(app, stream),
                 flvUrl(app, stream),
-                webRtcUrl(app, stream));
+                webRtcUrl(app, stream),
+                null,
+                playback.hasNonNull("mediaInfo") ? VideoStreamStatus.READY : VideoStreamStatus.DEGRADED,
+                0,
+                0,
+                new VideoPlaybackAlternates(webRtcUrl(app, stream), flvUrl(app, stream)));
+    }
+
+    @Override
+    public VideoProviderStatus getStatus(VideoCameraBinding binding) {
+        ensureEnabled();
+        if (zlmVideoClient.isConfigured()) {
+            return zlmVideoClient.getStatus(binding);
+        }
+        JsonNode proxy = authenticatedGet("/api/proxy/one", Map.of(
+                "app", binding.streamApp(),
+                "stream", binding.streamId()));
+        boolean online = proxy.path("id").asInt(0) > 0 && proxy.path("pulling").asBoolean(false);
+        return new VideoProviderStatus(
+                online ? VideoStreamStatus.READY : VideoStreamStatus.OFFLINE,
+                online,
+                0,
+                "ZLMediaKit status integration is not configured",
+                System.currentTimeMillis());
+    }
+
+    @Override
+    public void stopPlayback(VideoCameraBinding binding) {
+        ensureEnabled();
+        JsonNode proxy = authenticatedGet("/api/proxy/one", Map.of(
+                "app", binding.streamApp(),
+                "stream", binding.streamId()));
+        int proxyId = proxy.path("id").asInt(0);
+        if (proxyId > 0) {
+            authenticatedGetVoid("/api/proxy/stop", Map.of("id", proxyId));
+        }
+    }
+
+    @Override
+    public VideoSnapshot getSnapshot(VideoCameraBinding binding) {
+        ensureEnabled();
+        return zlmVideoClient.getSnapshot(binding);
     }
 
     private JsonNode authenticatedGet(String path, Map<String, ?> queryParameters) {
@@ -137,6 +216,26 @@ public class WvpVideoProvider implements VideoProvider {
         } catch (RestClientException error) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "WVP request failed", error);
         }
+    }
+
+    private void authenticatedGetVoid(String path, Map<String, ?> queryParameters) {
+        try {
+            authenticatedGetVoid(path, queryParameters, false);
+        } catch (HttpClientErrorException.Unauthorized error) {
+            accessToken = null;
+            accessTokenExpiresAt = Instant.EPOCH;
+            authenticatedGetVoid(path, queryParameters, true);
+        } catch (RestClientException error) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "WVP request failed");
+        }
+    }
+
+    private void authenticatedGetVoid(String path, Map<String, ?> queryParameters, boolean forceLogin) {
+        String token = getAccessToken(forceLogin);
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(ACCESS_TOKEN_HEADER, token);
+        URI uri = buildUri(path, queryParameters);
+        restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<>(headers), Void.class);
     }
 
     private JsonNode authenticatedGet(String path, Map<String, ?> queryParameters, boolean forceLogin) {

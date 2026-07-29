@@ -50,6 +50,8 @@ The Vue development server exposes the same stream through the same-origin URL:
 ```
 ## ThingsBoard Video API
 
+完整的中文接口说明和调用示例见 [`docs/api/video-api.md`](../docs/api/video-api.md)。
+
 The ThingsBoard application integration is disabled by default. Configure these
 environment variables before starting the backend:
 
@@ -59,16 +61,38 @@ VIDEO_WVP_BASE_URL=http://127.0.0.1:18080
 VIDEO_WVP_USERNAME=admin
 VIDEO_WVP_PASSWORD=<local WVP password>
 VIDEO_WVP_DEFAULT_APP=live
+VIDEO_BINDING_AUTO_INITIALIZE_SCHEMA=true
+VIDEO_ZLM_ENABLED=true
+VIDEO_ZLM_BASE_URL=http://127.0.0.1:18081
+VIDEO_ZLM_SECRET=<local ZLMediaKit secret>
+VIDEO_ZLM_RTSP_BASE_URL=rtsp://127.0.0.1:10002
+VIDEO_SESSION_TTL_SECONDS=900
+VIDEO_SESSION_STOP_DELAY_SECONDS=20
+VIDEO_SNAPSHOT_CACHE_SECONDS=5
 ```
 
-The first API slice exposes:
+The UUID binding slice exposes:
 
 ```text
-GET  /api/video/cameras
-POST /api/video/cameras/{cameraCode}/play
+GET    /api/video/cameras
+GET    /api/video/cameras/{tbDeviceId}
+POST   /api/video/cameras/{tbDeviceId}/play
+POST   /api/video/cameras/{tbDeviceId}/stop
+GET    /api/video/cameras/{tbDeviceId}/status
+GET    /api/video/cameras/{tbDeviceId}/snapshot
+GET    /api/video/devices/{tbDeviceId}/binding
+PUT    /api/video/devices/{tbDeviceId}/binding
+DELETE /api/video/devices/{tbDeviceId}/binding
+
 ```
 
-Both endpoints use the existing ThingsBoard JWT authorization model.
+All endpoints use the existing ThingsBoard JWT authorization model.
+
+`play` returns a short-lived `sessionId`. Pass it to `stop` when the viewer is
+closed. If no session ID is supplied, `stop` releases all sessions owned by the
+current user for that camera. The last released session schedules a delayed
+provider stop; tenant administrators may send `{"force": true}` for an
+immediate stop. Snapshot responses are private, short-lived cached image bytes.
 
 ## Containerized virtual camera
 
@@ -91,3 +115,18 @@ E:\simulationEquipment\start-all.ps1
 The original PowerShell camera scripts remain available only for manual
 troubleshooting and must not run at the same time as the containerized status
 publisher.
+
+## Starting the ThingsBoard backend for local video validation
+
+Keep credentials in the Git-ignored `.env.video.local` file and start
+ThingsBoard from the repository root with:
+
+```powershell
+Copy-Item .env.video.example .env.video.local
+# Fill in the local-only values once.
+.\scripts\start-thingsboard-video-local.ps1
+```
+
+Do not start the backend with plain `mvn spring-boot:run` for video validation.
+That omits `VIDEO_WVP_ENABLED` and `VIDEO_ZLM_ENABLED`, so the Video API returns
+HTTP `503` even when the WVP and ZLMediaKit containers are healthy.

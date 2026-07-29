@@ -2075,6 +2075,25 @@ mqtt:
 
 # Video platform integration parameters
 video:
+  binding:
+    # Automatically creates the custom video_camera_binding table for existing installations.
+    auto-initialize-schema: "${VIDEO_BINDING_AUTO_INITIALIZE_SCHEMA:true}"
+  session:
+    ttl-seconds: "${VIDEO_SESSION_TTL_SECONDS:900}"
+    stop-delay-seconds: "${VIDEO_SESSION_STOP_DELAY_SECONDS:20}"
+    cleanup-interval-ms: "${VIDEO_SESSION_CLEANUP_INTERVAL_MS:30000}"
+  snapshot:
+    cache-seconds: "${VIDEO_SNAPSHOT_CACHE_SECONDS:5}"
+  zlm:
+    enabled: "${VIDEO_ZLM_ENABLED:false}"
+    base-url: "${VIDEO_ZLM_BASE_URL:http://127.0.0.1:18081}"
+    secret: "${VIDEO_ZLM_SECRET:}"
+    rtsp-base-url: "${VIDEO_ZLM_RTSP_BASE_URL:rtsp://127.0.0.1:10002}"
+    snapshot-timeout-seconds: "${VIDEO_ZLM_SNAPSHOT_TIMEOUT_SECONDS:10}"
+    snapshot-expire-seconds: "${VIDEO_ZLM_SNAPSHOT_EXPIRE_SECONDS:3}"
+    snapshot-max-bytes: "${VIDEO_ZLM_SNAPSHOT_MAX_BYTES:5242880}"
+    connect-timeout-ms: "${VIDEO_ZLM_CONNECT_TIMEOUT_MS:5000}"
+    read-timeout-ms: "${VIDEO_ZLM_READ_TIMEOUT_MS:20000}"
   wvp:
     enabled: "${VIDEO_WVP_ENABLED:false}"
     base-url: "${VIDEO_WVP_BASE_URL:http://127.0.0.1:18080}"

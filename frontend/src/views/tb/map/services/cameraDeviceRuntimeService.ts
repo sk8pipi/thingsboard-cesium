@@ -1,4 +1,5 @@
 import { getDeviceInfoById, type DeviceInfo } from '/@/api/tb/device';
+import { startVideoPlayback } from '/@/api/tb/video';
 import { findRelationInfoListByFrom, findRelationInfoListByTo, type EntityRelationInfo } from '/@/api/tb/relation';
 import { getAttributes, getLatestTimeseries, type TsKvEntity, type kvEntity } from '/@/api/tb/telemetry';
 import { EntityType } from '/@/enums/entityTypeEnum';
@@ -125,53 +126,8 @@ async function findRelatedGatewayDevice(sourceDeviceId: string): Promise<DeviceI
   return devices.find((device) => device.additionalInfo?.gateway === true) || null;
 }
 
-function deriveHlsUrlFromWebRtcUrl(webRtcUrl?: string) {
-  if (!webRtcUrl) return undefined;
-
-  try {
-    const parsed = new URL(webRtcUrl);
-    const streamPath = parsed.pathname.replace(/\/+$/, '');
-    if (!streamPath || streamPath === '/') return undefined;
-
-    const protocol = 'http:';
-    const port = parsed.port === '8889' || !parsed.port ? '8888' : parsed.port;
-    return `${protocol}//${parsed.hostname}:${port}${streamPath}/index.m3u8`;
-  } catch {
-    return undefined;
-  }
-}
-
-function deriveHlsUrlFromRtspUrl(rtspUrl?: string) {
-  if (!rtspUrl) return undefined;
-
-  try {
-    const parsed = new URL(rtspUrl);
-    const streamPath = parsed.pathname.replace(/\/+$/, '');
-    if (!streamPath || streamPath === '/') return undefined;
-
-    return `http://${parsed.hostname}:8888${streamPath}/index.m3u8`;
-  } catch {
-    return undefined;
-  }
-}
-
-function resolvePreferredHlsUrl(raw: {
-  hlsUrl?: string;
-  streamUrlMain?: string;
-  streamUrl?: string;
-  webRtcUrl?: string;
-  rtspUrl?: string;
-}) {
-  const directHlsFromWebRtc = deriveHlsUrlFromWebRtcUrl(raw.webRtcUrl);
-  const directHlsFromRtsp = deriveHlsUrlFromRtspUrl(raw.rtspUrl);
-  const directFallbackUrl = directHlsFromWebRtc || directHlsFromRtsp;
-
-  const explicitHlsUrl = raw.hlsUrl;
-  const explicitMainStreamUrl = raw.streamUrlMain;
-  const explicitStreamUrl = raw.streamUrl;
-  const explicitPreferredUrl = explicitHlsUrl || explicitMainStreamUrl || explicitStreamUrl;
-
-  return explicitPreferredUrl || directFallbackUrl;
+function resolvePreferredHlsUrl(raw: { hlsUrl?: string; streamUrlMain?: string; streamUrl?: string }) {
+  return raw.hlsUrl || raw.streamUrlMain || raw.streamUrl;
 }
 
 function extractLastValue(value: unknown): unknown {
@@ -221,7 +177,7 @@ export async function loadCameraRuntimeInfo(entityId: string, entityName: string
     throw new Error('Camera entityId is required.');
   }
 
-  const [deviceResult, attributesResult, telemetryResult] = await Promise.allSettled([
+  const [deviceResult, attributesResult, telemetryResult, playbackResult] = await Promise.allSettled([
     getDeviceInfoById(normalizedEntityId),
     getAttributes({ entityType: EntityType.DEVICE, id: normalizedEntityId } as any, CAMERA_ATTRIBUTE_KEYS.join(',')),
     getLatestTimeseries(
@@ -229,12 +185,14 @@ export async function loadCameraRuntimeInfo(entityId: string, entityName: string
       CAMERA_TELEMETRY_KEYS.join(','),
       true,
     ),
+    startVideoPlayback(normalizedEntityId),
   ]);
 
   if (
     deviceResult.status === 'rejected' &&
     attributesResult.status === 'rejected' &&
-    telemetryResult.status === 'rejected'
+    telemetryResult.status === 'rejected' &&
+    playbackResult.status === 'rejected'
   ) {
     throw new Error('读取摄像头设备信息失败');
   }
@@ -242,27 +200,28 @@ export async function loadCameraRuntimeInfo(entityId: string, entityName: string
   const device = deviceResult.status === 'fulfilled' ? deviceResult.value : null;
   const attributeState = attributesToObject(attributesResult.status === 'fulfilled' ? attributesResult.value : []);
   const telemetryState = telemetryToObject(telemetryResult.status === 'fulfilled' ? telemetryResult.value : {});
+  const playback = playbackResult.status === 'fulfilled' ? playbackResult.value : null;
 
   const rawHlsUrl = toStringValue(attributeState.hlsUrl);
   const rawStreamUrlMain = toStringValue(attributeState.streamUrlMain);
   const rawStreamUrl = toStringValue(attributeState.streamUrl);
-  const webRtcUrl = toStringValue(attributeState.webRtcUrl);
+  const webRtcUrl = playback?.webRtcUrl || toStringValue(attributeState.webRtcUrl);
   const rtspUrl = toStringValue(attributeState.rtspUrl);
-  const hlsUrl = resolvePreferredHlsUrl({
+  const legacyHlsUrl = resolvePreferredHlsUrl({
     hlsUrl: rawHlsUrl,
     streamUrlMain: rawStreamUrlMain,
     streamUrl: rawStreamUrl,
-    webRtcUrl,
-    rtspUrl,
   });
-  const streamUrl = rawStreamUrl || rawStreamUrlMain || rawHlsUrl || hlsUrl;
+  const playbackUrl = playback?.url || playback?.hlsUrl;
+  const hlsUrl = playbackUrl || legacyHlsUrl;
+  const streamUrl = playbackUrl || rawStreamUrl || rawStreamUrlMain || rawHlsUrl;
   const deviceActive = typeof device?.active === 'boolean' ? device.active : undefined;
   const telemetryOnline = toBoolean(telemetryState.online ?? telemetryState.status);
   const telemetryActive = toBoolean(telemetryState.active);
   const online = deviceActive === false ? false : (telemetryOnline ?? deviceActive ?? telemetryActive ?? false);
   const telemetryStreamOnline = toBoolean(telemetryState.streamOnline ?? telemetryState.streamAlive);
   const streamOnline =
-    online === false ? false : (telemetryStreamOnline ?? (online && (hlsUrl || streamUrl) ? true : undefined));
+    online === false ? false : (playback?.online ?? telemetryStreamOnline ?? (hlsUrl || streamUrl ? true : undefined));
   const motion = toBoolean(telemetryState.motion);
   const motionDetected = toBoolean(telemetryState.motionDetected) ?? motion;
   const configuredRpcTargetDeviceId =
@@ -287,13 +246,14 @@ export async function loadCameraRuntimeInfo(entityId: string, entityName: string
     configuredRpcTopic ||
     (rpcPayloadMode === 'gatewayTopic' && rpcTargetCameraId ? `camera/rpc/${rpcTargetCameraId}` : undefined);
 
-  if (rawHlsUrl || rawStreamUrlMain || rawStreamUrl || webRtcUrl || rtspUrl) {
-    console.info('[cameraDeviceRuntimeService] Raw camera transport attributes:', {
+  if (playback || rawHlsUrl || rawStreamUrlMain || rawStreamUrl || webRtcUrl || rtspUrl) {
+    console.info('[cameraDeviceRuntimeService] Resolved camera transport:', {
       entityId: normalizedEntityId,
       entityName: normalizedEntityName || device?.name,
+      source: playback ? 'video-api' : 'thingsboard-attribute-fallback',
       cameraId: attributeState.cameraId,
-      cameraCode: attributeState.cameraCode,
-      hlsUrl: rawHlsUrl,
+      cameraCode: playback?.cameraCode || attributeState.cameraCode,
+      hlsUrl,
       streamUrlMain: rawStreamUrlMain,
       streamUrl: rawStreamUrl,
       webRtcUrl,
@@ -301,27 +261,12 @@ export async function loadCameraRuntimeInfo(entityId: string, entityName: string
     });
   }
 
-  if (
-    (rawHlsUrl || rawStreamUrlMain || rawStreamUrl) &&
-    !webRtcUrl &&
-    !rtspUrl &&
-    String(hlsUrl || '').includes('/live/')
-  ) {
-    console.warn(
-      '[cameraDeviceRuntimeService] Camera runtime still points to a legacy /live/ proxy URL and no direct MediaMTX path attributes were found.',
-      {
-        entityId: normalizedEntityId,
-        resolvedHlsUrl: hlsUrl,
-        suggestion: 'Please set hlsUrl/streamUrl/streamUrlMain/webRtcUrl/rtspUrl on the ThingsBoard device attributes.',
-      },
-    );
-  }
-
   const runtimeInfo: CameraRuntimeInfo = {
     entityId: normalizedEntityId,
     entityName: toStringValue(device?.name) || normalizedEntityName || normalizedEntityId,
     cameraId: toStringValue(attributeState.cameraId),
-    cameraCode: toStringValue(attributeState.cameraCode) || toStringValue(attributeState.cameraId),
+    cameraCode:
+      playback?.cameraCode || toStringValue(attributeState.cameraCode) || toStringValue(attributeState.cameraId),
     cameraName:
       toStringValue(attributeState.cameraName) ||
       normalizedEntityName ||
@@ -332,8 +277,12 @@ export async function loadCameraRuntimeInfo(entityId: string, entityName: string
     streamUrl,
     webRtcUrl,
     rtspUrl,
-    flvUrl: toStringValue(attributeState.flvUrl),
-    streamType: toStringValue(attributeState.streamType),
+    flvUrl: playback?.flvUrl || toStringValue(attributeState.flvUrl),
+    streamType: playback ? 'hls' : toStringValue(attributeState.streamType),
+    playbackSessionId: playback?.sessionId,
+    playbackExpiresAt: playback?.expiresAt,
+    playbackStatus: playback?.status,
+    playbackProtocol: playback?.protocol === 'hls' ? 'hls' : undefined,
     supportsLive: toBoolean(attributeState.supportsLive),
     supportsPlayback: toBoolean(attributeState.supportsPlayback),
     supportsPtz: toBoolean(attributeState.supportsPtz),

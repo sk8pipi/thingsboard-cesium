@@ -15,11 +15,44 @@
  */package org.thingsboard.server.service.video;
 
 public record VideoPlaybackInfo(
+        String tbDeviceId,
         String cameraCode,
+        String provider,
         String app,
         String stream,
         boolean online,
         String hlsUrl,
+        String protocol,
+        String url,
         String flvUrl,
-        String webRtcUrl) {
+        String webRtcUrl,
+        String sessionId,
+        VideoStreamStatus status,
+        int activeSessions,
+        long expiresAt,
+        VideoPlaybackAlternates alternates) {
+
+    public VideoPlaybackInfo withSession(
+            String sessionId,
+            VideoStreamStatus status,
+            int activeSessions,
+            long expiresAt) {
+        return new VideoPlaybackInfo(
+                tbDeviceId,
+                cameraCode,
+                provider,
+                app,
+                stream,
+                online,
+                hlsUrl,
+                protocol,
+                url,
+                flvUrl,
+                webRtcUrl,
+                sessionId,
+                status,
+                activeSessions,
+                expiresAt,
+                new VideoPlaybackAlternates(webRtcUrl, flvUrl));
+    }
 }

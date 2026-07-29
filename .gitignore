@@ -50,3 +50,4 @@ Thumbs.db
 *.versionsBackup
 dependency-reduced-pom.xml
 .instance_id
+backend/tb-video-api-run.err

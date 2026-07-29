@@ -162,6 +162,12 @@
   import { useMessage } from '/@/hooks/web/useMessage';
   import { normalizeSupportedRpcMethods } from '../services/cameraRpcCapabilities';
   import { getDefaultCameraRpcParams, sendCameraRpc } from '../services/cameraRpcService';
+  import {
+    isSameCameraVideoSession,
+    releaseCameraVideoSession,
+    resolveCameraVideoSession,
+    type CameraVideoSession,
+  } from '../services/cameraVideoSessionService';
   import type { CameraRuntimeInfo } from '../types/mapPointTypes';
 
   type CameraRpcAction = {
@@ -189,6 +195,7 @@
   const rpcStatusText = ref('');
 
   let hls: Hls | null = null;
+  let activeVideoSession: CameraVideoSession | null = null;
 
   const playUrl = computed(() => normalizeHlsUrl(props.runtimeInfo?.hlsUrl || props.runtimeInfo?.streamUrl || ''));
   const monitorPageUrl = computed(() => '');
@@ -292,16 +299,7 @@
       const parsed = new URL(value, window.location.origin);
       parsed.searchParams.delete('cookieCheck');
 
-      if (['localhost:8888', '127.0.0.1:8888'].includes(parsed.host)) {
-        const path = parsed.pathname.startsWith('/live/') ? parsed.pathname : `/live${parsed.pathname}`;
-        return `${path}${parsed.search}${parsed.hash}`;
-      }
-
       if (parsed.origin === window.location.origin) {
-        if (/^\/(?:virtual|sim)-/.test(parsed.pathname)) {
-          parsed.pathname = `/live${parsed.pathname}`;
-        }
-
         return `${parsed.pathname}${parsed.search}${parsed.hash}`;
       }
 
@@ -400,65 +398,23 @@
     }
   }
 
-  async function resolvePrimaryHlsUrl(
-    targetUrl: string,
-    normalizeHlsRequestUrl: (rawUrl: string) => string,
-    rememberSessionFromUrl: (rawUrl: string) => void,
-  ) {
-    const normalizedTargetUrl = normalizeHlsRequestUrl(targetUrl);
-
-    try {
-      const response = await fetch(normalizedTargetUrl, {
-        cache: 'no-store',
-      });
-
-      if (!response.ok) {
-        return normalizedTargetUrl;
-      }
-
-      const playlistText = await response.text();
-      if (!playlistText.includes('#EXTM3U') || !playlistText.includes('#EXT-X-STREAM-INF')) {
-        return normalizedTargetUrl;
-      }
-
-      const lines = playlistText.split(/\r?\n/);
-      for (let index = 0; index < lines.length; index += 1) {
-        const currentLine = lines[index]?.trim() || '';
-
-        if (currentLine.startsWith('#')) {
-          currentLine.replace(/URI="([^"]+)"/g, (_match, uri: string) => {
-            rememberSessionFromUrl(uri);
-            return '';
-          });
-        }
-
-        if (!currentLine || currentLine.startsWith('#')) {
-          continue;
-        }
-
-        rememberSessionFromUrl(currentLine);
-      }
-
-      for (let index = 0; index < lines.length; index += 1) {
-        if (!lines[index]?.trim().startsWith('#EXT-X-STREAM-INF')) {
-          continue;
-        }
-
-        for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
-          const candidate = lines[nextIndex]?.trim();
-          if (!candidate || candidate.startsWith('#')) {
-            continue;
-          }
-
-          rememberSessionFromUrl(candidate);
-          return normalizeHlsRequestUrl(candidate);
-        }
-      }
-    } catch (error) {
-      console.warn('[CameraMonitorPopup] Failed to resolve primary HLS playlist, fallback to target URL:', error);
+  function releaseActiveVideoSession() {
+    const session = activeVideoSession;
+    activeVideoSession = null;
+    if (session) {
+      void releaseCameraVideoSession(session);
     }
+  }
 
-    return normalizedTargetUrl;
+  function syncActiveVideoSession() {
+    const nextSession = props.visible ? resolveCameraVideoSession(props.runtimeInfo) : null;
+    if (isSameCameraVideoSession(activeVideoSession, nextSession)) return;
+
+    const previousSession = activeVideoSession;
+    activeVideoSession = nextSession;
+    if (previousSession) {
+      void releaseCameraVideoSession(previousSession);
+    }
   }
 
   async function initPlayer() {
@@ -500,116 +456,14 @@
     video.playsInline = true;
 
     if (Hls.isSupported()) {
-      const streamBaseUrl = new URL('./', new URL(playUrl.value, window.location.origin)).toString();
-      const sessionByResource = new Map<string, string>();
-      let primaryPlaylistUrl = '';
-
-      const normalizeResourcePath = (pathname: string) => pathname.replace(/^\/live/, '').replace(/\/+/, '/');
-      const buildResourceKeys = (pathname: string) => {
-        const normalizedPath = normalizeResourcePath(pathname);
-        const basename = normalizedPath.split('/').filter(Boolean).pop() || normalizedPath;
-        return [normalizedPath, basename];
-      };
-      const rememberSessionFromUrl = (rawUrl: string) => {
-        const resolved = new URL(rawUrl, streamBaseUrl);
-        const session = resolved.searchParams.get('session');
-        if (!session) return;
-
-        buildResourceKeys(resolved.pathname).forEach((key) => {
-          if (key) {
-            sessionByResource.set(key, session);
-          }
-        });
-      };
-      const resolveRememberedSession = (pathname: string) => {
-        for (const key of buildResourceKeys(pathname)) {
-          const session = sessionByResource.get(key);
-          if (session) return session;
-        }
-        return '';
-      };
-      const normalizeHlsRequestUrl = (rawUrl: string) => {
-        const rawValue = String(rawUrl || '').trim();
-        const isRelativePath = rawValue && !/^[a-z][a-z0-9+.-]*:/i.test(rawValue) && !rawValue.startsWith('/');
-        const normalized = isRelativePath
-          ? new URL(rawValue, streamBaseUrl)
-          : new URL(normalizeHlsUrl(rawValue), streamBaseUrl);
-        normalized.searchParams.delete('cookieCheck');
-
-        if (normalized.origin === window.location.origin && !normalized.searchParams.has('session')) {
-          const rememberedSession = resolveRememberedSession(normalized.pathname);
-          if (rememberedSession) {
-            normalized.searchParams.set('session', rememberedSession);
-          }
-        }
-
-        if (normalized.origin === window.location.origin) {
-          return `${normalized.pathname}${normalized.search}${normalized.hash}`;
-        }
-
-        return normalized.toString();
-      };
-      const isPrimaryPlaylistRequest = (rawUrl: string) => {
-        if (!primaryPlaylistUrl) return false;
-
-        const currentUrl = new URL(rawUrl, streamBaseUrl);
-        const primaryUrl = new URL(primaryPlaylistUrl, streamBaseUrl);
-        return currentUrl.pathname === primaryUrl.pathname;
-      };
-      const rewritePlaylistText = (playlistText: string) =>
-        playlistText
-          .split(/\r?\n/)
-          .map((line) => {
-            const trimmed = line.trim();
-            if (!trimmed) return line;
-
-            if (trimmed.startsWith('#')) {
-              return line.replace(/URI="([^"]+)"/g, (_match, uri: string) => {
-                rememberSessionFromUrl(uri);
-                return `URI="${normalizeHlsRequestUrl(uri)}"`;
-              });
-            }
-
-            rememberSessionFromUrl(trimmed);
-            return normalizeHlsRequestUrl(trimmed);
-          })
-          .join('\n');
-
-      const BaseLoader = Hls.DefaultConfig.loader;
-      class CameraMonitorHlsLoader extends BaseLoader {
-        override load(context: any, config: any, callbacks: any) {
-          if (isPrimaryPlaylistRequest(String(context?.url || ''))) {
-            const currentUrl = new URL(String(context.url || ''), streamBaseUrl);
-            const currentHasSession = currentUrl.searchParams.has('session');
-            context.url = currentHasSession ? normalizeHlsRequestUrl(context.url) : primaryPlaylistUrl;
-          } else {
-            context.url = normalizeHlsRequestUrl(context.url);
-          }
-
-          const wrappedCallbacks = {
-            ...callbacks,
-            onSuccess: (response: any, stats: any, ctx: any, networkDetails: any) => {
-              if (typeof response?.data === 'string' && /\.m3u8(?:$|\?)/.test(String(ctx?.url || context.url || ''))) {
-                response.data = rewritePlaylistText(response.data);
-              }
-
-              callbacks.onSuccess(response, stats, ctx, networkDetails);
-            },
-          };
-
-          super.load(context, config, wrappedCallbacks);
-        }
-      }
-
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
         backBufferLength: 30,
-        loader: CameraMonitorHlsLoader,
       });
 
       hls.attachMedia(video);
-      hls.on(Hls.Events.MEDIA_ATTACHED, async () => {
+      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
         console.info('[CameraMonitorPopup] Loading HLS source:', {
           playUrl: playUrl.value,
           entityId: runtimeInfo.entityId,
@@ -617,13 +471,7 @@
           webRtcUrl: runtimeInfo.webRtcUrl,
           rtspUrl: runtimeInfo.rtspUrl,
         });
-        const resolvedPlaybackUrl = await resolvePrimaryHlsUrl(
-          playUrl.value,
-          normalizeHlsRequestUrl,
-          rememberSessionFromUrl,
-        );
-        primaryPlaylistUrl = resolvedPlaybackUrl;
-        hls?.loadSource(resolvedPlaybackUrl);
+        hls?.loadSource(playUrl.value);
       });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         playerLoading.value = false;
@@ -662,6 +510,7 @@
 
   function handleClose() {
     destroyPlayer();
+    releaseActiveVideoSession();
     rpcStatusText.value = '';
     emit('close');
   }
@@ -727,6 +576,14 @@
   }
 
   watch(
+    () => [props.visible, props.runtimeInfo?.entityId, props.runtimeInfo?.playbackSessionId] as const,
+    () => {
+      syncActiveVideoSession();
+    },
+    { immediate: true },
+  );
+
+  watch(
     () => [props.visible, props.runtimeInfo?.entityId, playUrl.value, props.runtimeInfo?.streamOnline],
     async () => {
       await nextTick();
@@ -780,6 +637,7 @@
 
   onBeforeUnmount(() => {
     destroyPlayer();
+    releaseActiveVideoSession();
   });
 </script>
 

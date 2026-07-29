@@ -360,6 +360,26 @@ CREATE TABLE IF NOT EXISTS device_credentials (
     CONSTRAINT device_credentials_device_id_unq_key UNIQUE (device_id)
 );
 
+CREATE TABLE IF NOT EXISTS video_camera_binding (
+    id uuid NOT NULL CONSTRAINT video_camera_binding_pkey PRIMARY KEY,
+    created_time bigint NOT NULL,
+    updated_time bigint NOT NULL,
+    tenant_id uuid NOT NULL,
+    tb_device_id uuid NOT NULL,
+    camera_code varchar(255) NOT NULL,
+    provider varchar(64) NOT NULL,
+    provider_device_id varchar(255),
+    provider_channel_id varchar(255),
+    media_server_id varchar(255),
+    stream_app varchar(255) NOT NULL,
+    stream_id varchar(255) NOT NULL,
+    preferred_protocol varchar(32) NOT NULL,
+    enabled boolean NOT NULL DEFAULT true,
+    CONSTRAINT video_camera_binding_device_unq_key UNIQUE (tb_device_id),
+    CONSTRAINT video_camera_binding_camera_code_unq_key UNIQUE (tenant_id, camera_code),
+    CONSTRAINT fk_video_camera_binding_device FOREIGN KEY (tb_device_id) REFERENCES device(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS rule_node_debug_event (
     id uuid NOT NULL,
     tenant_id uuid NOT NULL ,
