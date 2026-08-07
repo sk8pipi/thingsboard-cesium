@@ -15,12 +15,15 @@
  */package org.thingsboard.server.service.video;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
@@ -35,11 +38,16 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
+@Slf4j
 @Service
 @TbCoreComponent
 public class WvpVideoProvider implements VideoProvider {
@@ -54,24 +62,30 @@ public class WvpVideoProvider implements VideoProvider {
     private final String username;
     private final String password;
     private final String defaultApp;
+    private final ZoneId timeZone;
     private final ZlmVideoClient zlmVideoClient;
+    private final TaskScheduler taskScheduler;
 
     private volatile String accessToken;
     private volatile Instant accessTokenExpiresAt = Instant.EPOCH;
 
     public WvpVideoProvider(
             ZlmVideoClient zlmVideoClient,
+            @Qualifier("taskScheduler") TaskScheduler taskScheduler,
             @Value("${video.wvp.enabled:false}") boolean enabled,
             @Value("${video.wvp.base-url:http://127.0.0.1:18080}") String baseUrl,
             @Value("${video.wvp.username:admin}") String username,
             @Value("${video.wvp.password:}") String password,
-            @Value("${video.wvp.default-app:live}") String defaultApp) {
+            @Value("${video.wvp.default-app:live}") String defaultApp,
+            @Value("${video.wvp.time-zone:Asia/Shanghai}") String timeZone) {
         this.zlmVideoClient = zlmVideoClient;
+        this.taskScheduler = taskScheduler;
         this.enabled = enabled;
         this.baseUrl = stripTrailingSlash(baseUrl);
         this.username = username;
         this.password = password;
         this.defaultApp = defaultApp;
+        this.timeZone = ZoneId.of(timeZone);
     }
 
     @Override
@@ -204,6 +218,246 @@ public class WvpVideoProvider implements VideoProvider {
     public VideoSnapshot getSnapshot(VideoCameraBinding binding) {
         ensureEnabled();
         return zlmVideoClient.getSnapshot(binding);
+    }
+
+    @Override
+    public VideoPtzResult controlPtz(VideoCameraBinding binding, VideoPtzRequest request) {
+        ensureEnabled();
+        requireGbChannel(binding);
+        VideoPtzRequest normalized = VideoPtzService.normalize(request);
+        UUID requestId = UUID.randomUUID();
+        long now = System.currentTimeMillis();
+        if (normalized.command().startsWith("preset.")) {
+            String operation = switch (normalized.command()) {
+                case "preset.save" -> "add";
+                case "preset.call" -> "call";
+                case "preset.delete" -> "delete";
+                default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported preset command");
+            };
+            authenticatedGet(
+                    "/api/front-end/preset/" + operation + "/" + encode(binding.providerDeviceId())
+                            + "/" + encode(binding.providerChannelId()),
+                    Map.of("presetId", normalized.presetId()));
+        } else {
+            String command = switch (normalized.command()) {
+                case "ptz.up" -> "up";
+                case "ptz.down" -> "down";
+                case "ptz.left" -> "left";
+                case "ptz.right" -> "right";
+                case "ptz.up-left" -> "upleft";
+                case "ptz.up-right" -> "upright";
+                case "ptz.down-left" -> "downleft";
+                case "ptz.down-right" -> "downright";
+                case "ptz.stop" -> "stop";
+                case "zoom.in" -> "zoomin";
+                case "zoom.out" -> "zoomout";
+                default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported WVP PTZ command");
+            };
+            int movementSpeed = Math.max(1, Math.round(normalized.speed() * 255 / 100.0f));
+            int zoomSpeed = Math.max(1, Math.round(normalized.speed() * 15 / 100.0f));
+            authenticatedGet(
+                    "/api/front-end/ptz/" + encode(binding.providerDeviceId())
+                            + "/" + encode(binding.providerChannelId()),
+                    Map.of(
+                            "command", command,
+                            "horizonSpeed", movementSpeed,
+                            "verticalSpeed", movementSpeed,
+                            "zoomSpeed", zoomSpeed));
+            if (normalized.durationMs() != null && !"ptz.stop".equals(normalized.command())) {
+                schedulePtzStop(binding, normalized.durationMs());
+            }
+        }
+        return new VideoPtzResult(
+                binding.tbDeviceId().toString(),
+                binding.cameraCode(),
+                binding.provider(),
+                "wvp-gb28181",
+                normalized.command(),
+                true,
+                requestId.toString(),
+                now);
+    }
+
+    @Override
+    public VideoRecordingList listRecordings(VideoCameraBinding binding, VideoRecordingQuery query) {
+        ensureEnabled();
+        requireGbChannel(binding);
+        JsonNode data = authenticatedGet(
+                "/api/gb_record/query/" + encode(binding.providerDeviceId())
+                        + "/" + encode(binding.providerChannelId()),
+                Map.of(
+                        "startTime", formatProviderTime(query.startTime()),
+                        "endTime", formatProviderTime(query.endTime())));
+        JsonNode recordList = data.path("recordList");
+        if (!recordList.isArray()) {
+            recordList = recordList.path("item");
+        }
+        List<VideoRecordingItem> recordings = new ArrayList<>();
+        if (recordList.isArray()) {
+            for (JsonNode record : recordList) {
+                long start = parseProviderTime(textFirst(record, "startTime", "start"));
+                long end = parseProviderTime(textFirst(record, "endTime", "end"));
+                if (start <= 0 || end <= start) {
+                    continue;
+                }
+                String recordingId = textFirst(record, "filePath", "name", "address");
+                if (recordingId.isBlank()) {
+                    recordingId = start + "-" + end;
+                }
+                recordings.add(new VideoRecordingItem(
+                        recordingId,
+                        start,
+                        end,
+                        end - start,
+                        nullableLong(record, "fileSize"),
+                        textFirst(record, "type", "recordType")));
+            }
+        }
+        int total = data.path("sumNum").asInt(recordings.size());
+        return new VideoRecordingList(
+                binding.tbDeviceId().toString(),
+                binding.cameraCode(),
+                query.startTime(),
+                query.endTime(),
+                total,
+                List.copyOf(recordings));
+    }
+
+    @Override
+    public VideoRecordingPlaybackSource startRecordingPlayback(
+            VideoCameraBinding binding,
+            VideoRecordingPlayRequest request) {
+        ensureEnabled();
+        requireGbChannel(binding);
+        JsonNode playback = authenticatedGet(
+                "/api/playback/start/" + encode(binding.providerDeviceId())
+                        + "/" + encode(binding.providerChannelId()),
+                Map.of(
+                        "startTime", formatProviderTime(request.startTime()),
+                        "endTime", formatProviderTime(request.endTime())));
+        JsonNode mediaInfo = playback.path("mediaInfo");
+        String app = textOrDefault(playback, "app", textOrDefault(mediaInfo, "app", "rtp"));
+        String stream = textOrDefault(playback, "stream",
+                textOrDefault(playback, "streamId", textOrDefault(mediaInfo, "stream", "")));
+        if (stream.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "WVP playback did not return a stream ID");
+        }
+        return new VideoRecordingPlaybackSource(
+                app,
+                stream,
+                !mediaInfo.isMissingNode() && !mediaInfo.isNull(),
+                hlsUrl(app, stream));
+    }
+
+    @Override
+    public void stopRecordingPlayback(VideoCameraBinding binding, String providerStreamId) {
+        ensureEnabled();
+        requireGbChannel(binding);
+        authenticatedGet(
+                "/api/playback/stop/" + encode(binding.providerDeviceId())
+                        + "/" + encode(binding.providerChannelId())
+                        + "/" + encode(providerStreamId),
+                Map.of());
+    }
+
+    @Override
+    public void controlRecordingPlayback(
+            VideoCameraBinding binding,
+            String providerStreamId,
+            VideoRecordingControlRequest request) {
+        ensureEnabled();
+        String stream = encode(providerStreamId);
+        String path;
+        switch (request.action()) {
+            case "pause" -> path = "/api/playback/pause/" + stream;
+            case "resume" -> path = "/api/playback/resume/" + stream;
+            case "seek" -> path = "/api/playback/seek/" + stream + "/" + request.positionSeconds();
+            case "speed" -> path = "/api/playback/speed/" + stream + "/" + formatSpeed(request.speed());
+            default -> throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Unsupported recording playback action: " + request.action());
+        }
+        authenticatedGet(path, Map.of());
+    }
+
+    private void schedulePtzStop(VideoCameraBinding binding, int durationMs) {
+        taskScheduler.schedule(() -> {
+            try {
+                authenticatedGet(
+                        "/api/front-end/ptz/" + encode(binding.providerDeviceId())
+                                + "/" + encode(binding.providerChannelId()),
+                        Map.of(
+                                "command", "stop",
+                                "horizonSpeed", 1,
+                                "verticalSpeed", 1,
+                                "zoomSpeed", 1));
+            } catch (RuntimeException error) {
+                log.warn("[{}] Failed to send scheduled WVP PTZ stop: {}",
+                        binding.tbDeviceId(), error.getMessage());
+            }
+        }, Instant.ofEpochMilli(System.currentTimeMillis() + durationMs));
+    }
+
+    private void requireGbChannel(VideoCameraBinding binding) {
+        if (binding.providerDeviceId() == null || binding.providerDeviceId().isBlank()
+                || binding.providerChannelId() == null || binding.providerChannelId().isBlank()) {
+            throw new ResponseStatusException(
+                    HttpStatus.NOT_IMPLEMENTED,
+                    "This operation requires providerDeviceId and providerChannelId in the camera binding");
+        }
+    }
+
+    private String formatProviderTime(long timestamp) {
+        return DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                .format(Instant.ofEpochMilli(timestamp).atZone(timeZone));
+    }
+
+    private long parseProviderTime(String value) {
+        if (value == null || value.isBlank()) {
+            return 0;
+        }
+        try {
+            return LocalDateTime.parse(value, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                    .atZone(timeZone)
+                    .toInstant()
+                    .toEpochMilli();
+        } catch (RuntimeException error) {
+            try {
+                return Instant.parse(value).toEpochMilli();
+            } catch (RuntimeException ignored) {
+                return 0;
+            }
+        }
+    }
+
+    private String textFirst(JsonNode node, String... fields) {
+        for (String field : fields) {
+            String value = node.path(field).asText("");
+            if (!value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private Long nullableLong(JsonNode node, String field) {
+        JsonNode value = node.path(field);
+        if (value.isIntegralNumber()) {
+            return value.asLong();
+        }
+        try {
+            String text = value.asText("");
+            return text.isBlank() ? null : Long.parseLong(text);
+        } catch (NumberFormatException error) {
+            return null;
+        }
+    }
+
+    private String formatSpeed(Double speed) {
+        if (speed == null) {
+            return "1";
+        }
+        return speed == Math.rint(speed) ? Long.toString(speed.longValue()) : speed.toString();
     }
 
     private JsonNode authenticatedGet(String path, Map<String, ?> queryParameters) {

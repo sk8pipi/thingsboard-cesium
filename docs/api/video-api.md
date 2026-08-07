@@ -724,3 +724,248 @@ Copy-Item .env.video.example .env.video.local
 说明当前后端不是通过上述脚本启动，或者缺少
 `VIDEO_WVP_ENABLED=true`。这与 ThingsBoard 设备在线状态、摄像头 UUID
 绑定和 Docker 容器是否在线无关；加载环境变量并重启后端即可。
+
+## 17. PTZ 统一 API
+
+### 17.1 请求
+
+```http
+POST /api/video/cameras/{tbDeviceId}/ptz
+Content-Type: application/json
+X-Authorization: Bearer <THINGSBOARD_JWT>
+```
+
+```json
+{
+  "command": "ptz.up",
+  "speed": 50,
+  "durationMs": 500,
+  "presetId": null
+}
+```
+
+支持的 `command`：
+
+- 方向：`ptz.up`、`ptz.down`、`ptz.left`、`ptz.right`、
+  `ptz.up-left`、`ptz.up-right`、`ptz.down-left`、`ptz.down-right`、`ptz.stop`。
+- 变焦：`zoom.in`、`zoom.out`。
+- 预置位：`preset.call`、`preset.save`、`preset.delete`，必须提供
+  `presetId`（1～255）。
+
+`speed` 范围为 1～100，默认 50；`durationMs` 可选，范围为
+100～10000。调用者必须拥有 ThingsBoard Device 的 `RPC_CALL` 权限。
+
+```powershell
+$ptzBody = @{
+  command = "ptz.left"
+  speed = 50
+  durationMs = 500
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://127.0.0.1:8080/api/video/cameras/$tbDeviceId/ptz" `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body $ptzBody
+```
+
+### 17.2 路由规则与响应
+
+绑定同时存在 `providerDeviceId` 和 `providerChannelId` 时，WVP Provider
+把统一命令翻译为 GB28181 PTZ；否则通过 ThingsBoard 单向 RPC 发送同名
+命令，供当前模拟摄像头或网关设备消费。
+
+```json
+{
+  "tbDeviceId": "4d6f7eb0-5c25-11f1-86cb-01b6b6f1aba4",
+  "cameraCode": "sim-camera-001",
+  "provider": "WVP_STREAM_PROXY",
+  "transport": "thingsboard-rpc",
+  "command": "ptz.left",
+  "accepted": true,
+  "requestId": "6a9498cc-90f6-4c61-b769-b2a2881ab079",
+  "requestedAt": 1785290000000
+}
+```
+
+`accepted=true` 表示后端已接受并投递，不代表摄像头机械动作一定成功。
+真实 GB28181 通道的 `transport` 为 `wvp-gb28181`。
+
+## 18. 录像检索与回放 API
+
+录像能力要求绑定配置真实的 `providerDeviceId` 和
+`providerChannelId`。当前仅有直播流的 `sim-camera-001` 可以验证 PTZ RPC，
+但不能伪造 WVP 设备录像。
+
+### 18.1 检索录像
+
+```http
+GET /api/video/cameras/{tbDeviceId}/recordings?startTime=<epochMs>&endTime=<epochMs>
+```
+
+时间使用 Unix epoch 毫秒，查询范围最大 31 天。
+
+```powershell
+$startTime = [DateTimeOffset]::Now.AddHours(-6).ToUnixTimeMilliseconds()
+$endTime = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
+Invoke-RestMethod `
+  -Method Get `
+  -Uri "http://127.0.0.1:8080/api/video/cameras/$tbDeviceId/recordings?startTime=$startTime&endTime=$endTime" `
+  -Headers $headers
+```
+
+响应只返回业务需要的元数据，不返回 Provider 内部下载地址或凭证：
+
+```json
+{
+  "tbDeviceId": "4d6f7eb0-5c25-11f1-86cb-01b6b6f1aba4",
+  "cameraCode": "cam-gb-001",
+  "startTime": 1785268400000,
+  "endTime": 1785290000000,
+  "total": 1,
+  "recordings": [
+    {
+      "recordingId": "provider-recording-id",
+      "startTime": 1785286400000,
+      "endTime": 1785290000000,
+      "durationMs": 3600000,
+      "fileSize": 104857600,
+      "recordType": "time"
+    }
+  ]
+}
+```
+
+### 18.2 创建回放会话
+
+```http
+POST /api/video/cameras/{tbDeviceId}/recordings/play
+Content-Type: application/json
+```
+
+```json
+{
+  "startTime": 1785286400000,
+  "endTime": 1785290000000,
+  "protocol": "hls"
+}
+```
+
+响应中的 `url` 是唯一应交给播放器的地址：
+
+```json
+{
+  "tbDeviceId": "4d6f7eb0-5c25-11f1-86cb-01b6b6f1aba4",
+  "cameraCode": "cam-gb-001",
+  "provider": "WVP_STREAM_PROXY",
+  "sessionId": "7936b4dc-f436-483c-a7b2-9e4b425ab45e",
+  "app": "rtp",
+  "stream": "playback-stream-id",
+  "protocol": "hls",
+  "url": "/video-stream/rtp/playback-stream-id/hls.m3u8",
+  "online": true,
+  "startTime": 1785286400000,
+  "endTime": 1785290000000,
+  "expiresAt": 1785290900000
+}
+```
+
+### 18.3 控制回放
+
+```http
+POST /api/video/cameras/{tbDeviceId}/recordings/control
+```
+
+暂停或恢复：
+
+```json
+{"sessionId":"7936b4dc-f436-483c-a7b2-9e4b425ab45e","action":"pause"}
+```
+
+定位，单位为相对录像开始时间的秒数：
+
+```json
+{"sessionId":"7936b4dc-f436-483c-a7b2-9e4b425ab45e","action":"seek","positionSeconds":120}
+```
+
+倍速只允许 `0.25`、`0.5`、`1`、`2`、`4`、`8`：
+
+```json
+{"sessionId":"7936b4dc-f436-483c-a7b2-9e4b425ab45e","action":"speed","speed":2}
+```
+
+### 18.4 停止回放
+
+```http
+POST /api/video/cameras/{tbDeviceId}/recordings/stop
+```
+
+```json
+{"sessionId":"7936b4dc-f436-483c-a7b2-9e4b425ab45e"}
+```
+
+回放会话默认 900 秒到期；过期后后端自动调用 Provider 停止接口。
+普通用户只能操作自己的会话，`TENANT_ADMIN` 可以释放同租户设备上的会话。
+
+## 19. ZLMediaKit Hook API
+
+Hook 不使用 ThingsBoard JWT，而使用独立的 `VIDEO_ZLM_HOOK_TOKEN`。
+未配置该变量时接口返回 `503`；Token 错误返回 `401`。
+
+直接事件路由：
+
+```http
+POST /api/noauth/video/hooks/zlm/on_stream_changed
+X-Video-Hook-Token: <VIDEO_ZLM_HOOK_TOKEN>
+Content-Type: application/json
+```
+
+也支持受信任转发器统一转发：
+
+```http
+POST /api/noauth/video/hooks/zlm
+X-Zlm-Hook-Event: on_stream_changed
+X-Video-Hook-Token: <VIDEO_ZLM_HOOK_TOKEN>
+```
+
+如果 WVP 已独占 ZLMediaKit Hook 地址，必须使用受信任的 Nginx/Hook
+转发器把原请求继续发给 WVP，同时镜像一份到上述统一转发入口；不要直接覆盖
+WVP Hook 地址。Token 只能保存在 ZLMediaKit 或转发器的服务端配置中。
+
+当前处理的状态事件包括：
+
+- `on_stream_changed`
+- `on_stream_none_reader`
+- `on_play`
+- `on_record_start`、`on_record_stop`
+- `on_record_mp4`、`on_record_ts`
+
+Hook 根据 `mediaServerId + app + stream` 查找 `video_camera_binding`，写入：
+
+```text
+streamOnline
+videoLoss
+readerCount
+recording
+videoHookUpdatedAt
+videoStreamStatus
+lastRecordingAt
+```
+
+写入同时更新历史遥测、最新值和 ThingsBoard WebSocket。对于
+`on_stream_none_reader`，响应固定包含 `{"code":0,"close":false}`，流是否关闭
+仍由 Video API 会话策略决定。
+
+## 20. 新增配置项
+
+```text
+VIDEO_PTZ_RPC_TIMEOUT_MS=10000
+VIDEO_RECORDING_SESSION_TTL_SECONDS=900
+VIDEO_RECORDING_SESSION_CLEANUP_INTERVAL_MS=30000
+VIDEO_ZLM_HOOK_TOKEN=<独立随机密钥>
+VIDEO_WVP_TIME_ZONE=Asia/Shanghai
+```
+
+`VIDEO_ZLM_HOOK_TOKEN` 不得与 WVP 密码、ZLMediaKit Secret、ThingsBoard
+JWT 或 Device Token 复用，也不得提交到 Git。

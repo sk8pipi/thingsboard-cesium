@@ -2084,6 +2084,12 @@ video:
     cleanup-interval-ms: "${VIDEO_SESSION_CLEANUP_INTERVAL_MS:30000}"
   snapshot:
     cache-seconds: "${VIDEO_SNAPSHOT_CACHE_SECONDS:5}"
+  ptz:
+    rpc-timeout-ms: "${VIDEO_PTZ_RPC_TIMEOUT_MS:10000}"
+  recording:
+    session:
+      ttl-seconds: "${VIDEO_RECORDING_SESSION_TTL_SECONDS:900}"
+      cleanup-interval-ms: "${VIDEO_RECORDING_SESSION_CLEANUP_INTERVAL_MS:30000}"
   zlm:
     enabled: "${VIDEO_ZLM_ENABLED:false}"
     base-url: "${VIDEO_ZLM_BASE_URL:http://127.0.0.1:18081}"
@@ -2094,9 +2100,12 @@ video:
     snapshot-max-bytes: "${VIDEO_ZLM_SNAPSHOT_MAX_BYTES:5242880}"
     connect-timeout-ms: "${VIDEO_ZLM_CONNECT_TIMEOUT_MS:5000}"
     read-timeout-ms: "${VIDEO_ZLM_READ_TIMEOUT_MS:20000}"
+    # Shared secret used only by ZLMediaKit or a trusted Hook relay.
+    hook-token: "${VIDEO_ZLM_HOOK_TOKEN:}"
   wvp:
     enabled: "${VIDEO_WVP_ENABLED:false}"
     base-url: "${VIDEO_WVP_BASE_URL:http://127.0.0.1:18080}"
     username: "${VIDEO_WVP_USERNAME:admin}"
     password: "${VIDEO_WVP_PASSWORD:}"
     default-app: "${VIDEO_WVP_DEFAULT_APP:live}"
+    time-zone: "${VIDEO_WVP_TIME_ZONE:Asia/Shanghai}"

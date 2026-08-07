@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.thingsboard.server.common.data.Device;
 import org.thingsboard.server.common.data.exception.ThingsboardErrorCode;
@@ -47,8 +48,18 @@ import org.thingsboard.server.service.video.VideoStopRequest;
 import org.thingsboard.server.service.video.VideoStopResult;
 import org.thingsboard.server.service.video.VideoCameraInfo;
 import org.thingsboard.server.service.video.VideoCameraService;
+import org.thingsboard.server.service.video.VideoAdvancedService;
 import org.thingsboard.server.service.video.VideoPlaybackInfo;
 import org.thingsboard.server.service.video.VideoPlayRequest;
+import org.thingsboard.server.service.video.VideoPtzRequest;
+import org.thingsboard.server.service.video.VideoPtzResult;
+import org.thingsboard.server.service.video.VideoRecordingControlRequest;
+import org.thingsboard.server.service.video.VideoRecordingControlResult;
+import org.thingsboard.server.service.video.VideoRecordingList;
+import org.thingsboard.server.service.video.VideoRecordingPlayRequest;
+import org.thingsboard.server.service.video.VideoRecordingPlaybackInfo;
+import org.thingsboard.server.service.video.VideoRecordingStopRequest;
+import org.thingsboard.server.service.video.VideoRecordingStopResult;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
@@ -62,6 +73,7 @@ import java.util.concurrent.TimeUnit;
 public class VideoController extends BaseController {
 
     private final VideoCameraService videoCameraService;
+    private final VideoAdvancedService videoAdvancedService;
 
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ThingsboardErrorResponse> handleVideoApiException(ResponseStatusException error) {
@@ -192,6 +204,71 @@ public class VideoController extends BaseController {
                 .body(snapshot.data());
     }
 
+    @ApiOperation(value = "Control camera PTZ",
+            notes = "Uses WVP GB28181 PTZ for bound provider channels and ThingsBoard RPC for simulated or gateway cameras.")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN', 'CUSTOMER_USER')")
+    @PostMapping("/cameras/{deviceId}/ptz")
+    public VideoPtzResult controlPtz(
+            @PathVariable String deviceId,
+            @RequestBody VideoPtzRequest request) throws ThingsboardException {
+        return videoAdvancedService.controlPtz(
+                bindingForOperation(deviceId, Operation.RPC_CALL),
+                getCurrentUser(),
+                request);
+    }
+
+    @ApiOperation(value = "Query camera recordings",
+            notes = "Queries provider recordings in an epoch-millisecond time range of at most 31 days.")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN', 'CUSTOMER_USER')")
+    @GetMapping("/cameras/{deviceId}/recordings")
+    public VideoRecordingList listRecordings(
+            @PathVariable String deviceId,
+            @RequestParam long startTime,
+            @RequestParam long endTime) throws ThingsboardException {
+        return videoAdvancedService.listRecordings(readableBinding(deviceId), startTime, endTime);
+    }
+
+    @ApiOperation(value = "Start recording playback",
+            notes = "Starts provider playback and returns a short-lived, browser-safe HLS session.")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN', 'CUSTOMER_USER')")
+    @PostMapping("/cameras/{deviceId}/recordings/play")
+    public VideoRecordingPlaybackInfo startRecordingPlayback(
+            @PathVariable String deviceId,
+            @RequestBody VideoRecordingPlayRequest request) throws ThingsboardException {
+        return videoAdvancedService.startRecordingPlayback(
+                readableBinding(deviceId),
+                getCurrentUser().getId().getId(),
+                request);
+    }
+
+    @ApiOperation(value = "Control recording playback",
+            notes = "Pauses, resumes, seeks or changes speed for an owned recording playback session.")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN', 'CUSTOMER_USER')")
+    @PostMapping("/cameras/{deviceId}/recordings/control")
+    public VideoRecordingControlResult controlRecordingPlayback(
+            @PathVariable String deviceId,
+            @RequestBody VideoRecordingControlRequest request) throws ThingsboardException {
+        return videoAdvancedService.controlRecordingPlayback(
+                readableBinding(deviceId),
+                getCurrentUser().getId().getId(),
+                request,
+                getCurrentUser().getAuthority() == Authority.TENANT_ADMIN);
+    }
+
+    @ApiOperation(value = "Stop recording playback",
+            notes = "Stops and releases an owned recording playback session.")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN', 'CUSTOMER_USER')")
+    @PostMapping("/cameras/{deviceId}/recordings/stop")
+    public VideoRecordingStopResult stopRecordingPlayback(
+            @PathVariable String deviceId,
+            @RequestBody VideoRecordingStopRequest request) throws ThingsboardException {
+        return videoAdvancedService.stopRecordingPlayback(
+                readableBinding(deviceId),
+                getCurrentUser().getId().getId(),
+                request,
+                getCurrentUser().getAuthority() == Authority.TENANT_ADMIN);
+    }
+
     @ApiOperation(value = "Get camera binding", notes = "Gets the video mapping for one ThingsBoard camera device.")
     @PreAuthorize("hasAnyAuthority('TENANT_ADMIN', 'CUSTOMER_USER')")
     @GetMapping("/devices/{deviceId}/binding")
@@ -220,7 +297,13 @@ public class VideoController extends BaseController {
     }
 
     private VideoCameraBinding readableBinding(String deviceId) throws ThingsboardException {
-        Device device = checkDeviceId(new DeviceId(toUUID(deviceId)), Operation.READ);
+        return bindingForOperation(deviceId, Operation.READ);
+    }
+
+    private VideoCameraBinding bindingForOperation(
+            String deviceId,
+            Operation operation) throws ThingsboardException {
+        Device device = checkDeviceId(new DeviceId(toUUID(deviceId)), operation);
         return videoCameraService.getBinding(device.getTenantId().getId(), device.getId().getId());
     }
 

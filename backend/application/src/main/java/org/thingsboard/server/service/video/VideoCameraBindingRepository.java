@@ -116,6 +116,22 @@ public class VideoCameraBindingRepository {
                 tenantId);
     }
 
+    public List<VideoCameraBinding> findAllByStream(String app, String stream, String mediaServerId) {
+        return jdbcTemplate.query("""
+                        SELECT *
+                        FROM video_camera_binding
+                        WHERE stream_app = ?
+                          AND stream_id = ?
+                          AND enabled = true
+                          AND (? IS NULL OR media_server_id IS NULL OR media_server_id = ?)
+                        """,
+                ROW_MAPPER,
+                app,
+                stream,
+                mediaServerId,
+                mediaServerId);
+    }
+
     public VideoCameraBinding save(UUID tenantId, UUID deviceId, VideoCameraBindingRequest request) {
         long now = System.currentTimeMillis();
         UUID id = UUID.randomUUID();

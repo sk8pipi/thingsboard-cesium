@@ -932,3 +932,50 @@ Git 忽略的 `.env.video.local` 加载 PostgreSQL、WVP 和 ZLMediaKit 配置�
 - 如果后端未加载 `VIDEO_WVP_ENABLED=true`，播放 API 应返回 `503`，不得由
   前端绕过 Video API 拼接媒体地址。
 - `.env.video.local` 只用于当前开发机，不能提交，也不能下发到浏览器。
+
+## 24. PTZ、录像回放与 ZLMediaKit Hook 实施记录
+
+#### 2026-07-30
+
+统一 PTZ 已实现为：
+
+```text
+POST /api/video/cameras/{tbDeviceId}/ptz
+```
+
+- API 使用 ThingsBoard JWT，并校验 Device `RPC_CALL` 权限。
+- 有 `providerDeviceId + providerChannelId` 的 WVP 绑定转换为 GB28181 PTZ。
+- 没有 Provider 通道标识的模拟/网关摄像头回退为 ThingsBoard 单向 RPC。
+- 前端仍然只使用统一命令，不判断 WVP、MQTT 或厂商类型。
+
+录像与回放已实现：
+
+```text
+GET  /api/video/cameras/{tbDeviceId}/recordings
+POST /api/video/cameras/{tbDeviceId}/recordings/play
+POST /api/video/cameras/{tbDeviceId}/recordings/control
+POST /api/video/cameras/{tbDeviceId}/recordings/stop
+```
+
+- 外部身份始终为 ThingsBoard Device UUID。
+- Provider 内部设备、通道和回放流 ID 不成为前端主键。
+- 回放地址仍由 Video API 生成同源 `/video-stream/{app}/{stream}/hls.m3u8`。
+- 回放使用用户所有权和 TTL 会话；过期会话由后端释放 Provider 流。
+- WVP 时间格式转换统一使用 `VIDEO_WVP_TIME_ZONE`。
+
+ZLMediaKit Hook 接入点：
+
+```text
+POST /api/noauth/video/hooks/zlm/{event}
+POST /api/noauth/video/hooks/zlm
+```
+
+- Hook 使用独立 `VIDEO_ZLM_HOOK_TOKEN`，不使用浏览器 JWT。
+- 状态通过 `mediaServerId + app + stream` 解析绑定，再写回 ThingsBoard
+  `streamOnline`、`videoLoss`、`readerCount`、`recording` 等遥测。
+- 遥测写入同时保存历史、更新 latest 并发送 WebSocket 更新。
+- WVP 已占用 ZLM Hook 时必须通过受信任转发器做扇出，不能破坏 WVP 原 Hook。
+- Hook 事件是实时状态主通道；ZLM REST 状态查询继续作为按需诊断和降级路径。
+
+新增 Provider 必须实现所需的 `VideoProvider` PTZ、录像查询、回放启动、
+停止和控制方法；不支持的能力返回 `501`，不得在前端新增 Provider 分支。
