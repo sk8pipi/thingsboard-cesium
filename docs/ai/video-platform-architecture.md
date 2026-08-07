@@ -3,7 +3,9 @@
 > 状态：项目级权威架构文档  
 > 最后更新：2026-07-28  
 > 适用范围：ThingsBoard、Vue、Cesium、WVP-GB28181-pro、ZLMediaKit、模拟摄像头、Video API、监控页面  
-> 强制要求：任何 AI 在分析或修改本项目之前，必须完整阅读本文档。
+> 强制要求：任何 AI 在分析或修改视频、摄像头、ThingsBoard 摄像头身份、WVP、
+> ZLMediaKit、Video API、Cesium 摄像头点位或本地视频环境之前，必须完整阅读本文档。
+> 其他任务按 `docs/ai/architecture-index.md` 路由。
 
 ## 1. 文档目标
 
@@ -803,7 +805,8 @@ http://127.0.0.1/live/virtual-oilwell-cam-001/hls.m3u8
 
 后续 AI 必须遵守：
 
-1. 修改视频、摄像头、ThingsBoard 或 Cesium 代码前，完整阅读本文档。
+1. 修改视频、摄像头、ThingsBoard 摄像头身份、Video API、Cesium 摄像头点位或
+   视频基础设施代码前，完整阅读本文档；其他任务按架构索引路由。
 2. 先检查当前工作树，保留用户已有修改。
 3. 不得重新使用 Token 作为摄像头身份。
 4. 不得把完整运行时播放 URL 重新设为 ThingsBoard 权威属性。
@@ -842,6 +845,14 @@ http://127.0.0.1/live/virtual-oilwell-cam-001/hls.m3u8
 - Cesium 点位绑定 `tbDeviceId`，点击时调用 Video API 播放。
 - 当前模拟摄像头、状态发布器和流注册器完成容器化。
 
+### 2026-08-07
+
+- AI 必读文档改为由 `docs/ai/architecture-index.md` 按任务范围路由，避免非视频任务
+  重复加载整份视频架构文档。
+- 所有涉及视频、摄像头身份、Video API、Cesium 摄像头点位、WVP、ZLMediaKit 和
+  本地视频环境的任务仍必须完整阅读本文档。
+- 本次调整只改变 AI 协作治理和上下文加载范围，不改变任何运行时架构、数据模型、
+  API 契约、迁移路径或兼容行为，因此不需要代码或数据迁移。
 
 ## 21. Video API 第二阶段实施记录
 
