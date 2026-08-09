@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-08-08",
+  "tasks": [
+    {
+      "taskId": "agent-governance-ssot",
+      "name": "完善多 Agent 文件系统唯一真相来源",
+      "status": "待人工提交",
+      "owner": "主 Agent",
+      "taskDirectory": "docs/changes/agent-governance-ssot",
+      "worktree": ".",
+      "fileScopes": [
+        ".codex/agents",
+        "AGENTS.md",
+        "docs/ai/architecture-index.md",
+        "docs/ai/multi-agent-development.md",
+        "docs/ai/project-architecture.md",
+        "docs/changes/_template",
+        "docs/changes/agent-governance-ssot",
+        "scripts/validate-agent-governance.ps1"
+      ],
+      "sharedResources": [],
+      "lastUpdated": "2026-08-08"
+    }
+  ]
+}

@@ -106,7 +106,22 @@ backend/application/src/test/java/org/thingsboard/server/service/video/
 
 ## 6. 文档与事实来源
 
-优先级和用途如下：
+本项目采用“按事实类别确定唯一正式来源”，不使用一个文件覆盖所有生命周期。分类如下：
+
+| 事实类别 | 正式来源 | 说明 |
+| --- | --- | --- |
+| 当前任务方向 | 用户当前明确决定 | 产生持久影响后必须写入任务决策或架构文档 |
+| 活动任务与资源占用 | docs/changes/active-tasks.json | 只保留活动任务，由中央主 Agent 串行维护 |
+| 任务目标、状态和下一步 | docs/changes/<任务编号>/delivery.md | 当前任务中央状态文件 |
+| 已批准决策 | docs/changes/<任务编号>/decisions.md | 记录 RIO、兼容、迁移和回退，不复制完整讨论 |
+| 长期架构边界 | 领域权威架构文档 | 稳定决策晋升后的长期约束 |
+| Agent 协作规范 | docs/ai/multi-agent-development.md | `.codex/agents/*.toml` 是运行时执行投影 |
+| API 调用契约 | docs/api/ 下对应 API 文档 | 必须与当前实现和契约测试一致 |
+| 当前实现状态 | 当前代码、数据库 schema 和配置 | 文档不得覆盖与实现不一致的事实 |
+| 已提交变更历史 | Git 历史 | 仅用户执行 Git 写操作 |
+| 已执行验证 | 测试、CI 和 verification.md | 未实际运行的检查不得写为通过 |
+
+同一类别内部发生冲突时，按以下优先级核实：
 
 1. 用户当前明确决定：决定当前任务方向。
 2. docs/changes/<任务编号>/decisions.md：当前需求已批准共识。
@@ -116,4 +131,5 @@ backend/application/src/test/java/org/thingsboard/server/service/video/
 6. 测试和 CI：反映已经执行的验证事实。
 7. Agent 摘要和历史聊天：仅作为线索，必须回到正式来源核实。
 
-发生冲突时不得静默选择其中一方，应向用户说明并更新正式文档。
+用户当前决定尚未落盘时只具有当前对话效力；主 Agent 必须在继续委派或切换上下文前
+写入对应正式来源。发生冲突时不得静默选择其中一方，应向用户说明并更新正式文档。

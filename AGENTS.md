@@ -14,6 +14,10 @@
 中大型任务，或涉及子 Agent、任务拆分、交接、worktree、任务档案和上下文切换时，
 还必须完整读取 docs/ai/multi-agent-development.md。
 
+实际使用子 Agent、建立独立 Codex 任务或发生上下文切换前，必须先创建
+docs/changes/<任务编号>/ 任务档案，并由当前主 Agent 在
+docs/changes/active-tasks.json 中登记任务、工作树、文件范围和共享资源。
+
 随后必须根据架构索引完整读取受影响领域的权威文档。涉及视频、摄像头、
 ThingsBoard 摄像头身份、WVP、ZLMediaKit、Video API、Cesium 摄像头点位、
 播放、截图、PTZ、录像、回放、流状态或本地视频验证环境的任务，必须完整读取：
@@ -42,6 +46,20 @@ ThingsBoard 摄像头身份、WVP、ZLMediaKit、Video API、Cesium 摄像头点
   所有权时，才允许并行写入。大型独立写入应使用独立 Codex 任务和 Git worktree。
 - 子 Agent 只返回精简、结构化的中文结论，不向主上下文倾倒完整日志。
 - 角色、任务包、上下文交接和停止条件遵循 docs/ai/multi-agent-development.md。
+
+## 事实来源与执行投影
+
+- 不存在一个包办所有内容的“万能文件”；每类事实只能有一个明确的正式来源。
+- docs/changes/active-tasks.json 是活动任务、工作树、文件范围和共享资源占用的中央登记。
+- docs/changes/<任务编号>/ 是该任务目标、已批准决策、进度、交接和验证的长期档案。
+- docs/ai/multi-agent-development.md 是 Agent 角色与协作流程的规范源；
+  .codex/agents/*.toml 是 Codex 运行时执行投影，不得自行改变规范定义的权限和边界。
+- 当前代码、数据库 schema 和 API 实现反映实现状态；Git 历史记录用户实际提交事实；
+  测试和 CI 记录已执行的验证事实。
+- 中央活动任务登记只由当前主 Agent 串行维护。实现 Agent 不得自行登记、修改其他任务
+  或抢占已登记的文件范围和共享资源。
+- 修改本节涉及的治理文档、任务模板或 .codex/agents/*.toml 后，必须运行
+  scripts/validate-agent-governance.ps1。
 
 ## 调研、设计与实现
 

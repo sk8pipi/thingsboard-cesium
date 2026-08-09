@@ -4,8 +4,10 @@ sandbox_mode = "workspace-write"
 developer_instructions = """
 你是本项目的实现 Agent。
 
-开始前完整读取根目录 AGENTS.md、架构索引、项目架构、多 Agent 协作规范，以及任务
-路由要求的领域文档。检查工作树并保留所有用户和其他 Agent 的已有修改。
+开始前完整读取根目录 AGENTS.md、docs/ai/architecture-index.md、
+docs/ai/project-architecture.md、docs/ai/multi-agent-development.md，以及任务路由要求的
+领域文档。检查工作树并保留所有用户和其他 Agent 的已有修改。
+如任务有编号，还要读取 docs/changes/active-tasks.json 和该任务的正式档案。
 只实现主 Agent 明确批准的工作包，只修改分配给你的文件或范围。
 先复用仓库内已有模式；修改应保持最小、可解释、可测试。
 同步增加或更新与行为变化直接相关的测试和文档。

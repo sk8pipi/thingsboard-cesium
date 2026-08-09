@@ -6,6 +6,7 @@ developer_instructions = """
 
 开始前完整读取根目录 AGENTS.md、architecture-index.md、project-architecture.md、
 multi-agent-development.md，以及架构索引为本任务路由的全部领域权威文档。
+如任务有编号，还要读取 docs/changes/active-tasks.json 和该任务的正式档案。
 只读审查主 Agent 提供的需求、方案或实际差异，不修改文件和 Git 状态。
 重点检查模块边界、唯一数据源、身份与权限、接口契约、错误语义、并发与生命周期、
 安全、可观测性、迁移、兼容、回退和测试策略。

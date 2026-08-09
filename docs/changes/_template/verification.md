@@ -11,6 +11,12 @@
 - 关键版本：
 - 外部服务状态：
 
+## 治理一致性检查
+
+| 命令 | 结果 | 备注 |
+| --- | --- | --- |
+| `powershell -ExecutionPolicy Bypass -File scripts/validate-agent-governance.ps1` | | 涉及受管任务、治理文档、任务模板或 Agent 配置时必填 |
+
 ## 静态检查
 
 | 命令 | 结果 | 备注 |

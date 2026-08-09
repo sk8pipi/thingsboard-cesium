@@ -12,7 +12,8 @@
 还必须完整读取 docs/ai/multi-agent-development.md。
 
 如果当前需求已经建立 docs/changes/<任务编号>/，还必须读取其中的 delivery.md、
-decisions.md 和 verification.md。
+decisions.md 和 verification.md。实际使用子 Agent、独立 worktree 或上下文切换时，
+还必须读取 docs/changes/active-tasks.json，确认任务登记、文件范围和共享资源没有冲突。
 
 ## 领域路由
 
@@ -24,7 +25,8 @@ decisions.md 和 verification.md。
 | Vue 3 前端、普通 Cesium 地图、仪表盘运行时 | docs/ai/project-architecture.md | 若触及摄像头或播放，再追加视频文档 |
 | ThingsBoard Java 后端、DAO、权限、数据库 | docs/ai/project-architecture.md | 若触及视频绑定或状态，再追加视频文档 |
 | video-platform/、本地视频容器、相关启动脚本 | docs/ai/video-platform-architecture.md | 不得泄露本地密钥或并行争用共享端口 |
-| 多 Agent、任务拆分、worktree、交接、上下文切换 | docs/ai/multi-agent-development.md | 该文档是协作流程权威来源 |
+| 多 Agent、任务拆分、worktree、交接、上下文切换 | docs/ai/multi-agent-development.md、docs/changes/active-tasks.json、当前任务档案 | 协作文档是规范源，活动登记和任务档案记录运行状态 |
+| Agent 角色权限、并发和运行配置 | docs/ai/multi-agent-development.md、.codex/config.toml、.codex/agents/*.toml | 协作文档定义规范，TOML 是执行投影，修改后运行治理校验 |
 
 ## 新领域文档
 
