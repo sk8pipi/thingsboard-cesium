@@ -49,9 +49,8 @@
       </div>
 
       <div class="camera-video-panel__meta">
-        <span>HLS：{{ playbackUrl || '-' }}</span>
-        <span>RTSP：{{ camera?.rtspUrl || '-' }}</span>
-        <span>WebRTC：{{ camera?.webRtcUrl || '-' }}</span>
+        <span>视频流：{{ playbackUrl ? '已通过后端会话提供' : '未建立' }}</span>
+        <span>协议：HLS</span>
       </div>
 
       <div class="camera-video-panel__section">
@@ -187,19 +186,8 @@
   let hls: Hls | null = null;
   let playerState: 'idle' | 'ready' | 'error' = 'idle';
 
-  const playbackUrl = computed(() => props.camera?.hlsUrl || props.camera?.streamUrl || '');
-  const monitorPageUrl = computed(() => {
-    if (props.camera?.monitorPageUrl) {
-      return props.camera.monitorPageUrl;
-    }
-
-    const cameraCode = props.camera?.cameraCode || props.camera?.id || '';
-    if (!cameraCode) {
-      return '';
-    }
-
-    return '';
-  });
+  const playbackUrl = computed(() => '');
+  const monitorPageUrl = computed(() => '');
   const preferMonitorPage = computed(() => Boolean(monitorPageUrl.value));
 
   const statusLabel = computed(() => {
@@ -331,7 +319,7 @@
         return;
       }
 
-      console.warn('Video play failed:', error);
+      console.warn('Video play failed.');
       setError('实时视频已加载，请点击播放器开始预览。');
     }
   }
@@ -390,7 +378,11 @@
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
 
-        console.error('HLS playback failed:', data);
+        console.warn('HLS playback failed.', {
+          type: data.type,
+          details: data.details,
+          fatal: data.fatal,
+        });
         destroyPlayer();
         setError('实时视频播放失败，请检查 HLS 服务或流地址。');
       });

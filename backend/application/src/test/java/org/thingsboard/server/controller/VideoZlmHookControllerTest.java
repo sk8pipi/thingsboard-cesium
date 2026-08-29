@@ -54,7 +54,7 @@ public class VideoZlmHookControllerTest {
     public void shouldAcceptForwardedEventHeader() throws Exception {
         mockMvc.perform(post("/api/noauth/video/hooks/zlm")
                         .header("X-Zlm-Hook-Event", "on_stream_none_reader")
-                        .param("token", "test-hook-token")
+                        .header("X-Video-Hook-Token", "test-hook-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"app":"live","stream":"camera-001"}
@@ -68,6 +68,15 @@ public class VideoZlmHookControllerTest {
     public void shouldRejectInvalidToken() throws Exception {
         mockMvc.perform(post("/api/noauth/video/hooks/zlm/on_stream_changed")
                         .header("X-Video-Hook-Token", "wrong")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    public void shouldRejectQueryToken() throws Exception {
+        mockMvc.perform(post("/api/noauth/video/hooks/zlm/on_stream_changed")
+                        .param("token", "test-hook-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isUnauthorized());

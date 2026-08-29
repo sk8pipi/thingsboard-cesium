@@ -1,7 +1,7 @@
 # 视频平台架构与 AI 实施约束
 
 > 状态：项目级权威架构文档  
-> 最后更新：2026-07-28  
+> 最后更新：2026-08-09
 > 适用范围：ThingsBoard、Vue、Cesium、WVP-GB28181-pro、ZLMediaKit、模拟摄像头、Video API、监控页面  
 > 强制要求：任何 AI 在分析或修改视频、摄像头、ThingsBoard 摄像头身份、WVP、
 > ZLMediaKit、Video API、Cesium 摄像头点位或本地视频环境之前，必须完整阅读本文档。
@@ -909,6 +909,10 @@ DELETE /api/video/devices/{tbDeviceId}/binding
 - 正式业务调用必须使用 `/api/video/cameras/{tbDeviceId}/play`。
 - `hlsUrl`、`flvUrl` 和 `webRtcUrl` 暂时保留为响应兼容字段；新代码只使用 `protocol` 和 `url`。
 - `cameraCode` 播放解析只作为迁移回退，新的 API 和页面必须传 ThingsBoard Device UUID。
+- Cesium 遗留点位引用已删除 Device UUID 时，前端只可在当前用户权限过滤后的摄像头列表中按稳定身份做唯一迁移匹配，并将匹配到的当前 Device UUID 传给正式播放接口；禁止直接以 `cameraCode` 播放、模糊匹配、多结果自动选择或借迁移绕过权限。
+- 遗留点位稳定 ID 可在去除明确的 `camera-`、`video-camera-` 或 `device-` 前缀后，与权限列表业务身份做精确唯一匹配；禁止包含匹配和模糊匹配。
+- 迁移前必须先按原 UUID 查询 Device；当前用户能够读取原 Device 时必须保留原 UUID，禁止因为其他租户或其他 Device 存在同名绑定而自动重定向。
+- 遗留点位身份字段也无法匹配时，仅在原 Device 对当前用户明确返回 403/404 且权限过滤后的列表只有一个视频 Device UUID 时，才可把该唯一 UUID 作为迁移结果；原 Device 仍可读取或列表不唯一时必须保留失败，禁止猜测。
 
 后端环境变量：
 
@@ -990,3 +994,37 @@ POST /api/noauth/video/hooks/zlm
 
 新增 Provider 必须实现所需的 `VideoProvider` PTZ、录像查询、回放启动、
 停止和控制方法；不支持的能力返回 `501`，不得在前端新增 Provider 分支。
+#### 2026-08-09：端到端闭环
+
+Hook 扇出采用现有 `polaris-nginx`，不新增长期运行服务：
+
+- ZLMediaKit 和 WVP 自动配置中的 Hook 主机统一为 `polaris-nginx:18978`。
+- Nginx 同步代理所有 Hook 到 `polaris-wvp:18978`，WVP 响应保持主响应。
+- 仅将 `on_play`、`on_stream_changed`、`on_stream_none_reader` 和
+  `on_record_mp4` 镜像给 ThingsBoard；镜像失败不影响 WVP。
+- ThingsBoard Hook Token 仅通过请求头传递；查询参数 Token 被拒绝。
+- 绑定解析严格匹配 `mediaServerId + app + stream`，不使用空节点通配其他节点。
+- `mediaServerId` 对不依赖 ZLMediaKit Hook 的 Provider 保持可选；一旦启用 Hook
+  状态同步则为条件必填，且必须与 Hook 载荷完全一致。本地部署固定使用
+  `polaris`；缺失该字段的遗留绑定不会命中 Hook，迁移时需补齐。
+
+录像回放会话和 WVP Client 的可靠性约束：
+
+- 录像会话过期时先调用 Provider 停止，成功后才能从内存删除。
+- 定时清理失败必须保留会话并在下一周期重试；同一会话的停止和控制串行化。
+- WVP Client 使用可配置连接/读取超时，默认分别为 5 秒和 20 秒。
+- WVP 登录重试后的网络错误统一映射为 `502`，不返回上游原始错误正文。
+
+现有单摄像头前端闭环：
+
+- 地图实际入口 `CameraMonitorPopup.vue` 通过 `CameraVideoOperations.vue`
+  调用统一 Video API，不再直接发送 ThingsBoard 摄像头 RPC。
+- 弹窗可执行媒体状态刷新、截图、PTZ、录像检索、回放、暂停/恢复、定位、
+  倍速和停止。
+- 关闭、切换设备或卸载时停止轮询、撤销截图 Blob URL，并分别释放直播和
+  录像回放会话。
+- 前端 UI 和普通日志不显示 RTSP 或完整播放 URL；遗留 URL 属性仅保留为待迁移
+  数据模型，不是新 UI 的业务输入。
+
+本轮不增加多监控集合、批量播放/状态 API 或持久化监控分组；这些能力必须在
+独立任务中根据页面访问模式重新设计。

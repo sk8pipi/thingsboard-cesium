@@ -23,6 +23,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
@@ -56,7 +57,7 @@ public class WvpVideoProvider implements VideoProvider {
     private static final String PROVIDER_TYPE = "WVP_STREAM_PROXY";
     private static final long TOKEN_CACHE_SECONDS = 600;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
     private final boolean enabled;
     private final String baseUrl;
     private final String username;
@@ -77,7 +78,10 @@ public class WvpVideoProvider implements VideoProvider {
             @Value("${video.wvp.username:admin}") String username,
             @Value("${video.wvp.password:}") String password,
             @Value("${video.wvp.default-app:live}") String defaultApp,
-            @Value("${video.wvp.time-zone:Asia/Shanghai}") String timeZone) {
+            @Value("${video.wvp.time-zone:Asia/Shanghai}") String timeZone,
+            @Value("${video.wvp.connect-timeout-ms:5000}") int connectTimeoutMs,
+            @Value("${video.wvp.read-timeout-ms:20000}") int readTimeoutMs) {
+        this.restTemplate = createRestTemplate(connectTimeoutMs, readTimeoutMs);
         this.zlmVideoClient = zlmVideoClient;
         this.taskScheduler = taskScheduler;
         this.enabled = enabled;
@@ -86,6 +90,13 @@ public class WvpVideoProvider implements VideoProvider {
         this.password = password;
         this.defaultApp = defaultApp;
         this.timeZone = ZoneId.of(timeZone);
+    }
+
+    static RestTemplate createRestTemplate(int connectTimeoutMs, int readTimeoutMs) {
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(Math.max(1000, connectTimeoutMs));
+        requestFactory.setReadTimeout(Math.max(1000, readTimeoutMs));
+        return new RestTemplate(requestFactory);
     }
 
     @Override
@@ -466,9 +477,13 @@ public class WvpVideoProvider implements VideoProvider {
         } catch (HttpClientErrorException.Unauthorized error) {
             accessToken = null;
             accessTokenExpiresAt = Instant.EPOCH;
-            return authenticatedGet(path, queryParameters, true);
+            try {
+                return authenticatedGet(path, queryParameters, true);
+            } catch (RestClientException retryError) {
+                throw wvpRequestFailed(retryError);
+            }
         } catch (RestClientException error) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "WVP request failed", error);
+            throw wvpRequestFailed(error);
         }
     }
 
@@ -478,10 +493,18 @@ public class WvpVideoProvider implements VideoProvider {
         } catch (HttpClientErrorException.Unauthorized error) {
             accessToken = null;
             accessTokenExpiresAt = Instant.EPOCH;
-            authenticatedGetVoid(path, queryParameters, true);
+            try {
+                authenticatedGetVoid(path, queryParameters, true);
+            } catch (RestClientException retryError) {
+                throw wvpRequestFailed(retryError);
+            }
         } catch (RestClientException error) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "WVP request failed");
+            throw wvpRequestFailed(error);
         }
+    }
+
+    private ResponseStatusException wvpRequestFailed(RestClientException error) {
+        return new ResponseStatusException(HttpStatus.BAD_GATEWAY, "WVP request failed", error);
     }
 
     private void authenticatedGetVoid(String path, Map<String, ?> queryParameters, boolean forceLogin) {
@@ -526,8 +549,7 @@ public class WvpVideoProvider implements VideoProvider {
 
     private JsonNode unwrap(JsonNode response) {
         if (response == null || response.path("code").asInt(-1) != 0) {
-            String message = response == null ? "empty response" : response.path("msg").asText("unknown error");
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "WVP returned an error: " + message);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "WVP returned an error");
         }
         return response.path("data");
     }

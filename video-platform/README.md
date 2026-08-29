@@ -60,6 +60,8 @@ VIDEO_WVP_ENABLED=true
 VIDEO_WVP_BASE_URL=http://127.0.0.1:18080
 VIDEO_WVP_USERNAME=admin
 VIDEO_WVP_PASSWORD=<local WVP password>
+VIDEO_WVP_CONNECT_TIMEOUT_MS=5000
+VIDEO_WVP_READ_TIMEOUT_MS=20000
 VIDEO_WVP_DEFAULT_APP=live
 VIDEO_BINDING_AUTO_INITIALIZE_SCHEMA=true
 VIDEO_ZLM_ENABLED=true
@@ -69,6 +71,10 @@ VIDEO_ZLM_RTSP_BASE_URL=rtsp://127.0.0.1:10002
 VIDEO_SESSION_TTL_SECONDS=900
 VIDEO_SESSION_STOP_DELAY_SECONDS=20
 VIDEO_SNAPSHOT_CACHE_SECONDS=5
+VIDEO_RECORDING_SESSION_TTL_SECONDS=900
+VIDEO_RECORDING_SESSION_CLEANUP_INTERVAL_MS=30000
+VIDEO_ZLM_HOOK_TOKEN=<independent local hook token>
+VIDEO_WVP_TIME_ZONE=Asia/Shanghai
 ```
 
 The UUID binding slice exposes:
@@ -80,6 +86,11 @@ POST   /api/video/cameras/{tbDeviceId}/play
 POST   /api/video/cameras/{tbDeviceId}/stop
 GET    /api/video/cameras/{tbDeviceId}/status
 GET    /api/video/cameras/{tbDeviceId}/snapshot
+POST   /api/video/cameras/{tbDeviceId}/ptz
+GET    /api/video/cameras/{tbDeviceId}/recordings
+POST   /api/video/cameras/{tbDeviceId}/recordings/play
+POST   /api/video/cameras/{tbDeviceId}/recordings/control
+POST   /api/video/cameras/{tbDeviceId}/recordings/stop
 GET    /api/video/devices/{tbDeviceId}/binding
 PUT    /api/video/devices/{tbDeviceId}/binding
 DELETE /api/video/devices/{tbDeviceId}/binding
@@ -87,6 +98,30 @@ DELETE /api/video/devices/{tbDeviceId}/binding
 ```
 
 All endpoints use the existing ThingsBoard JWT authorization model.
+
+## ZLMediaKit Hook relay
+
+ZLMediaKit Hook traffic enters `polaris-nginx:18978`. The relay keeps WVP as
+the synchronous primary upstream and mirrors the supported state events to the
+ThingsBoard backend. A ThingsBoard outage therefore does not change the Hook
+response returned by WVP.
+
+Set these non-secret/secret values in the local deployment environment:
+
+```text
+VIDEO_HOOK_THINGSBOARD_URL=http://host.docker.internal:8080
+VIDEO_ZLM_HOOK_TOKEN=<same independent token used by ThingsBoard>
+```
+
+The token is server-side only and is sent in `X-Video-Hook-Token`; it must not
+be put in a query string or committed. Both `config/zlm/config.ini` and WVP
+`media.hook-ip` point to the relay because WVP can reapply the media-server
+Hook configuration after startup.
+
+`docker compose config --quiet --no-env-resolution` validates the Compose model
+without resolving service secret files. After Docker is available, validate the
+rendered Nginx configuration with `nginx -t`; do not use `nginx -T` because
+it prints the rendered token-bearing configuration.
 
 `play` returns a short-lived `sessionId`. Pass it to `stop` when the viewer is
 closed. If no session ID is supplied, `stop` releases all sessions owned by the

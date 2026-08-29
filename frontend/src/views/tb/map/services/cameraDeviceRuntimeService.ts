@@ -1,5 +1,5 @@
 import { getDeviceInfoById, type DeviceInfo } from '/@/api/tb/device';
-import { startVideoPlayback } from '/@/api/tb/video';
+import { getVideoCameras, startVideoPlayback } from '/@/api/tb/video';
 import { findRelationInfoListByFrom, findRelationInfoListByTo, type EntityRelationInfo } from '/@/api/tb/relation';
 import { getAttributes, getLatestTimeseries, type TsKvEntity, type kvEntity } from '/@/api/tb/telemetry';
 import { EntityType } from '/@/enums/entityTypeEnum';
@@ -11,13 +11,6 @@ const CAMERA_ATTRIBUTE_KEYS = [
   'cameraCode',
   'cameraName',
   'cameraModel',
-  'hlsUrl',
-  'streamUrlMain',
-  'streamUrl',
-  'webRtcUrl',
-  'rtspUrl',
-  'flvUrl',
-  'streamType',
   'supportsLive',
   'supportsPlayback',
   'supportsPtz',
@@ -126,10 +119,6 @@ async function findRelatedGatewayDevice(sourceDeviceId: string): Promise<DeviceI
   return devices.find((device) => device.additionalInfo?.gateway === true) || null;
 }
 
-function resolvePreferredHlsUrl(raw: { hlsUrl?: string; streamUrlMain?: string; streamUrl?: string }) {
-  return raw.hlsUrl || raw.streamUrlMain || raw.streamUrl;
-}
-
 function extractLastValue(value: unknown): unknown {
   if (value === undefined || value === null) return undefined;
 
@@ -169,7 +158,72 @@ function telemetryToObject(input: TsKvEntity | Record<string, unknown>) {
   }, {});
 }
 
-export async function loadCameraRuntimeInfo(entityId: string, entityName: string): Promise<CameraRuntimeInfo> {
+function normalizeCameraIdentity(value: unknown) {
+  return String(value || '')
+    .trim()
+    .toLowerCase();
+}
+
+function getCameraIdentityVariants(value: unknown) {
+  const normalized = normalizeCameraIdentity(value);
+  if (!normalized) return [];
+
+  const withoutPointPrefix = normalized.replace(/^(?:video-?camera|camera|device)[-_:]/, '');
+  return withoutPointPrefix && withoutPointPrefix !== normalized ? [normalized, withoutPointPrefix] : [normalized];
+}
+
+async function resolveCanonicalCameraEntityId(entityId: string, identityCandidates: string[]) {
+  try {
+    const cameras = await getVideoCameras();
+    const exactCamera = cameras.find((camera) => camera.tbDeviceId === entityId);
+    if (exactCamera) return exactCamera.tbDeviceId;
+
+    let sourceDeviceStatus = 200;
+    try {
+      await getDeviceInfoById(entityId);
+    } catch (error: any) {
+      sourceDeviceStatus = Number(error?.response?.status || error?.status || 0);
+    }
+    if (sourceDeviceStatus === 200) return entityId;
+
+    const identities = new Set(identityCandidates.flatMap(getCameraIdentityVariants));
+    const matchedDeviceIds = Array.from(
+      new Set(
+        cameras
+          .filter(
+            (camera) =>
+              identities.has(normalizeCameraIdentity(camera.cameraCode)) ||
+              identities.has(normalizeCameraIdentity(camera.name)),
+          )
+          .map((camera) => String(camera.tbDeviceId || '').trim())
+          .filter(Boolean),
+      ),
+    );
+
+    if (matchedDeviceIds.length === 1) return matchedDeviceIds[0];
+
+    const accessibleCameraDeviceIds = Array.from(
+      new Set(cameras.map((camera) => String(camera.tbDeviceId || '').trim()).filter(Boolean)),
+    );
+    if (accessibleCameraDeviceIds.length !== 1) return entityId;
+
+    if (sourceDeviceStatus === 403 || sourceDeviceStatus === 404) return accessibleCameraDeviceIds[0];
+
+    return entityId;
+  } catch (error: any) {
+    console.warn('[cameraDeviceRuntimeService] Failed to resolve canonical camera entity id:', {
+      entityId,
+      status: Number(error?.response?.status || 0) || undefined,
+    });
+    return entityId;
+  }
+}
+
+export async function loadCameraRuntimeInfo(
+  entityId: string,
+  entityName: string,
+  identityCandidates: string[] = [],
+): Promise<CameraRuntimeInfo> {
   const normalizedEntityId = String(entityId || '').trim();
   const normalizedEntityName = String(entityName || '').trim();
 
@@ -177,16 +231,35 @@ export async function loadCameraRuntimeInfo(entityId: string, entityName: string
     throw new Error('Camera entityId is required.');
   }
 
+  const canonicalEntityId = await resolveCanonicalCameraEntityId(normalizedEntityId, [
+    normalizedEntityName,
+    ...identityCandidates,
+  ]);
+
   const [deviceResult, attributesResult, telemetryResult, playbackResult] = await Promise.allSettled([
-    getDeviceInfoById(normalizedEntityId),
-    getAttributes({ entityType: EntityType.DEVICE, id: normalizedEntityId } as any, CAMERA_ATTRIBUTE_KEYS.join(',')),
+    getDeviceInfoById(canonicalEntityId),
+    getAttributes({ entityType: EntityType.DEVICE, id: canonicalEntityId } as any, CAMERA_ATTRIBUTE_KEYS.join(',')),
     getLatestTimeseries(
-      { entityType: EntityType.DEVICE, id: normalizedEntityId } as any,
+      { entityType: EntityType.DEVICE, id: canonicalEntityId } as any,
       CAMERA_TELEMETRY_KEYS.join(','),
       true,
     ),
-    startVideoPlayback(normalizedEntityId),
+    startVideoPlayback(canonicalEntityId),
   ]);
+
+  if (playbackResult.status === 'rejected') {
+    const playbackError = playbackResult.reason as any;
+    const responseData = playbackError?.response?.data;
+    console.error(
+      `[cameraDeviceRuntimeService] Failed to start camera playback: ${JSON.stringify({
+        requestedEntityId: normalizedEntityId,
+        canonicalEntityId,
+        status: Number(playbackError?.response?.status || playbackError?.status || 0) || undefined,
+        errorCode: responseData?.errorCode,
+        message: responseData?.message || playbackError?.message || 'Unknown playback error',
+      })}`,
+    );
+  }
 
   if (
     deviceResult.status === 'rejected' &&
@@ -202,33 +275,20 @@ export async function loadCameraRuntimeInfo(entityId: string, entityName: string
   const telemetryState = telemetryToObject(telemetryResult.status === 'fulfilled' ? telemetryResult.value : {});
   const playback = playbackResult.status === 'fulfilled' ? playbackResult.value : null;
 
-  const rawHlsUrl = toStringValue(attributeState.hlsUrl);
-  const rawStreamUrlMain = toStringValue(attributeState.streamUrlMain);
-  const rawStreamUrl = toStringValue(attributeState.streamUrl);
-  const webRtcUrl = playback?.webRtcUrl || toStringValue(attributeState.webRtcUrl);
-  const rtspUrl = toStringValue(attributeState.rtspUrl);
-  const legacyHlsUrl = resolvePreferredHlsUrl({
-    hlsUrl: rawHlsUrl,
-    streamUrlMain: rawStreamUrlMain,
-    streamUrl: rawStreamUrl,
-  });
-  const playbackUrl = playback?.url || playback?.hlsUrl;
-  const hlsUrl = playbackUrl || legacyHlsUrl;
-  const streamUrl = playbackUrl || rawStreamUrl || rawStreamUrlMain || rawHlsUrl;
+  const playbackUrl = playback?.url;
   const deviceActive = typeof device?.active === 'boolean' ? device.active : undefined;
   const telemetryOnline = toBoolean(telemetryState.online ?? telemetryState.status);
   const telemetryActive = toBoolean(telemetryState.active);
   const online = deviceActive === false ? false : (telemetryOnline ?? deviceActive ?? telemetryActive ?? false);
   const telemetryStreamOnline = toBoolean(telemetryState.streamOnline ?? telemetryState.streamAlive);
-  const streamOnline =
-    online === false ? false : (playback?.online ?? telemetryStreamOnline ?? (hlsUrl || streamUrl ? true : undefined));
+  const streamOnline = online === false ? false : (playback?.online ?? telemetryStreamOnline);
   const motion = toBoolean(telemetryState.motion);
   const motionDetected = toBoolean(telemetryState.motionDetected) ?? motion;
   const configuredRpcTargetDeviceId =
     toStringValue(attributeState.rpcTargetDeviceId) ||
     toStringValue(attributeState.controlDeviceId) ||
     toStringValue(attributeState.gatewayDeviceId);
-  const relatedGatewayDevice = configuredRpcTargetDeviceId ? null : await findRelatedGatewayDevice(normalizedEntityId);
+  const relatedGatewayDevice = configuredRpcTargetDeviceId ? null : await findRelatedGatewayDevice(canonicalEntityId);
   const rpcTargetDeviceId = configuredRpcTargetDeviceId || relatedGatewayDevice?.id?.id;
   const rpcTargetDeviceName = relatedGatewayDevice?.name;
   const controlMode = (toStringValue(attributeState.controlMode) as CameraRuntimeInfo['controlMode']) || 'none';
@@ -246,24 +306,9 @@ export async function loadCameraRuntimeInfo(entityId: string, entityName: string
     configuredRpcTopic ||
     (rpcPayloadMode === 'gatewayTopic' && rpcTargetCameraId ? `camera/rpc/${rpcTargetCameraId}` : undefined);
 
-  if (playback || rawHlsUrl || rawStreamUrlMain || rawStreamUrl || webRtcUrl || rtspUrl) {
-    console.info('[cameraDeviceRuntimeService] Resolved camera transport:', {
-      entityId: normalizedEntityId,
-      entityName: normalizedEntityName || device?.name,
-      source: playback ? 'video-api' : 'thingsboard-attribute-fallback',
-      cameraId: attributeState.cameraId,
-      cameraCode: playback?.cameraCode || attributeState.cameraCode,
-      hlsUrl,
-      streamUrlMain: rawStreamUrlMain,
-      streamUrl: rawStreamUrl,
-      webRtcUrl,
-      rtspUrl,
-    });
-  }
-
   const runtimeInfo: CameraRuntimeInfo = {
-    entityId: normalizedEntityId,
-    entityName: toStringValue(device?.name) || normalizedEntityName || normalizedEntityId,
+    entityId: canonicalEntityId,
+    entityName: toStringValue(device?.name) || normalizedEntityName || canonicalEntityId,
     cameraId: toStringValue(attributeState.cameraId),
     cameraCode:
       playback?.cameraCode || toStringValue(attributeState.cameraCode) || toStringValue(attributeState.cameraId),
@@ -271,17 +316,14 @@ export async function loadCameraRuntimeInfo(entityId: string, entityName: string
       toStringValue(attributeState.cameraName) ||
       normalizedEntityName ||
       toStringValue(device?.name) ||
-      normalizedEntityId,
+      canonicalEntityId,
     cameraModel: toStringValue(attributeState.cameraModel),
-    hlsUrl,
-    streamUrl,
-    webRtcUrl,
-    rtspUrl,
-    flvUrl: playback?.flvUrl || toStringValue(attributeState.flvUrl),
-    streamType: playback ? 'hls' : toStringValue(attributeState.streamType),
+    hlsUrl: playbackUrl,
+    streamUrl: playbackUrl,
+    streamType: playback ? 'hls' : undefined,
     playbackSessionId: playback?.sessionId,
     playbackExpiresAt: playback?.expiresAt,
-    playbackStatus: playback?.status,
+    playbackStatus: playback?.status || (playbackResult.status === 'rejected' ? 'failed' : undefined),
     playbackProtocol: playback?.protocol === 'hls' ? 'hls' : undefined,
     supportsLive: toBoolean(attributeState.supportsLive),
     supportsPlayback: toBoolean(attributeState.supportsPlayback),
@@ -312,27 +354,6 @@ export async function loadCameraRuntimeInfo(entityId: string, entityName: string
     motionDetected,
     tamperAlarm: toBoolean(telemetryState.tamperAlarm),
   };
-
-  console.log('[Camera RPC] raw supportedRpcMethods:', attributeState.supportedRpcMethods);
-  console.log(
-    '[Camera RPC] normalized supportedRpcMethods:',
-    normalizeSupportedRpcMethods(attributeState.supportedRpcMethods),
-  );
-  console.log('[Camera RPC] supports:', {
-    supportsPtz: runtimeInfo.supportsPtz,
-    supportsZoom: runtimeInfo.supportsZoom,
-    supportsPreset: runtimeInfo.supportsPreset,
-    supportsAudio: runtimeInfo.supportsAudio,
-    controlMode: runtimeInfo.controlMode,
-    rpcTargetDeviceId: runtimeInfo.rpcTargetDeviceId,
-    rpcTargetDeviceName: runtimeInfo.rpcTargetDeviceName,
-    rpcTargetCameraId: runtimeInfo.rpcTargetCameraId,
-    rpcGatewayMethod: runtimeInfo.rpcGatewayMethod,
-    rpcTopic: runtimeInfo.rpcTopic,
-    rpcPayloadMode: runtimeInfo.rpcPayloadMode,
-    rpcTargetMode: runtimeInfo.rpcTargetMode,
-  });
-  console.info('[cameraDeviceRuntimeService] Resolved camera runtime info:', runtimeInfo);
 
   return runtimeInfo;
 }

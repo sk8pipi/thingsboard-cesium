@@ -50,9 +50,8 @@
       </div>
 
       <div class="camera-monitor-popup__meta">
-        <span>播放地址: {{ playUrl || '-' }}</span>
-        <span>WebRTC: {{ runtimeInfo?.webRtcUrl || '-' }}</span>
-        <span>RTSP: {{ runtimeInfo?.rtspUrl || '-' }}</span>
+        <span>播放协议: {{ runtimeInfo?.playbackProtocol || runtimeInfo?.streamType || '-' }}</span>
+        <span>直播会话: {{ runtimeInfo?.playbackSessionId ? '已建立' : '未建立' }}</span>
       </div>
 
       <div class="camera-monitor-popup__grid">
@@ -84,74 +83,14 @@
         </div>
       </div>
 
-      <div v-if="showControlSection" class="camera-monitor-popup__ptz">
-        <div class="camera-monitor-popup__section-title">摄像头控制</div>
-
-        <div v-if="!supportsThingsboardRpc" class="camera-monitor-popup__hint camera-monitor-popup__hint--warning">
-          当前设备不支持 ThingsBoard RPC 控制
-        </div>
-
-        <template v-else>
-          <div
-            v-if="!hasDirectionalControls && !hasZoomControls && !hasPresetControls"
-            class="camera-monitor-popup__hint"
-          >
-            当前设备未暴露可用的 RPC 控制方法
-          </div>
-
-          <div v-if="hasDirectionalControls" class="camera-monitor-popup__control-group">
-            <div class="camera-monitor-popup__control-label">方向控制</div>
-            <div class="camera-monitor-popup__ptz-grid">
-              <button
-                v-for="action in directionalActions"
-                :key="action.method"
-                class="camera-monitor-popup__ptz-btn"
-                type="button"
-                :disabled="controlsDisabled"
-                @click="sendRpcCommand(action.method, action.params)"
-              >
-                {{ action.label }}
-              </button>
-            </div>
-          </div>
-
-          <div v-if="hasZoomControls" class="camera-monitor-popup__control-group">
-            <div class="camera-monitor-popup__control-label">变焦控制</div>
-            <div class="camera-monitor-popup__ptz-grid camera-monitor-popup__ptz-grid--compact">
-              <button
-                v-for="action in zoomActions"
-                :key="action.method"
-                class="camera-monitor-popup__ptz-btn"
-                type="button"
-                :disabled="controlsDisabled"
-                @click="sendRpcCommand(action.method, action.params)"
-              >
-                {{ action.label }}
-              </button>
-            </div>
-          </div>
-
-          <div v-if="hasPresetControls" class="camera-monitor-popup__control-group">
-            <div class="camera-monitor-popup__control-label">预置位</div>
-            <div class="camera-monitor-popup__ptz-grid camera-monitor-popup__ptz-grid--compact">
-              <button
-                v-for="action in presetActions"
-                :key="action.method"
-                class="camera-monitor-popup__ptz-btn"
-                type="button"
-                :disabled="controlsDisabled"
-                @click="sendRpcCommand(action.method, action.params)"
-              >
-                {{ action.label }}
-              </button>
-            </div>
-          </div>
-
-          <div v-if="rpcStatusText" class="camera-monitor-popup__hint">
-            {{ rpcStatusText }}
-          </div>
-        </template>
-      </div>
+      <CameraVideoOperations
+        :visible="visible"
+        :tb-device-id="runtimeInfo?.entityId"
+        :supports-ptz="runtimeInfo?.supportsPtz"
+        :supports-zoom="runtimeInfo?.supportsZoom"
+        :supports-preset="runtimeInfo?.supportsPreset"
+        :supports-playback="runtimeInfo?.supportsPlayback"
+      />
     </div>
   </div>
 </template>
@@ -159,9 +98,7 @@
 <script setup lang="ts">
   import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
   import Hls from 'hls.js';
-  import { useMessage } from '/@/hooks/web/useMessage';
-  import { normalizeSupportedRpcMethods } from '../services/cameraRpcCapabilities';
-  import { getDefaultCameraRpcParams, sendCameraRpc } from '../services/cameraRpcService';
+  import CameraVideoOperations from './CameraVideoOperations.vue';
   import {
     isSameCameraVideoSession,
     releaseCameraVideoSession,
@@ -169,12 +106,6 @@
     type CameraVideoSession,
   } from '../services/cameraVideoSessionService';
   import type { CameraRuntimeInfo } from '../types/mapPointTypes';
-
-  type CameraRpcAction = {
-    label: string;
-    method: string;
-    params: Record<string, any>;
-  };
 
   const props = defineProps<{
     visible: boolean;
@@ -187,12 +118,9 @@
     (e: 'close'): void;
   }>();
 
-  const { showMessage } = useMessage();
   const videoEl = ref<HTMLVideoElement | null>(null);
   const playerLoading = ref(false);
   const playerError = ref('');
-  const rpcSending = ref(false);
-  const rpcStatusText = ref('');
 
   let hls: Hls | null = null;
   let activeVideoSession: CameraVideoSession | null = null;
@@ -202,21 +130,6 @@
   const preferMonitorPage = computed(() => Boolean(monitorPageUrl.value));
   const loadingState = computed(() => Boolean(props.loading) || playerLoading.value);
   const displayMessage = computed(() => props.error || playerError.value);
-  const supportedRpcMethods = computed(() => normalizeSupportedRpcMethods(props.runtimeInfo?.supportedRpcMethods));
-  const supportsThingsboardRpc = computed(() =>
-    ['thingsboardRpc', 'gatewayRpc'].includes(String(props.runtimeInfo?.controlMode || '')),
-  );
-  const showControlSection = computed(
-    () =>
-      supportedRpcMethods.value.length > 0 ||
-      props.runtimeInfo?.controlMode === 'thingsboardRpc' ||
-      props.runtimeInfo?.supportsPtz ||
-      props.runtimeInfo?.supportsZoom ||
-      props.runtimeInfo?.supportsPreset,
-  );
-  const controlsDisabled = computed(
-    () => rpcSending.value || !supportsThingsboardRpc.value || !props.runtimeInfo?.entityId,
-  );
   const onlineLabel = computed(() => (props.runtimeInfo?.online ? '设备在线' : '设备离线'));
   const streamLabel = computed(() => (props.runtimeInfo?.streamOnline ? '视频流正常' : '视频流离线'));
   const onlineTagClass = computed(() =>
@@ -240,44 +153,6 @@
     return alarms.length ? alarms.join(' / ') : '无';
   });
 
-  function hasRpcMethod(method: string) {
-    return supportedRpcMethods.value.includes(method);
-  }
-
-  function buildAction(label: string, method: string): CameraRpcAction {
-    return {
-      label,
-      method,
-      params: getDefaultCameraRpcParams(method),
-    };
-  }
-
-  const directionalActions = computed(() =>
-    !props.runtimeInfo?.supportsPtz
-      ? []
-      : [
-          buildAction('上', 'ptz.up'),
-          buildAction('下', 'ptz.down'),
-          buildAction('左', 'ptz.left'),
-          buildAction('右', 'ptz.right'),
-        ].filter((item) => hasRpcMethod(item.method)),
-  );
-  const zoomActions = computed(() =>
-    !props.runtimeInfo?.supportsZoom
-      ? []
-      : [buildAction('放大', 'zoom.in'), buildAction('缩小', 'zoom.out')].filter((item) => hasRpcMethod(item.method)),
-  );
-  const presetActions = computed(() =>
-    !props.runtimeInfo?.supportsPreset
-      ? []
-      : [buildAction('调用预置位', 'preset.call'), buildAction('保存预置位', 'preset.save')].filter((item) =>
-          hasRpcMethod(item.method),
-        ),
-  );
-  const hasDirectionalControls = computed(() => directionalActions.value.length > 0);
-  const hasZoomControls = computed(() => zoomActions.value.length > 0);
-  const hasPresetControls = computed(() => presetActions.value.length > 0);
-
   function runtimeHasNumber(value?: number) {
     return value !== undefined && value !== null && !Number.isNaN(value);
   }
@@ -299,68 +174,11 @@
       const parsed = new URL(value, window.location.origin);
       parsed.searchParams.delete('cookieCheck');
 
-      if (parsed.origin === window.location.origin) {
-        return `${parsed.pathname}${parsed.search}${parsed.hash}`;
-      }
-
-      return parsed.toString();
+      if (parsed.origin !== window.location.origin || !parsed.pathname.startsWith('/video-stream/')) return '';
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
     } catch {
-      return value;
+      return '';
     }
-  }
-
-  function resolveTransportRpcMethod(actionMethod: string) {
-    const configuredMethod = String(props.runtimeInfo?.rpcGatewayMethod || '').trim();
-    if (configuredMethod) return configuredMethod;
-
-    return actionMethod;
-  }
-
-  function resolveRpcEntityId() {
-    const sourceEntityId = String(props.runtimeInfo?.entityId || '').trim();
-    const targetEntityId = String(props.runtimeInfo?.rpcTargetDeviceId || '').trim();
-
-    if (props.runtimeInfo?.rpcTargetMode === 'gateway') {
-      return targetEntityId || sourceEntityId;
-    }
-
-    return sourceEntityId;
-  }
-
-  function buildRpcParams(actionMethod: string, params?: Record<string, any>) {
-    const baseParams = params || {};
-
-    if (props.runtimeInfo?.rpcPayloadMode !== 'gatewayTopic') {
-      return baseParams;
-    }
-
-    const cameraId = String(
-      props.runtimeInfo?.rpcTargetCameraId ||
-        props.runtimeInfo?.cameraId ||
-        props.runtimeInfo?.cameraCode ||
-        props.runtimeInfo?.entityName ||
-        '',
-    ).trim();
-    const topic = String(props.runtimeInfo?.rpcTopic || (cameraId ? `camera/rpc/${cameraId}` : '')).trim();
-    const commandPayload = {
-      method: actionMethod,
-      command: actionMethod,
-      cameraId,
-      deviceName: cameraId,
-      ...baseParams,
-    };
-
-    return {
-      ...baseParams,
-      method: actionMethod,
-      command: actionMethod,
-      action: actionMethod,
-      cameraId,
-      deviceName: cameraId,
-      topic,
-      payload: commandPayload,
-      ts: Date.now(),
-    };
   }
 
   function clearVideoSource() {
@@ -426,7 +244,7 @@
     if (!runtimeInfo) return;
 
     if (!playUrl.value && !preferMonitorPage.value) {
-      playerError.value = '未配置视频播放地址';
+      playerError.value = runtimeInfo.playbackStatus === 'failed' ? '视频服务暂不可用' : '未配置视频播放地址';
       return;
     }
 
@@ -439,12 +257,6 @@
 
     if (preferMonitorPage.value) {
       clearVideoSource();
-      console.info('[CameraMonitorPopup] Loading MediaMTX preview page:', {
-        monitorPageUrl: monitorPageUrl.value,
-        playUrl: playUrl.value,
-        entityId: runtimeInfo.entityId,
-        cameraName: runtimeInfo.cameraName,
-      });
       return;
     }
 
@@ -463,23 +275,18 @@
       });
 
       hls.attachMedia(video);
-      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-        console.info('[CameraMonitorPopup] Loading HLS source:', {
-          playUrl: playUrl.value,
-          entityId: runtimeInfo.entityId,
-          cameraName: runtimeInfo.cameraName,
-          webRtcUrl: runtimeInfo.webRtcUrl,
-          rtspUrl: runtimeInfo.rtspUrl,
-        });
-        hls?.loadSource(playUrl.value);
-      });
+      hls.on(Hls.Events.MEDIA_ATTACHED, () => hls?.loadSource(playUrl.value));
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         playerLoading.value = false;
         void tryPlay(video);
       });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
-        console.error('[CameraMonitorPopup] HLS playback failed:', data);
+        console.warn('[CameraMonitorPopup] HLS playback failed.', {
+          type: data.type,
+          details: data.details,
+          fatal: data.fatal,
+        });
         destroyPlayer();
         playerError.value = '实时视频播放失败，请检查 HLS 地址或流媒体服务状态。';
       });
@@ -511,68 +318,7 @@
   function handleClose() {
     destroyPlayer();
     releaseActiveVideoSession();
-    rpcStatusText.value = '';
     emit('close');
-  }
-
-  async function sendRpcCommand(method: string, params?: Record<string, any>) {
-    const entityId = resolveRpcEntityId();
-
-    if (!entityId) {
-      showMessage('未找到摄像头设备 ID，无法发送 RPC', 'error');
-      return;
-    }
-
-    if (!supportsThingsboardRpc.value) {
-      showMessage('当前设备不支持 ThingsBoard RPC 控制', 'warning');
-      return;
-    }
-
-    rpcSending.value = true;
-    rpcStatusText.value = `正在发送 RPC: ${method}`;
-
-    try {
-      const transportMethod = resolveTransportRpcMethod(method);
-      const rpcParams = buildRpcParams(method, params);
-      await sendCameraRpc({
-        entityId,
-        method: transportMethod,
-        params: rpcParams,
-        oneWay: props.runtimeInfo?.rpcCallType !== 'twoway',
-        timeout: props.runtimeInfo?.rpcTimeout ?? 10000,
-        fallbackToLegacyApi: false,
-      });
-      rpcStatusText.value = `已发送 RPC: ${method}`;
-      showMessage(`已发送 RPC: ${method}`, 'success');
-      console.info('[CameraMonitorPopup] Camera RPC sent.', {
-        entityId,
-        sourceEntityId: props.runtimeInfo?.entityId,
-        configuredTargetEntityId: props.runtimeInfo?.rpcTargetDeviceId,
-        targetDeviceName: props.runtimeInfo?.rpcTargetDeviceName,
-        controlMode: props.runtimeInfo?.controlMode,
-        rpcTargetMode: props.runtimeInfo?.rpcTargetMode,
-        actionMethod: method,
-        transportMethod,
-        params: rpcParams,
-      });
-    } catch (error: any) {
-      const message = error?.message || '摄像头 RPC 发送失败';
-      rpcStatusText.value = `RPC 发送失败: ${method}`;
-      showMessage(message, 'error');
-      console.error('[CameraMonitorPopup] Camera RPC send failed.', {
-        entityId,
-        sourceEntityId: props.runtimeInfo?.entityId,
-        configuredTargetEntityId: props.runtimeInfo?.rpcTargetDeviceId,
-        targetDeviceName: props.runtimeInfo?.rpcTargetDeviceName,
-        controlMode: props.runtimeInfo?.controlMode,
-        rpcTargetMode: props.runtimeInfo?.rpcTargetMode,
-        method,
-        params,
-        error,
-      });
-    } finally {
-      rpcSending.value = false;
-    }
   }
 
   watch(
@@ -594,43 +340,6 @@
       }
 
       destroyPlayer();
-    },
-    { immediate: true },
-  );
-
-  watch(
-    () => props.runtimeInfo?.entityId,
-    () => {
-      rpcStatusText.value = '';
-    },
-  );
-
-  watch(
-    () => props.runtimeInfo,
-    (runtimeInfo) => {
-      if (!runtimeInfo) return;
-
-      console.log('[Camera RPC] raw supportedRpcMethods:', runtimeInfo.supportedRpcMethods);
-      console.log(
-        '[Camera RPC] normalized supportedRpcMethods:',
-        normalizeSupportedRpcMethods(runtimeInfo.supportedRpcMethods),
-      );
-      console.log('[Camera RPC] supports:', {
-        supportsPtz: runtimeInfo.supportsPtz,
-        supportsZoom: runtimeInfo.supportsZoom,
-        supportsPreset: runtimeInfo.supportsPreset,
-        supportsAudio: runtimeInfo.supportsAudio,
-        controlMode: runtimeInfo.controlMode,
-        rpcTargetDeviceId: runtimeInfo.rpcTargetDeviceId,
-        rpcTargetDeviceName: runtimeInfo.rpcTargetDeviceName,
-        rpcTargetCameraId: runtimeInfo.rpcTargetCameraId,
-        rpcGatewayMethod: runtimeInfo.rpcGatewayMethod,
-        rpcTopic: runtimeInfo.rpcTopic,
-        rpcPayloadMode: runtimeInfo.rpcPayloadMode,
-        rpcTargetMode: runtimeInfo.rpcTargetMode,
-        rpcCallType: runtimeInfo.rpcCallType,
-        rpcTimeout: runtimeInfo.rpcTimeout,
-      });
     },
     { immediate: true },
   );

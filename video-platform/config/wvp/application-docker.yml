@@ -37,7 +37,7 @@ media:
   ip: polaris-media
   stream-ip: ${WVP_PUBLIC_IP}
   sdp-ip: ${WVP_PUBLIC_IP}
-  hook-ip: polaris-wvp
+  hook-ip: polaris-nginx
   http-port: 80
   auto-config: true
   secret: su6TiedN2rVAmBbIDX0aa0QTiBJLBdcf

@@ -1,0 +1,62 @@
+log_format video_hook_relay '$time_iso8601 uri=$uri status=$status upstream_status=$upstream_status';
+
+server {
+    listen 18978;
+    server_name _;
+
+    access_log /var/log/nginx/video-hook-relay.access.log video_hook_relay;
+    error_log /var/log/nginx/video-hook-relay.error.log warn;
+    client_max_body_size 1m;
+
+    location = /index/hook/on_play {
+        mirror /_thingsboard_hook/on_play;
+        mirror_request_body on;
+        proxy_pass http://polaris-wvp:18978;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+    }
+
+    location = /index/hook/on_stream_changed {
+        mirror /_thingsboard_hook/on_stream_changed;
+        mirror_request_body on;
+        proxy_pass http://polaris-wvp:18978;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+    }
+
+    location = /index/hook/on_stream_none_reader {
+        mirror /_thingsboard_hook/on_stream_none_reader;
+        mirror_request_body on;
+        proxy_pass http://polaris-wvp:18978;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+    }
+
+    location = /index/hook/on_record_mp4 {
+        mirror /_thingsboard_hook/on_record_mp4;
+        mirror_request_body on;
+        proxy_pass http://polaris-wvp:18978;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+    }
+
+    location /index/hook/ {
+        proxy_pass http://polaris-wvp:18978;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+    }
+
+    location ~ ^/_thingsboard_hook/(?<hook_event>on_play|on_stream_changed|on_stream_none_reader|on_record_mp4)$ {
+        internal;
+        rewrite ^ /api/noauth/video/hooks/zlm break;
+        proxy_pass ${VIDEO_HOOK_THINGSBOARD_URL};
+        proxy_method POST;
+        proxy_pass_request_body on;
+        proxy_set_header Content-Type $http_content_type;
+        proxy_set_header X-Zlm-Hook-Event $hook_event;
+        proxy_set_header X-Video-Hook-Token "${VIDEO_ZLM_HOOK_TOKEN}";
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 5s;
+        proxy_next_upstream off;
+    }
+}

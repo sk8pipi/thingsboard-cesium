@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.thingsboard.server.queue.util.TbCoreComponent;
@@ -42,9 +41,8 @@ public class VideoZlmHookController {
     public Map<String, Object> handle(
             @PathVariable String event,
             @RequestHeader(value = "X-Video-Hook-Token", required = false) String headerToken,
-            @RequestParam(value = "token", required = false) String queryToken,
             @RequestBody(required = false) JsonNode body) {
-        requireValidToken(headerToken, queryToken);
+        requireValidToken(headerToken);
         return hookService.handle(event, body);
     }
 
@@ -52,22 +50,20 @@ public class VideoZlmHookController {
     public Map<String, Object> handleForwarded(
             @RequestHeader("X-Zlm-Hook-Event") String event,
             @RequestHeader(value = "X-Video-Hook-Token", required = false) String headerToken,
-            @RequestParam(value = "token", required = false) String queryToken,
             @RequestBody(required = false) JsonNode body) {
-        requireValidToken(headerToken, queryToken);
+        requireValidToken(headerToken);
         return hookService.handle(event, body);
     }
 
-    private void requireValidToken(String headerToken, String queryToken) {
+    private void requireValidToken(String headerToken) {
         if (hookToken.isBlank()) {
             throw new ResponseStatusException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "ZLMediaKit Hook is disabled because VIDEO_ZLM_HOOK_TOKEN is not configured");
         }
-        String supplied = headerToken == null || headerToken.isBlank() ? queryToken : headerToken;
-        if (supplied == null || !MessageDigest.isEqual(
+        if (headerToken == null || !MessageDigest.isEqual(
                 hookToken.getBytes(StandardCharsets.UTF_8),
-                supplied.getBytes(StandardCharsets.UTF_8))) {
+                headerToken.getBytes(StandardCharsets.UTF_8))) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid ZLMediaKit Hook token");
         }
     }

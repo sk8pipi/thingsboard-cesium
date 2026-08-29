@@ -123,7 +123,7 @@ public class VideoCameraBindingRepository {
                         WHERE stream_app = ?
                           AND stream_id = ?
                           AND enabled = true
-                          AND (? IS NULL OR media_server_id IS NULL OR media_server_id = ?)
+                          AND (media_server_id = ? OR (media_server_id IS NULL AND ? IS NULL))
                         """,
                 ROW_MAPPER,
                 app,

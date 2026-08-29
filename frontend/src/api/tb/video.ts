@@ -117,6 +117,104 @@ export interface VideoStopResult {
   scheduledStopAt?: number;
 }
 
+export type VideoPtzCommand =
+  | 'ptz.up'
+  | 'ptz.down'
+  | 'ptz.left'
+  | 'ptz.right'
+  | 'ptz.up-left'
+  | 'ptz.up-right'
+  | 'ptz.down-left'
+  | 'ptz.down-right'
+  | 'ptz.stop'
+  | 'zoom.in'
+  | 'zoom.out'
+  | 'preset.call'
+  | 'preset.save'
+  | 'preset.delete';
+
+export interface VideoPtzRequest {
+  command: VideoPtzCommand;
+  speed?: number;
+  durationMs?: number;
+  presetId?: number;
+}
+
+export interface VideoPtzResult {
+  tbDeviceId: string;
+  cameraCode: string;
+  provider: string;
+  transport: string;
+  command: VideoPtzCommand;
+  accepted: boolean;
+  requestId?: string;
+  requestedAt: number;
+}
+
+export interface VideoRecordingItem {
+  recordingId: string;
+  startTime: number;
+  endTime: number;
+  durationMs: number;
+  fileSize?: number;
+  recordType?: string;
+}
+
+export interface VideoRecordingList {
+  tbDeviceId: string;
+  cameraCode: string;
+  startTime: number;
+  endTime: number;
+  total: number;
+  recordings: VideoRecordingItem[];
+}
+
+export interface VideoRecordingPlayRequest {
+  startTime: number;
+  endTime: number;
+  protocol?: 'hls';
+}
+
+export interface VideoRecordingPlaybackInfo {
+  tbDeviceId: string;
+  cameraCode: string;
+  provider: string;
+  sessionId: string;
+  app: string;
+  stream: string;
+  protocol: string;
+  url: string;
+  online: boolean;
+  startTime: number;
+  endTime: number;
+  expiresAt: number;
+}
+
+export type VideoRecordingControlAction = 'pause' | 'resume' | 'seek' | 'speed';
+
+export interface VideoRecordingControlRequest {
+  sessionId: string;
+  action: VideoRecordingControlAction;
+  positionSeconds?: number;
+  speed?: number;
+}
+
+export interface VideoRecordingControlResult {
+  tbDeviceId: string;
+  cameraCode: string;
+  sessionId: string;
+  action: VideoRecordingControlAction;
+  accepted: boolean;
+  updatedAt: number;
+}
+
+export interface VideoRecordingStopResult {
+  tbDeviceId: string;
+  cameraCode: string;
+  sessionId: string;
+  stopped: boolean;
+}
+
 export function getVideoCameras() {
   return defHttp.get<VideoCameraInfo[]>({ url: '/api/video/cameras' }, { errorMessageMode: 'none' });
 }
@@ -139,7 +237,7 @@ export function startVideoPlayback(
   tbDeviceId: string,
   request: VideoPlayRequest = { protocol: 'hls', streamProfile: 'main' },
 ) {
-  return defHttp.post<VideoPlaybackInfo>(
+  return defHttp.postJson<VideoPlaybackInfo>(
     {
       url: `/api/video/cameras/${encodeURIComponent(tbDeviceId)}/play`,
       data: request,
@@ -149,7 +247,7 @@ export function startVideoPlayback(
 }
 
 export function stopVideoPlayback(tbDeviceId: string, request?: VideoStopRequest) {
-  return defHttp.post<VideoStopResult>(
+  return defHttp.postJson<VideoStopResult>(
     {
       url: `/api/video/cameras/${encodeURIComponent(tbDeviceId)}/stop`,
       data: request,
@@ -158,8 +256,18 @@ export function stopVideoPlayback(tbDeviceId: string, request?: VideoStopRequest
   );
 }
 
+export function controlVideoPtz(tbDeviceId: string, request: VideoPtzRequest) {
+  return defHttp.postJson<VideoPtzResult>(
+    {
+      url: `/api/video/cameras/${encodeURIComponent(tbDeviceId)}/ptz`,
+      data: request,
+    },
+    { errorMessageMode: 'none' },
+  );
+}
+
 export function getVideoSnapshot(tbDeviceId: string) {
-  return defHttp.get(
+  return defHttp.get<Blob>(
     {
       url: `/api/video/cameras/${encodeURIComponent(tbDeviceId)}/snapshot`,
       responseType: 'blob',
@@ -167,6 +275,47 @@ export function getVideoSnapshot(tbDeviceId: string) {
     { errorMessageMode: 'none' },
   );
 }
+
+export function getVideoRecordings(tbDeviceId: string, startTime: number, endTime: number) {
+  return defHttp.get<VideoRecordingList>(
+    {
+      url: `/api/video/cameras/${encodeURIComponent(tbDeviceId)}/recordings`,
+      params: { startTime, endTime },
+    },
+    { errorMessageMode: 'none' },
+  );
+}
+
+export function startVideoRecordingPlayback(tbDeviceId: string, request: VideoRecordingPlayRequest) {
+  return defHttp.postJson<VideoRecordingPlaybackInfo>(
+    {
+      url: `/api/video/cameras/${encodeURIComponent(tbDeviceId)}/recordings/play`,
+      data: request,
+    },
+    { errorMessageMode: 'none' },
+  );
+}
+
+export function controlVideoRecordingPlayback(tbDeviceId: string, request: VideoRecordingControlRequest) {
+  return defHttp.postJson<VideoRecordingControlResult>(
+    {
+      url: `/api/video/cameras/${encodeURIComponent(tbDeviceId)}/recordings/control`,
+      data: request,
+    },
+    { errorMessageMode: 'none' },
+  );
+}
+
+export function stopVideoRecordingPlayback(tbDeviceId: string, sessionId: string) {
+  return defHttp.postJson<VideoRecordingStopResult>(
+    {
+      url: `/api/video/cameras/${encodeURIComponent(tbDeviceId)}/recordings/stop`,
+      data: { sessionId },
+    },
+    { errorMessageMode: 'none' },
+  );
+}
+
 export function getVideoCameraBinding(tbDeviceId: string) {
   return defHttp.get<VideoCameraBinding>(
     { url: `/api/video/devices/${encodeURIComponent(tbDeviceId)}/binding` },
@@ -179,6 +328,7 @@ export function saveVideoCameraBinding(tbDeviceId: string, request: VideoCameraB
     {
       url: `/api/video/devices/${encodeURIComponent(tbDeviceId)}/binding`,
       data: request,
+      headers: { 'content-type': 'application/json' },
     },
     { errorMessageMode: 'none' },
   );

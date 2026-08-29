@@ -1,10 +1,10 @@
 # Video API 中文调用文档
 
-> 当前版本：直播、状态、截图、播放会话和摄像头绑定 API  
+> 当前版本：直播、状态、截图、PTZ、录像回放、Hook 和摄像头绑定 API
 > 身份主键：ThingsBoard Device UUID  
 > 鉴权方式：ThingsBoard JWT  
 > 浏览器播放协议：HLS  
-> 最后更新：2026-07-29
+> 最后更新：2026-08-09
 
 ## 1. API 的职责
 
@@ -20,15 +20,16 @@ Secret、摄像头 RTSP 密码或媒体服务器内部地址。
 - 创建和释放直播观看会话。
 - 获取缓存截图。
 - 管理 ThingsBoard 摄像头与 WVP/ZLMediaKit 流的绑定。
+- 统一 PTZ 控制。
+- 录像检索、回放、暂停/恢复、定位、倍速和停止。
+- 接收经过服务端令牌认证的 ZLMediaKit Hook。
 
 当前暂未提供：
 
-- PTZ。
-- 录像检索与回放。
-- ZLMediaKit Hook。
 - 生产播放 Ticket。
+- 多监控集合、批量播放或批量状态接口。
 
-这些能力后续仍会沿用相同的 `tbDeviceId + VideoProvider` 扩展方式。
+后续能力仍沿用相同的 `tbDeviceId + VideoProvider` 扩展方式。
 
 ## 2. 调用约定
 
@@ -85,6 +86,21 @@ $headers = @{
 
 旧的 `cameraCode` 播放兼容入口只用于迁移，新代码禁止依赖。
 
+Cesium 遗留点位如果仍保存已经删除的 Device UUID，可先调用当前用户权限过滤后的
+`GET /api/video/cameras`，按稳定业务身份做唯一迁移匹配，再把匹配结果中的
+`tbDeviceId` 传入正式接口。该流程不是 `cameraCode` 播放入口；无匹配或多匹配时
+必须停止自动迁移，不能猜测目标设备。
+
+遗留点位的稳定 ID 可以去除明确的 `camera-`、`video-camera-` 或 `device-` 前缀后，
+与权限列表中的业务身份做精确唯一匹配；不得使用包含匹配或模糊匹配。
+
+执行身份匹配前必须先按原 UUID 查询 Device。当前用户仍能读取原 Device 时必须
+继续使用原 UUID，不能因为另一个 Device 存在相同名称或 `cameraCode` 而重定向。
+
+如果遗留点位身份字段也已失效，只有在原 Device 对当前用户明确返回 HTTP 403/404、并且
+`GET /api/video/cameras` 对当前用户只返回一个唯一 `tbDeviceId` 时，才允许迁移到
+该 UUID。原 Device 仍可读取或列表包含多个 UUID 时不得使用此回退。
+
 ### 2.4 权限
 
 | 用户类型 | 查询列表 | 查询/播放已授权设备 | 修改绑定 | 强制停止 |
@@ -104,6 +120,11 @@ $headers = @{
 | `POST` | `/api/video/cameras/{tbDeviceId}/play` | 创建播放会话并获得播放地址 |
 | `POST` | `/api/video/cameras/{tbDeviceId}/stop` | 释放播放会话或强制停止 |
 | `GET` | `/api/video/cameras/{tbDeviceId}/snapshot` | 获取短期缓存截图 |
+| `POST` | `/api/video/cameras/{tbDeviceId}/ptz` | 统一 PTZ、变焦和预置位控制 |
+| `GET` | `/api/video/cameras/{tbDeviceId}/recordings` | 按时间范围查询录像 |
+| `POST` | `/api/video/cameras/{tbDeviceId}/recordings/play` | 创建录像回放会话 |
+| `POST` | `/api/video/cameras/{tbDeviceId}/recordings/control` | 暂停、恢复、定位或调整倍速 |
+| `POST` | `/api/video/cameras/{tbDeviceId}/recordings/stop` | 停止并释放录像回放会话 |
 | `GET` | `/api/video/devices/{tbDeviceId}/binding` | 查询视频绑定 |
 | `PUT` | `/api/video/devices/{tbDeviceId}/binding` | 创建或更新视频绑定 |
 | `DELETE` | `/api/video/devices/{tbDeviceId}/binding` | 删除视频绑定 |
@@ -561,7 +582,7 @@ Invoke-RestMethod `
 | `provider` | 否 | 默认 `WVP_STREAM_PROXY` |
 | `providerDeviceId` | 否 | GB28181/厂商设备编号 |
 | `providerChannelId` | 否 | GB28181/厂商通道编号 |
-| `mediaServerId` | 否 | 媒体节点编号 |
+| `mediaServerId` | 条件必填 | 不使用 ZLMediaKit Hook 时可省略；需要 Hook 状态同步时必须填写，并与 Hook 载荷中的媒体节点编号完全一致。本地部署使用 `polaris` |
 | `streamApp` | 否 | 默认 `live` |
 | `streamId` | 否 | 默认使用 `cameraCode` |
 | `preferredProtocol` | 否 | 当前使用 `hls` |
@@ -691,6 +712,8 @@ VIDEO_WVP_ENABLED
 VIDEO_WVP_BASE_URL
 VIDEO_WVP_USERNAME
 VIDEO_WVP_PASSWORD
+VIDEO_WVP_CONNECT_TIMEOUT_MS
+VIDEO_WVP_READ_TIMEOUT_MS
 VIDEO_ZLM_ENABLED
 VIDEO_ZLM_BASE_URL
 VIDEO_ZLM_SECRET
@@ -698,6 +721,11 @@ VIDEO_ZLM_RTSP_BASE_URL
 VIDEO_SESSION_TTL_SECONDS
 VIDEO_SESSION_STOP_DELAY_SECONDS
 VIDEO_SNAPSHOT_CACHE_SECONDS
+VIDEO_PTZ_RPC_TIMEOUT_MS
+VIDEO_RECORDING_SESSION_TTL_SECONDS
+VIDEO_RECORDING_SESSION_CLEANUP_INTERVAL_MS
+VIDEO_ZLM_HOOK_TOKEN
+VIDEO_WVP_TIME_ZONE
 ```
 
 凭证只能放在后端环境变量或安全配置中，不得通过任何 Video API 返回给浏览器。
@@ -931,7 +959,16 @@ X-Video-Hook-Token: <VIDEO_ZLM_HOOK_TOKEN>
 
 如果 WVP 已独占 ZLMediaKit Hook 地址，必须使用受信任的 Nginx/Hook
 转发器把原请求继续发给 WVP，同时镜像一份到上述统一转发入口；不要直接覆盖
-WVP Hook 地址。Token 只能保存在 ZLMediaKit 或转发器的服务端配置中。
+WVP Hook 地址。当前本地部署使用 `polaris-nginx:18978` 作为 Hook 中继：
+
+1. 所有 `/index/hook/**` 请求同步代理到 `polaris-wvp:18978`，WVP 的响应仍是
+   ZLMediaKit 看到的主响应。
+2. `on_play`、`on_stream_changed`、`on_stream_none_reader` 和
+   `on_record_mp4` 额外镜像到 ThingsBoard。
+3. ThingsBoard 镜像失败不改变 WVP 主响应。
+
+Token 只能保存在 ZLMediaKit 或转发器的服务端配置中，只能通过
+`X-Video-Hook-Token` 请求头传递；查询参数 Token 会返回 `401`。
 
 当前处理的状态事件包括：
 
@@ -942,6 +979,12 @@ WVP Hook 地址。Token 只能保存在 ZLMediaKit 或转发器的服务端配�
 - `on_record_mp4`、`on_record_ts`
 
 Hook 根据 `mediaServerId + app + stream` 查找 `video_camera_binding`，写入：
+
+该查找使用三个字段的精确匹配，不把空 `mediaServerId` 当作通配符。因此，接入
+ZLMediaKit Hook 状态同步的绑定必须显式保存 `mediaServerId`，并与 ZLMediaKit
+`general.mediaServerId`/Hook 载荷保持一致；本地部署值为 `polaris`。缺少该字段
+的遗留绑定仍可使用与其 Provider 相符的直播能力，但不会命中 Hook 状态同步，需在
+迁移时补齐。
 
 ```text
 streamOnline
@@ -961,11 +1004,15 @@ lastRecordingAt
 
 ```text
 VIDEO_PTZ_RPC_TIMEOUT_MS=10000
+VIDEO_WVP_CONNECT_TIMEOUT_MS=5000
+VIDEO_WVP_READ_TIMEOUT_MS=20000
 VIDEO_RECORDING_SESSION_TTL_SECONDS=900
 VIDEO_RECORDING_SESSION_CLEANUP_INTERVAL_MS=30000
 VIDEO_ZLM_HOOK_TOKEN=<独立随机密钥>
 VIDEO_WVP_TIME_ZONE=Asia/Shanghai
+VIDEO_HOOK_THINGSBOARD_URL=http://host.docker.internal:8080
 ```
 
 `VIDEO_ZLM_HOOK_TOKEN` 不得与 WVP 密码、ZLMediaKit Secret、ThingsBoard
-JWT 或 Device Token 复用，也不得提交到 Git。
+JWT 或 Device Token 复用，也不得提交到 Git。WVP 连接/读取超时分别默认
+5 秒和 20 秒；超时或重试失败统一映射为 502，不向调用方返回 WVP 原始错误正文。

@@ -86,7 +86,7 @@ public class VideoZlmHookService {
                 state.readerCount = readerCount(payload, state.readerCount);
             }
             case "on_stream_none_reader" -> state.readerCount = 0;
-            case "on_play" -> state.readerCount = readerCount(payload, Math.max(1, state.readerCount));
+            case "on_play" -> state.readerCount = readerCount(payload, state.readerCount);
             case "on_record_start" -> state.recording = true;
             case "on_record_stop", "on_record_mp4", "on_record_ts" -> {
                 state.recording = false;

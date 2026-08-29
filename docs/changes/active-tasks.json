@@ -1,26 +1,35 @@
 {
-  "schemaVersion": 1,
-  "updatedAt": "2026-08-08",
-  "tasks": [
-    {
-      "taskId": "agent-governance-ssot",
-      "name": "完善多 Agent 文件系统唯一真相来源",
-      "status": "待人工提交",
-      "owner": "主 Agent",
-      "taskDirectory": "docs/changes/agent-governance-ssot",
-      "worktree": ".",
-      "fileScopes": [
-        ".codex/agents",
-        "AGENTS.md",
-        "docs/ai/architecture-index.md",
-        "docs/ai/multi-agent-development.md",
-        "docs/ai/project-architecture.md",
-        "docs/changes/_template",
-        "docs/changes/agent-governance-ssot",
-        "scripts/validate-agent-governance.ps1"
-      ],
-      "sharedResources": [],
-      "lastUpdated": "2026-08-08"
-    }
-  ]
+    "schemaVersion":  1,
+    "updatedAt":  "2026-08-18",
+    "tasks":  [
+                  {
+                      "taskId":  "video-iot-capacity-test",
+                      "name":  "视频容量基线与多摄像头复用指南",
+                      "status":  "调研中",
+                      "owner":  "主 Agent",
+                      "taskDirectory":  "docs/changes/video-iot-capacity-test",
+                      "worktree":  ".",
+                      "fileScopes":  [
+                                         "backend/application/src/main/java/org/thingsboard/server/service/video/VideoRecordingSessionManager.java",
+                                         "video-platform/deploy/compose.web.yaml",
+                                         "video-platform/config/nginx/zlm-hook-fanout.conf.template",
+                                         "docs/changes/video-iot-capacity-test",
+                                         "docs/changes/active-tasks.json",
+                                         "docs/ai/architecture-index.md",
+                                         "docs/ai/multi-camera-video-onboarding.md",
+                                         "video-platform/source/wvp-GB28181-pro/src/main/java/com/genersoft/iot/vmp/media/service/impl/MediaServerServiceImpl.java",
+                                         "video-platform/source/wvp-GB28181-pro/src/test/java/com/genersoft/iot/vmp/media/service/impl/MediaServerServiceImplTest.java",
+                                         "video-platform/source/wvp-GB28181-pro/pom.xml"
+                                     ],
+                      "sharedResources":  [
+                                              "本地 ThingsBoard/PostgreSQL",
+                                              "simulation-equipment-flow Docker 栈",
+                                              "tb-video-validation Docker 栈",
+                                              "MQTT 1883/1884",
+                                              "HTTP(S) 8080/5173/18080/18081",
+                                              "E:/simulationEquipment/tb-gateway/config/connected_devices.json（只读验证）"
+                                          ],
+                      "lastUpdated":  "2026-08-29"
+                  }
+              ]
 }

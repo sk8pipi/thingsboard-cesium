@@ -623,32 +623,69 @@
 
     const requestId = ++cameraRuntimeRequestId;
 
+    let targetCamera = camera;
+
     try {
-      const runtime = await loadCameraRuntimeInfo(camera.entityId, camera.entityName || camera.name);
+      const dashboardId = currentAssignedTemplateDashboardId.value;
+      if (isCustomerUserMap.value && dashboardId) {
+        try {
+          const dashboard = await getDashboardById(dashboardId);
+          const latestTemplateState = normalizeMapTemplateState(
+            dashboard.configuration?.[DASHBOARD_MAP_WIDGET_CONFIG_KEY],
+          );
+          const latestCameras = (latestTemplateState?.mapPoints || []).filter(
+            (point): point is CameraMapPoint => point.type === 'camera',
+          );
+          const sameEntityName = camera.entityName
+            ? latestCameras.filter((point) => point.entityName === camera.entityName)
+            : [];
+          const sameName = camera.name ? latestCameras.filter((point) => point.name === camera.name) : [];
+          const refreshedCamera =
+            latestCameras.find((point) => point.id === camera.id) ||
+            (sameEntityName.length === 1 ? sameEntityName[0] : undefined) ||
+            (sameName.length === 1 ? sameName[0] : undefined);
+          if (refreshedCamera) {
+            targetCamera = refreshedCamera;
+          }
+        } catch (error) {
+          console.warn('[MapHome] Failed to refresh camera point before playback:', {
+            dashboardId,
+            pointId: camera.id,
+            error,
+          });
+        }
+      }
+
+      if (requestId !== cameraRuntimeRequestId) return;
+      const runtime = await loadCameraRuntimeInfo(targetCamera.entityId, targetCamera.entityName || targetCamera.name, [
+        targetCamera.id,
+        targetCamera.name,
+      ]);
       if (requestId !== cameraRuntimeRequestId) {
         void releaseCameraVideoSession(runtime);
         return;
       }
 
+      const pointRuntime = createCameraRuntimeFromTemplatePoint(targetCamera);
       selectedCameraRuntime.value = {
         ...runtime,
-        entityId: camera.entityId,
-        entityName: runtime.entityName || camera.entityName || camera.name,
-        cameraName: runtime.cameraName || camera.name,
+        entityId: runtime.entityId,
+        entityName: runtime.entityName || targetCamera.entityName || targetCamera.name,
+        cameraName: pointRuntime.cameraName || runtime.cameraName || targetCamera.name,
       };
     } catch (error: any) {
       if (requestId !== cameraRuntimeRequestId) return;
       console.error('[MapHome] Failed to load camera runtime info:', {
-        pointId: camera.id,
-        entityId: camera.entityId,
-        entityName: camera.entityName,
+        pointId: targetCamera.id,
+        entityId: targetCamera.entityId,
+        entityName: targetCamera.entityName,
         error,
       });
       cameraRuntimeError.value = '\u8bfb\u53d6\u6444\u50cf\u5934\u8bbe\u5907\u4fe1\u606f\u5931\u8d25';
       selectedCameraRuntime.value = {
-        entityId: camera.entityId,
-        entityName: camera.entityName || camera.name,
-        cameraName: camera.name,
+        entityId: targetCamera.entityId,
+        entityName: targetCamera.entityName || targetCamera.name,
+        cameraName: targetCamera.name,
       };
     } finally {
       if (requestId === cameraRuntimeRequestId) {
@@ -674,12 +711,6 @@
       cameraCode: point.cameraCode,
       cameraName: point.cameraName || camera.name,
       cameraModel: point.cameraModel,
-      hlsUrl: point.hlsUrl,
-      streamUrl: point.streamUrl || point.streamUrlMain,
-      webRtcUrl: point.webRtcUrl,
-      rtspUrl: point.rtspUrl,
-      flvUrl: point.flvUrl,
-      streamType: point.streamType,
       supportsLive: point.supportsLive,
       supportsPlayback: point.supportsPlayback,
       supportsPtz: point.supportsPtz,

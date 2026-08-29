@@ -2109,3 +2109,5 @@ video:
     password: "${VIDEO_WVP_PASSWORD:}"
     default-app: "${VIDEO_WVP_DEFAULT_APP:live}"
     time-zone: "${VIDEO_WVP_TIME_ZONE:Asia/Shanghai}"
+    connect-timeout-ms: "${VIDEO_WVP_CONNECT_TIMEOUT_MS:5000}"
+    read-timeout-ms: "${VIDEO_WVP_READ_TIMEOUT_MS:20000}"

@@ -2535,7 +2535,10 @@
     const requestId = ++cameraRuntimeRequestId;
 
     try {
-      const runtime = await loadCameraRuntimeInfo(camera.entityId, camera.entityName || camera.name);
+      const runtime = await loadCameraRuntimeInfo(camera.entityId, camera.entityName || camera.name, [
+        camera.id,
+        camera.name,
+      ]);
       if (requestId !== cameraRuntimeRequestId) {
         void releaseCameraVideoSession(runtime);
         return;
@@ -2543,9 +2546,9 @@
 
       selectedCameraRuntime.value = {
         ...runtime,
-        entityId: camera.entityId,
+        entityId: runtime.entityId,
         entityName: runtime.entityName || camera.entityName || camera.name,
-        cameraName: runtime.cameraName || camera.name,
+        cameraName: camera.name || runtime.cameraName,
       };
     } catch (error: any) {
       if (requestId !== cameraRuntimeRequestId) return;

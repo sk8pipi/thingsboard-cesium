@@ -6,6 +6,7 @@
 package org.thingsboard.server.service.video;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -14,8 +15,11 @@ import org.springframework.web.server.ResponseStatusException;
 import org.thingsboard.server.queue.util.TbCoreComponent;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.LongSupplier;
 
 @Slf4j
 @Service
@@ -24,10 +28,17 @@ public class VideoRecordingSessionManager {
 
     private final Map<UUID, RecordingSession> sessions = new ConcurrentHashMap<>();
     private final long sessionTtlMs;
+    private final LongSupplier currentTimeMillis;
 
+    @Autowired
     public VideoRecordingSessionManager(
             @Value("${video.recording.session.ttl-seconds:900}") long sessionTtlSeconds) {
+        this(sessionTtlSeconds, System::currentTimeMillis);
+    }
+
+    VideoRecordingSessionManager(long sessionTtlSeconds, LongSupplier currentTimeMillis) {
         this.sessionTtlMs = Math.max(60, sessionTtlSeconds) * 1000;
+        this.currentTimeMillis = Objects.requireNonNull(currentTimeMillis);
     }
 
     public VideoRecordingPlaybackInfo start(
@@ -36,10 +47,16 @@ public class VideoRecordingSessionManager {
             UUID userId,
             VideoRecordingPlayRequest request) {
         VideoRecordingPlaybackSource source = provider.startRecordingPlayback(binding, request);
-        long now = System.currentTimeMillis();
+        long now = now();
         long expiresAt = now + sessionTtlMs;
         UUID sessionId = UUID.randomUUID();
-        sessions.put(sessionId, new RecordingSession(binding, provider, userId, source, expiresAt));
+        sessions.put(sessionId, new RecordingSession(
+                binding,
+                provider,
+                userId,
+                source,
+                expiresAt,
+                new ReentrantLock()));
         return new VideoRecordingPlaybackInfo(
                 binding.tbDeviceId().toString(),
                 binding.cameraCode(),
@@ -62,8 +79,20 @@ public class VideoRecordingSessionManager {
             boolean allowAdmin) {
         UUID sessionId = requireSessionId(request == null ? null : request.sessionId());
         RecordingSession session = ownedSession(binding, sessionId, userId, allowAdmin);
-        session.provider().stopRecordingPlayback(session.binding(), session.source().stream());
-        sessions.remove(sessionId, session);
+        session.lock().lock();
+        try {
+            if (sessions.get(sessionId) != session) {
+                throw sessionNotFound();
+            }
+            if (session.expiresAt() <= now()) {
+                releaseExpiredSessionLocked(sessionId, session);
+                throw sessionNotFound();
+            }
+            session.provider().stopRecordingPlayback(session.binding(), session.source().stream());
+            sessions.remove(sessionId, session);
+        } finally {
+            session.lock().unlock();
+        }
         return new VideoRecordingStopResult(
                 binding.tbDeviceId().toString(),
                 binding.cameraCode(),
@@ -78,30 +107,37 @@ public class VideoRecordingSessionManager {
             boolean allowAdmin) {
         UUID sessionId = requireSessionId(request == null ? null : request.sessionId());
         RecordingSession session = ownedSession(binding, sessionId, userId, allowAdmin);
-        session.provider().controlRecordingPlayback(
-                session.binding(),
-                session.source().stream(),
-                request);
+        session.lock().lock();
+        try {
+            if (sessions.get(sessionId) != session) {
+                throw sessionNotFound();
+            }
+            if (session.expiresAt() <= now()) {
+                releaseExpiredSessionLocked(sessionId, session);
+                throw sessionNotFound();
+            }
+            session.provider().controlRecordingPlayback(
+                    session.binding(),
+                    session.source().stream(),
+                    request);
+        } finally {
+            session.lock().unlock();
+        }
         return new VideoRecordingControlResult(
                 binding.tbDeviceId().toString(),
                 binding.cameraCode(),
                 sessionId.toString(),
                 request.action(),
                 true,
-                System.currentTimeMillis());
+                now());
     }
 
     @Scheduled(fixedDelayString = "${video.recording.session.cleanup-interval-ms:30000}")
     public void cleanupExpiredSessions() {
-        long now = System.currentTimeMillis();
+        long now = now();
         sessions.forEach((sessionId, session) -> {
-            if (session.expiresAt() <= now && sessions.remove(sessionId, session)) {
-                try {
-                    session.provider().stopRecordingPlayback(session.binding(), session.source().stream());
-                } catch (RuntimeException error) {
-                    log.warn("[{}] Failed to stop expired recording playback {}: {}",
-                            session.binding().tbDeviceId(), sessionId, error.getMessage());
-                }
+            if (session.expiresAt() <= now) {
+                releaseExpiredSession(sessionId, session);
             }
         });
     }
@@ -112,17 +148,50 @@ public class VideoRecordingSessionManager {
             UUID userId,
             boolean allowAdmin) {
         RecordingSession session = sessions.get(sessionId);
-        if (session == null || session.expiresAt() <= System.currentTimeMillis()) {
-            sessions.remove(sessionId);
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recording playback session was not found");
+        if (session == null) {
+            throw sessionNotFound();
+        }
+        if (session.expiresAt() <= now()) {
+            releaseExpiredSession(sessionId, session);
+            throw sessionNotFound();
         }
         if (!session.binding().tbDeviceId().equals(binding.tbDeviceId())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recording playback session was not found");
+            throw sessionNotFound();
         }
         if (!allowAdmin && !session.userId().equals(userId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Recording playback session belongs to another user");
         }
         return session;
+    }
+
+    private void releaseExpiredSession(UUID sessionId, RecordingSession session) {
+        session.lock().lock();
+        try {
+            releaseExpiredSessionLocked(sessionId, session);
+        } finally {
+            session.lock().unlock();
+        }
+    }
+
+    private void releaseExpiredSessionLocked(UUID sessionId, RecordingSession session) {
+        if (sessions.get(sessionId) != session || session.expiresAt() > now()) {
+            return;
+        }
+        try {
+            session.provider().stopRecordingPlayback(session.binding(), session.source().stream());
+            sessions.remove(sessionId, session);
+        } catch (RuntimeException error) {
+            log.warn("[{}] Failed to stop expired recording playback {} ({})",
+                    session.binding().tbDeviceId(), sessionId, error.getClass().getSimpleName());
+        }
+    }
+
+    private long now() {
+        return currentTimeMillis.getAsLong();
+    }
+
+    private static ResponseStatusException sessionNotFound() {
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Recording playback session was not found");
     }
 
     private static UUID requireSessionId(String value) {
@@ -141,6 +210,7 @@ public class VideoRecordingSessionManager {
             VideoProvider provider,
             UUID userId,
             VideoRecordingPlaybackSource source,
-            long expiresAt) {
+            long expiresAt,
+            ReentrantLock lock) {
     }
 }
