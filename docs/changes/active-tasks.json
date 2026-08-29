@@ -1,11 +1,11 @@
 {
     "schemaVersion":  1,
-    "updatedAt":  "2026-08-18",
+    "updatedAt":  "2026-08-29",
     "tasks":  [
                   {
                       "taskId":  "video-iot-capacity-test",
                       "name":  "视频容量基线与多摄像头复用指南",
-                      "status":  "调研中",
+                      "status":  "待人工提交",
                       "owner":  "主 Agent",
                       "taskDirectory":  "docs/changes/video-iot-capacity-test",
                       "worktree":  ".",

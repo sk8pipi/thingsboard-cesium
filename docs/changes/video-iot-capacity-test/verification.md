@@ -117,3 +117,12 @@
 - 临时 `tb-capacity-*` 负载容器已不存在；先恢复原传感器与 Gateway 完成连续窗口验证，交付前再停止本轮启动的仿真栈、视频栈和 ThingsBoard；未删除测试数据，未停止外部 PostgreSQL。
 - 遗留问题回归结束后，WVP、ZLMediaKit、Nginx、Redis、虚拟摄像头、Mosquitto、模拟器和 Gateway 容器均已停止；`docker ps` 无运行容器。
 - `powershell -ExecutionPolicy Bypass -File scripts/validate-agent-governance.ps1`：通过；Active tasks 1，Agent profiles 4。
+
+## 2026-08-29 多摄像头复用指南验证
+
+- 三个只读调查 Agent 分别核对前端点位点击与 HLS 会话生命周期、后端 Video API 到 WVP/ZLMediaKit 的调用链，以及多摄像头身份、唯一性、容量和安全边界。
+- 主 Agent 依据当前代码与权威架构文档汇总 `docs/ai/multi-camera-video-onboarding.md`，并在架构索引中增加批量接入路由。
+- 独立验证 Agent 首轮发现 WVP StreamProxy 与 ZLMediaKit 直连注册职责表述、摄像头列表 O(N) 失败传播、Hook 状态缓存淘汰三个缺口；修订后复核通过，无剩余 P0/P1/P2。
+- 指南明确当前直播启动只支持 WVP StreamProxy 路径，真实 GB28181 直播、多宫格实现、媒体元组数据库唯一约束、分布式会话和生产凭据治理不在本轮静默扩展。
+- 本轮文档工作未启动或修改 Docker、ThingsBoard、PostgreSQL、WVP、ZLMediaKit 和共享端口，也未读取、记录或输出任何密码、Token、Secret 或内部 RTSP URL。
+- `powershell -ExecutionPolicy Bypass -File scripts/validate-agent-governance.ps1`：通过；`git diff --check` 无内容错误，仅有工作区行尾转换提示。

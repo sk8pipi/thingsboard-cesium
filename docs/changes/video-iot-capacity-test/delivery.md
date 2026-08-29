@@ -4,7 +4,7 @@
 
 - 任务编号：video-iot-capacity-test
 - 任务名称：视频容量基线与多摄像头复用指南
-- 当前状态：调研中
+- 当前状态：待人工提交
 - 当前主 Agent：主 Agent
 - 最后更新：2026-08-29
 
@@ -59,6 +59,9 @@
 - WVP 嵌套源码仓库当前处于 detached HEAD，且被主仓库忽略；用户需在嵌套仓库中单独建立分支并人工提交，主仓库提交不会包含该修复。
 - Gateway 文件当前有效且启动回归通过，但此前 `Extra data` 的原始写坏时序未能复现；本轮没有修改外部仿真目录。
 - WVP 运行时仍记录 1 条非重复键、非数据完整性、非启动失败的其他 ERROR，未阻断 HTTP/HLS 健康验证。
+- 当前直播启动实现只接入 WVP StreamProxy；真实 GB28181 设备/通道的直播启动尚未接入 `VideoProvider`，不能把 PTZ/录像字段误当成直播能力。
+- `GET /api/video/cameras` 当前会同步逐条查询上游，绑定数量和坏代理都可能放大列表延迟或导致整表失败；大规模接入前需独立优化并补充隔离测试。
+- 当前可提交视频配置仍有硬编码媒体 API 凭据的历史安全债；本轮没有读取或复制其值，进入共享或生产环境前需另立任务轮换并外部化。
 
 ## 人工 Git 交付
 
@@ -66,6 +69,7 @@
 - 建议主仓库提交分组：启动阻塞修复；Hook/Nginx 修复；容量测试事实源。
 - WVP 修复位于独立嵌套 Git 仓库，必须由用户在该仓库另建分支并单独提交。
 - 建议 commit message：`test(video): record local video and telemetry capacity baseline`
+- 复用指南建议 commit message：`docs(video): add reusable multi-camera onboarding guide`
 - WVP 建议 commit message：`fix(media): handle concurrent media server registration`
 
 ## 验收标准
@@ -85,7 +89,7 @@
 | WVP 登记竞态闭环 | 主 Agent | 嵌套 WVP 仓库的 MediaServerServiceImpl、专项测试与 POM 测试开关 | 已完成 | 单测、镜像构建、运行时回归通过 |
 | 容量测试执行 | 主 Agent | 本地共享测试环境 | 已完成 | 错误、队列满或资源安全线 |
 | 结果与治理记录 | 主 Agent | docs/changes/video-iot-capacity-test、active-tasks.json | 已完成 | 治理校验通过 |
-| 多摄像头复用指南 | 主 Agent（汇总）+ 只读调查 Agent | docs/ai/multi-camera-video-onboarding.md、architecture-index.md | 进行中 | 调用链、扩展风险和验收清单完成独立核对 |
+| 多摄像头复用指南 | 主 Agent（汇总）+ 只读调查 Agent | docs/ai/multi-camera-video-onboarding.md、architecture-index.md | 已完成 | 调用链、扩展风险和验收清单完成独立核对 |
 
 ## 当前进度
 
@@ -95,12 +99,14 @@
 - 临时负载容器已经清理，原 100 传感器模拟器已恢复并完成连续窗口验证；交付前已停止本轮启动的全部容器与 ThingsBoard 进程。
 - WVP 主键冲突与 Gateway JSON 解析两项 P2 遗留问题已闭环；回归结束后本轮容器再次全部停止。
 - 结果、限制、发现和修复写入任务事实源。
+- 多摄像头复用指南已覆盖身份、绑定、WVP StreamProxy、ZLMediaKit、Video API、同源 HLS、前端会话生命周期、故障树、批量验收和多源容量阶梯。
+- 三个只读调查 Agent 分别核对前端、后端媒体链路和多摄像头扩展风险；独立验证 Agent 复核后无剩余 P0/P1/P2。
 
 ### 未完成
 
 - 101-499 条/秒区间二分、多摄像头源、录像并发与 24 小时稳定性测试留待独立环境执行。
-- 多摄像头复用指南尚待并行只读调查、主 Agent 汇总和独立验证。
+- WVP StreamProxy 之外的真实 GB28181 直播接入、多宫格产品实现、数据库媒体元组唯一约束、会话共享状态和生产凭据治理留待独立任务。
 
 ### 下一步
 
-- 并行梳理前端播放会话、后端/WVP/ZLMediaKit 数据链路和多摄像头扩展风险，形成正式复用指南并完成治理校验。
+- 由用户审核复用指南和工作区差异；后续新增摄像头按指南逐路验收，多独立源容量继续在独立环境按 1、2、4、8、16 路阶梯验证。

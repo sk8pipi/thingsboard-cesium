@@ -20,6 +20,7 @@ decisions.md 和 verification.md。实际使用子 Agent、独立 worktree 或�
 | 任务范围 | 必读文档 | 说明 |
 | --- | --- | --- |
 | 视频、摄像头、WVP、ZLMediaKit、播放、截图、PTZ、录像、回放、流状态 | docs/ai/video-platform-architecture.md | 视频领域唯一权威架构与决策记录 |
+| 新增多路摄像头、批量接入、视频点位复制、多宫格前置验收 | docs/ai/video-platform-architecture.md、docs/ai/multi-camera-video-onboarding.md、docs/api/video-api.md | 架构文档决定边界，接入指南提供逐路配置、诊断和容量清单 |
 | Video API 请求、响应、权限、错误码、调用生命周期 | docs/ai/video-platform-architecture.md、docs/api/video-api.md | 架构文档决定边界，API 文档决定调用契约 |
 | Cesium 摄像头点位和视频弹窗 | docs/ai/video-platform-architecture.md、docs/api/video-api.md | 必须保持 tbDeviceId 和 Video API 边界 |
 | Vue 3 前端、普通 Cesium 地图、仪表盘运行时 | docs/ai/project-architecture.md | 若触及摄像头或播放，再追加视频文档 |
