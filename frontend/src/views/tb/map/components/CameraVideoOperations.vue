@@ -735,7 +735,7 @@
     background: #020617;
   }
 
-  @media (max-width: 560px) {
+  @container map-screen (max-width: 560px) {
     .camera-video-operations__time-range {
       grid-template-columns: 1fr;
     }

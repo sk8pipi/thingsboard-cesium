@@ -101,7 +101,12 @@
       </div>
     </div>
 
-    <div class="mw-stage" :style="templateTopBarOffsetStyle">
+    <div
+      ref="stageEl"
+      class="mw-stage"
+      :class="{ 'mw-stage--compact': mapScreen.metrics.value.compact }"
+      :style="mapScreen.cssVars.value"
+    >
       <CesiumMap
         ref="cesiumMapRef"
         class="mw-cesium"
@@ -114,6 +119,8 @@
         :sensor-device-type-styles="templateSensorDeviceTypeStyles"
         :sensor-type-styles-ignore-offline="true"
         :camera-styles-ignore-offline="true"
+        :resolution-scale="mapScreen.metrics.value.cesiumResolutionScale"
+        :screen-scale="mapScreen.metrics.value.uiScale"
         @sensor-click="onSensorClick"
         @camera-click="onCameraClick"
         @map-click="onMapPicked"
@@ -124,6 +131,8 @@
         :config="templateTopBar"
         mode="editor"
         :dashboard-title="dashboardTemplate?.title || ''"
+        :responsive-height="mapScreen.metrics.value.topBarHeight"
+        :screen-scale="mapScreen.metrics.value.uiScale"
       />
 
       <MapTopBarSettingsPanel
@@ -513,7 +522,7 @@
           'mw-grid--editing': editorMode !== 'view',
           'mw-grid--hidden': shouldHideWidgetLayer,
         }"
-        :style="{ top: templateTopBarOffset }"
+        :style="mapScreen.canvasStyle.value"
       ></div>
 
       <div v-if="dragHint" class="mw-toast">{{ dragHint }}</div>
@@ -609,15 +618,18 @@
     DASHBOARD_MAP_WIDGET_CONFIG_KEY,
     createDefaultMapTemplateState,
     createDefaultMapTopBarConfig,
-    mapTopBarOffsetStyle,
+    DEFAULT_MAP_TEMPLATE_VIEWPORT,
     mapTemplateAppearanceStyle,
     normalizeMapTemplateState,
+    resolveMapTemplateViewportForLayout,
     type MapTemplateAppearance,
     type MapTemplateScene,
     type MapTemplateState,
+    type MapTemplateViewport,
     type MapTopBarConfig,
     type SensorDeviceTypeStyles,
   } from './mapTemplateConfig';
+  import { useMapScreenResponsive } from './mapScreenResponsive';
   import {
     collectMapTemplateDeviceRefs,
     formatTemplateDeviceNames,
@@ -635,6 +647,7 @@
     appearance: WidgetAppearance;
     sensorDeviceTypeStyles: SensorDeviceTypeStyles;
     topBar: MapTopBarConfig;
+    viewport: MapTemplateViewport;
   };
 
   type MapWidgetEditorState = MapTemplateState;
@@ -705,9 +718,11 @@
   const cesiumMapRef = ref<CesiumMapExpose | null>(null);
 
   const gridEl = ref<HTMLDivElement | null>(null);
+  const stageEl = ref<HTMLDivElement | null>(null);
   const fileInputEl = ref<HTMLInputElement | null>(null);
   const sensorStyleIconInputEl = ref<HTMLInputElement | null>(null);
   let grid: any = null;
+  let applyingScreenMetrics = false;
 
   const editorMode = ref<MapEditorMode>('view');
   const addPanelVisible = ref(false);
@@ -740,6 +755,7 @@
   const templateAppearance = ref<MapTemplateAppearance>({ ...createDefaultMapTemplateState().appearance });
   const templateSensorDeviceTypeStyles = ref<SensorDeviceTypeStyles>({});
   const templateTopBar = ref<MapTopBarConfig>(createDefaultMapTopBarConfig());
+  const templateViewport = ref<MapTemplateViewport>({ ...DEFAULT_MAP_TEMPLATE_VIEWPORT });
   const appearancePanelVisible = ref(false);
   const sensorStylePanelVisible = ref(false);
   const pageSettingsVisible = ref(false);
@@ -750,9 +766,40 @@
   const selectedSensorPointId = ref('');
   const sensorPointSearch = ref('');
   const templateAppearanceCssVars = computed(() => mapTemplateAppearanceStyle(templateAppearance.value));
-  const templateTopBarOffsetStyle = computed(() => mapTopBarOffsetStyle(templateTopBar.value));
-  const templateTopBarOffset = computed(() =>
-    templateTopBar.value.visible ? `${templateTopBar.value.height}px` : '0px',
+  const responsiveTemplateViewport = computed(() =>
+    resolveMapTemplateViewportForLayout(templateViewport.value, layout.value, widgets.value),
+  );
+  const mapScreen = useMapScreenResponsive(
+    stageEl,
+    () => responsiveTemplateViewport.value,
+    () => templateTopBar.value,
+  );
+  function applyScreenMetrics() {
+    if (!grid) return;
+    const metrics = mapScreen.metrics.value;
+    applyingScreenMetrics = true;
+    if (grid.getColumn() !== metrics.columns) {
+      grid.column(metrics.columns, 'move');
+    }
+    grid.cellHeight(Math.round(metrics.cellHeight * 100) / 100);
+    grid.margin(Math.round(metrics.margin * 100) / 100);
+    queueMicrotask(() => {
+      applyingScreenMetrics = false;
+    });
+  }
+
+  watch(
+    () => [
+      mapScreen.metrics.value.columns,
+      mapScreen.metrics.value.cellHeight,
+      mapScreen.metrics.value.margin,
+      mapScreen.metrics.value.canvasWidth,
+      mapScreen.metrics.value.canvasHeight,
+    ],
+    async () => {
+      await nextTick();
+      applyScreenMetrics();
+    },
   );
   const templateBackgroundTransparency = computed({
     get: () => Math.round((1 - Number(templateAppearance.value.backgroundOpacity ?? 0.04)) * 100),
@@ -1380,6 +1427,7 @@
     templateAppearance.value = cloneJson(normalized.appearance);
     templateSensorDeviceTypeStyles.value = cloneJson(normalized.sensorDeviceTypeStyles);
     templateTopBar.value = cloneJson(normalized.topBar);
+    templateViewport.value = cloneJson(normalized.viewport);
     layout.value = normalized.layout;
     widgets.value = normalizeWidgetState(normalized.widgets);
     originalMapPoints.value = cloneJson(normalized.mapPoints);
@@ -1395,6 +1443,7 @@
       appearance: cloneJson(templateAppearance.value),
       sensorDeviceTypeStyles: cloneJson(templateSensorDeviceTypeStyles.value),
       topBar: cloneJson(templateTopBar.value),
+      viewport: cloneJson(templateViewport.value),
       layout: cloneJson(layout.value),
       widgets: cloneJson(widgets.value),
       mapPoints: cloneJson(draftMapPoints.value),
@@ -2088,6 +2137,7 @@
       appearance: cloneJson(templateAppearance.value),
       sensorDeviceTypeStyles: cloneJson(templateSensorDeviceTypeStyles.value),
       topBar: cloneJson(templateTopBar.value),
+      viewport: cloneJson(templateViewport.value),
     };
     draftMapPoints.value = cloneJson(originalMapPoints.value);
     draftSensorPopupBindings.value = cloneJson(originalSensorPopupBindings.value);
@@ -2333,6 +2383,7 @@
     templateAppearance.value = cloneJson(widgetSnapshot.appearance);
     templateSensorDeviceTypeStyles.value = cloneJson(widgetSnapshot.sensorDeviceTypeStyles);
     templateTopBar.value = cloneJson(widgetSnapshot.topBar);
+    templateViewport.value = cloneJson(widgetSnapshot.viewport);
     renderGrid();
   }
 
@@ -2409,6 +2460,7 @@
       appearance: cloneJson(state.appearance),
       sensorDeviceTypeStyles: cloneJson(state.sensorDeviceTypeStyles),
       topBar: cloneJson(state.topBar),
+      viewport: cloneJson(state.viewport),
     };
 
     leaveEditMode();
@@ -2632,9 +2684,9 @@
 
     grid = GridStack.init(
       {
-        column: 12,
-        cellHeight: 30,
-        margin: 10,
+        column: mapScreen.metrics.value.columns,
+        cellHeight: mapScreen.metrics.value.cellHeight || 30,
+        margin: mapScreen.metrics.value.margin || 10,
         float: true,
         draggable: {
           handle: '.mw-widget',
@@ -2649,11 +2701,12 @@
 
     gridEl.value.addEventListener('click', onGridClick, true);
     grid.on('change', () => {
-      if (!grid || editorMode.value === 'view') return;
+      if (!grid || editorMode.value === 'view' || applyingScreenMetrics) return;
       syncLayoutFromGrid();
     });
 
     datasourceRuntime.connect();
+    applyScreenMetrics();
     renderGrid();
     grid.setStatic(true);
     grid.enableMove(false);
@@ -2675,6 +2728,7 @@
 <style scoped>
   .mw-editor {
     position: relative;
+    container: map-editor / size;
     display: flex;
     flex-direction: column;
     width: 100%;
@@ -2739,6 +2793,7 @@
 
   .mw-stage {
     position: relative;
+    container: map-screen / size;
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
@@ -2801,7 +2856,7 @@
     top: calc(var(--map-top-bar-offset, 0px) + 12px);
     left: 12px;
     z-index: 28;
-    width: min(380px, calc(100vw - 24px));
+    width: min(380px, calc(100% - 24px));
     box-sizing: border-box;
     display: grid;
     gap: 14px;
@@ -2881,7 +2936,7 @@
   }
 
   .mw-dialog-card {
-    width: min(420px, calc(100vw - 32px));
+    width: min(420px, calc(100% - 32px));
     padding: 18px;
     border-radius: 16px;
     background: rgba(18, 22, 30, 0.95);
@@ -2998,7 +3053,7 @@
     top: calc(var(--map-top-bar-offset, 0px) + 12px);
     right: 12px;
     z-index: 31;
-    width: min(860px, calc(100vw - 24px));
+    width: min(860px, calc(100% - 24px));
     max-height: calc(100% - var(--map-top-bar-offset, 0px) - 24px);
     overflow: hidden;
     box-sizing: border-box;
@@ -3255,7 +3310,7 @@
     color: #fdba74;
   }
 
-  @media (max-width: 720px) {
+  @container map-editor (max-width: 720px) {
     .mw-style-tabs {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3299,7 +3354,7 @@
     top: calc(var(--map-top-bar-offset, 0px) + 12px);
     left: 12px;
     z-index: 30;
-    width: min(620px, calc(100vw - 24px));
+    width: min(620px, calc(100% - 24px));
     max-height: calc(100% - var(--map-top-bar-offset, 0px) - 24px);
     overflow: hidden;
     border-radius: 12px;
@@ -3452,7 +3507,8 @@
 
   .mw-grid {
     position: absolute;
-    inset: var(--map-top-bar-offset, 0px) 0 0;
+    top: 0;
+    left: 0;
     z-index: 10;
     transition: opacity 0.2s ease;
     pointer-events: none;
@@ -3468,7 +3524,7 @@
     top: calc(var(--map-top-bar-offset, 0px) + 12px);
     right: 12px;
     z-index: 30;
-    width: min(420px, calc(100vw - 24px));
+    width: min(420px, calc(100% - 24px));
   }
 
   .mw-error {
@@ -3476,7 +3532,7 @@
     left: 12px;
     bottom: 12px;
     z-index: 35;
-    max-width: min(480px, calc(100vw - 24px));
+    max-width: min(480px, calc(100% - 24px));
     padding: 10px 12px;
     border-radius: 10px;
     background: rgba(127, 29, 29, 0.92);
@@ -3490,7 +3546,7 @@
     bottom: 18px;
     transform: translateX(-50%);
     z-index: 34;
-    max-width: min(620px, calc(100vw - 32px));
+    max-width: min(620px, calc(100% - 32px));
     padding: 10px 14px;
     border-radius: 999px;
     background: rgba(15, 23, 42, 0.88);
@@ -3598,7 +3654,7 @@
     transform: rotate(-45deg);
   }
 
-  @media (max-width: 960px) {
+  @container map-editor (max-width: 960px) {
     .mw-editbar {
       grid-template-columns: auto minmax(0, 1fr);
       gap: 8px 12px;
@@ -3623,7 +3679,7 @@
     }
   }
 
-  @media (max-width: 560px) {
+  @container map-editor (max-width: 560px) {
     .mw-editbar {
       gap: 6px 8px;
       padding: 7px 8px;

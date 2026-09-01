@@ -1,5 +1,10 @@
 <template>
-  <div ref="mapHomeRef" class="map-home" :style="mapAppearanceStyle">
+  <div
+    ref="mapHomeRef"
+    class="map-home"
+    :class="{ 'map-home--compact': mapScreen.metrics.value.compact }"
+    :style="mapAppearanceStyle"
+  >
     <MapScreenTopBar
       class="map-top-bar"
       :config="topBarConfig"
@@ -7,6 +12,8 @@
       mode="runtime"
       :dashboard-title="currentAssignedTemplateTitle"
       :is-fullscreen="isMapFullscreen"
+      :responsive-height="mapScreen.metrics.value.topBarHeight"
+      :screen-scale="mapScreen.metrics.value.uiScale"
       @action="handleTopBarAction"
     />
 
@@ -21,6 +28,8 @@
       :scene-models="sceneModels"
       :enable-sensor-type-styles="enableMapSensorTypeStyles"
       :sensor-device-type-styles="assignedTemplateState?.sensorDeviceTypeStyles || {}"
+      :resolution-scale="mapScreen.metrics.value.cesiumResolutionScale"
+      :screen-scale="mapScreen.metrics.value.uiScale"
       @sensor-click="onSensorClick"
       @camera-click="onCameraClick"
     />
@@ -32,6 +41,7 @@
       :data="assignedTemplateState"
       :runtime-devices="assignedTemplateRuntimeDevices"
       :runtime="datasourceRuntime"
+      :screen-metrics="mapScreen.metrics.value"
       @alarm-focus="onAlarmFocus"
     />
 
@@ -101,12 +111,14 @@
   import {
     DASHBOARD_MAP_WIDGET_CONFIG_KEY,
     createDefaultMapTopBarConfig,
-    mapTopBarOffsetStyle,
+    DEFAULT_MAP_TEMPLATE_VIEWPORT,
     mapTemplateAppearanceStyle,
     normalizeMapTemplateState,
+    resolveMapTemplateViewportForLayout,
     type MapTopBarActionType,
     type MapTemplateState,
   } from './mapTemplateConfig';
+  import { useMapScreenResponsive } from './mapScreenResponsive';
   import { executeMapTopBarAction, getAvailableMapTopBarActions } from './mapTopBarActions';
   import {
     clearSelectedMapTemplateId,
@@ -166,9 +178,21 @@
   const availableTopBarActions = computed(() =>
     getAvailableMapTopBarActions(topBarConfig.value.actions, userStore.getAuthority),
   );
+  const responsiveTemplateViewport = computed(() =>
+    resolveMapTemplateViewportForLayout(
+      assignedTemplateState.value?.viewport || DEFAULT_MAP_TEMPLATE_VIEWPORT,
+      assignedTemplateState.value?.layout,
+      assignedTemplateState.value?.widgets,
+    ),
+  );
+  const mapScreen = useMapScreenResponsive(
+    mapHomeRef,
+    () => responsiveTemplateViewport.value,
+    () => topBarConfig.value,
+  );
   const mapAppearanceStyle = computed(() => ({
     ...mapTemplateAppearanceStyle(assignedTemplateState.value?.appearance),
-    ...mapTopBarOffsetStyle(topBarConfig.value),
+    ...mapScreen.cssVars.value,
   }));
   const currentAssignedTemplateDashboardId = ref('');
   const storageKey = computed(() => getMapWidgetStorageKey());
@@ -793,6 +817,7 @@
 <style scoped>
   .map-home {
     position: relative;
+    container: map-screen / size;
     width: 100%;
     height: 100%;
     overflow: hidden;
@@ -810,8 +835,6 @@
   }
 
   .map-widgets {
-    position: absolute;
-    inset: var(--map-top-bar-offset, 0px) 0 0;
     z-index: 10;
     pointer-events: none;
   }

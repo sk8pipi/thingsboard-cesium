@@ -32,6 +32,14 @@ export type MapSceneModel = {
 
 export type MapTemplateAppearance = Pick<WidgetAppearance, 'backgroundOpacity' | 'blurPx'>;
 
+export type MapTemplateViewport = {
+  designWidth: number;
+  designHeight: number;
+  columns: number;
+  rows: number;
+  mode: 'fill';
+};
+
 export type SensorDeviceTypeStyles = Record<string, SensorPointStyleOverride>;
 
 export type MapTopBarActionType = 'overview' | 'settings' | 'fullscreen';
@@ -106,6 +114,14 @@ function normalizeSensorDeviceTypeStyles(value: unknown): SensorDeviceTypeStyles
 export const DEFAULT_MAP_TEMPLATE_APPEARANCE: Required<MapTemplateAppearance> = {
   backgroundOpacity: 0.04,
   blurPx: 0,
+};
+
+export const DEFAULT_MAP_TEMPLATE_VIEWPORT: MapTemplateViewport = {
+  designWidth: 1920,
+  designHeight: 1080,
+  columns: 12,
+  rows: 25,
+  mode: 'fill',
 };
 
 function clamp(value: unknown, fallback: number, min: number, max: number) {
@@ -188,11 +204,12 @@ export type MapTemplateState = {
   sensorDeviceTypeStyles: SensorDeviceTypeStyles;
   appearance: MapTemplateAppearance;
   topBar: MapTopBarConfig;
+  viewport: MapTemplateViewport;
 };
 
 export function createDefaultMapTemplateState(): MapTemplateState {
   return {
-    version: 5,
+    version: 6,
     scene: {
       globeOnly: true,
       models: [],
@@ -205,6 +222,50 @@ export function createDefaultMapTemplateState(): MapTemplateState {
     sensorDeviceTypeStyles: {},
     appearance: { ...DEFAULT_MAP_TEMPLATE_APPEARANCE },
     topBar: createDefaultMapTopBarConfig(),
+    viewport: { ...DEFAULT_MAP_TEMPLATE_VIEWPORT },
+  };
+}
+
+function normalizeMapTemplateViewport(
+  value: Partial<MapTemplateViewport> | null | undefined,
+  layout: GridItem[],
+): MapTemplateViewport {
+  const maximumLayoutRow = getMapTemplateLayoutRows(layout);
+
+  return {
+    designWidth: clamp(value?.designWidth, DEFAULT_MAP_TEMPLATE_VIEWPORT.designWidth, 1024, 7680),
+    designHeight: clamp(value?.designHeight, DEFAULT_MAP_TEMPLATE_VIEWPORT.designHeight, 576, 4320),
+    columns: Math.round(clamp(value?.columns, DEFAULT_MAP_TEMPLATE_VIEWPORT.columns, 1, 24)),
+    rows: Math.max(maximumLayoutRow, Math.round(clamp(value?.rows, DEFAULT_MAP_TEMPLATE_VIEWPORT.rows, 1, 200))),
+    mode: 'fill',
+  };
+}
+
+export function getMapTemplateLayoutRows(layout?: GridItem[] | null): number {
+  if (!Array.isArray(layout)) return 0;
+
+  return layout.reduce((maximum, item) => {
+    const bottom = Number(item.y || 0) + Number(item.h || 0);
+    return Number.isFinite(bottom) ? Math.max(maximum, Math.ceil(bottom)) : maximum;
+  }, 0);
+}
+
+/**
+ * Runtime and editor screens must stretch the occupied grid rows across the
+ * available canvas. The persisted row count remains a compatibility fallback
+ * for empty templates and does not create an unused band below real widgets.
+ */
+export function resolveMapTemplateViewportForLayout(
+  viewport: Partial<MapTemplateViewport> | null | undefined,
+  layout?: GridItem[] | null,
+  widgets?: Record<string, unknown> | null,
+): MapTemplateViewport {
+  const normalized = normalizeMapTemplateViewport(viewport, []);
+  const renderableLayout = widgets ? (layout || []).filter((item) => Boolean(widgets[item.i])) : layout;
+  const occupiedRows = getMapTemplateLayoutRows(renderableLayout);
+  return {
+    ...normalized,
+    rows: occupiedRows || normalized.rows,
   };
 }
 
@@ -212,18 +273,19 @@ export function normalizeMapTemplateState(state?: Partial<MapTemplateState> | nu
   const fallback = createDefaultMapTemplateState();
   const scene: Partial<MapTemplateScene> = state?.scene || {};
   const sourceVersion = Number(state?.version || 1);
+  const layout = Array.isArray(state?.layout) ? state.layout : [];
 
   return {
     ...fallback,
     ...(state || {}),
-    version: sourceVersion < 5 ? 5 : sourceVersion,
+    version: sourceVersion < 6 ? 6 : sourceVersion,
     scene: {
       ...fallback.scene,
       ...scene,
       models: Array.isArray(scene.models) ? scene.models : [],
       terrains: Array.isArray(scene.terrains) ? scene.terrains : [],
     },
-    layout: Array.isArray(state?.layout) ? state.layout : [],
+    layout,
     widgets: state?.widgets && typeof state.widgets === 'object' ? state.widgets : {},
     mapPoints: Array.isArray(state?.mapPoints) ? state.mapPoints : [],
     sensorPopupBindings:
@@ -234,5 +296,6 @@ export function normalizeMapTemplateState(state?: Partial<MapTemplateState> | nu
       ...(state?.appearance || {}),
     },
     topBar: normalizeMapTopBarConfig(state?.topBar),
+    viewport: normalizeMapTemplateViewport(state?.viewport, layout),
   };
 }

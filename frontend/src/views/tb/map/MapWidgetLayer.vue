@@ -1,10 +1,10 @@
 <template>
   <!-- 覆盖层：只负责渲染，不负责编辑 -->
-  <div ref="gridEl" class="mw-layer grid-stack"></div>
+  <div ref="gridEl" class="mw-layer grid-stack" :style="layerStyle"></div>
 </template>
 
 <script setup lang="ts">
-  import { ref, onMounted, onBeforeUnmount, nextTick, watch, createApp, h } from 'vue';
+  import { ref, onMounted, onBeforeUnmount, nextTick, watch, createApp, h, computed } from 'vue';
   import { GridStack } from 'gridstack';
   import 'gridstack/dist/gridstack.min.css';
 
@@ -16,6 +16,7 @@
   import type { AlarmFocusPayload } from '../dashboard/runtime/widgets/alarm/focus';
   import type { MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
   import type { MapPoint } from './types/mapPointTypes';
+  import { mapScreenCanvasStyle, type MapScreenMetrics } from './mapScreenResponsive';
 
   type WidgetData = DashboardWidget & {
     type?: LocalWidgetKey;
@@ -33,6 +34,7 @@
     data?: WidgetLayerData | null;
     runtimeDevices?: MapTemplateRuntimeDevices | null;
     runtime?: DatasourceRuntime;
+    screenMetrics?: MapScreenMetrics;
   }>();
 
   const emit = defineEmits<{
@@ -41,6 +43,17 @@
 
   const gridEl = ref<HTMLDivElement | null>(null);
   let grid: any = null;
+
+  const layerStyle = computed(() => (props.screenMetrics ? mapScreenCanvasStyle(props.screenMetrics) : undefined));
+
+  function applyScreenMetrics() {
+    if (!grid || !props.screenMetrics) return;
+    if (grid.getColumn() !== props.screenMetrics.columns) {
+      grid.column(props.screenMetrics.columns, 'move');
+    }
+    grid.cellHeight(Math.round(props.screenMetrics.cellHeight * 100) / 100);
+    grid.margin(Math.round(props.screenMetrics.margin * 100) / 100);
+  }
 
   const mountedApps = new Map<string, ReturnType<typeof createApp>>();
   const ownedDatasourceRuntime = props.runtime ? null : createDatasourceRuntime();
@@ -180,9 +193,9 @@
 
     grid = GridStack.init(
       {
-        column: 12,
-        cellHeight: 30,
-        margin: 10,
+        column: props.screenMetrics?.columns || 12,
+        cellHeight: props.screenMetrics?.cellHeight || 30,
+        margin: props.screenMetrics?.margin || 10,
         float: true,
         disableResize: true,
         disableDrag: true,
@@ -192,8 +205,23 @@
 
     window.addEventListener('storage', onStorage);
     datasourceRuntime.connect();
+    applyScreenMetrics();
     await render();
   });
+
+  watch(
+    () => [
+      props.screenMetrics?.columns,
+      props.screenMetrics?.cellHeight,
+      props.screenMetrics?.margin,
+      props.screenMetrics?.canvasWidth,
+      props.screenMetrics?.canvasHeight,
+    ],
+    async () => {
+      await nextTick();
+      applyScreenMetrics();
+    },
+  );
 
   watch(
     () => props.storageKey,
@@ -223,9 +251,12 @@
 <style scoped>
   .mw-layer {
     position: absolute;
-    inset: var(--map-top-bar-offset, 0px) 0 0;
+    top: 0;
+    left: 0;
     z-index: 10;
     pointer-events: none;
+    min-width: 0;
+    min-height: 0;
   }
 
   :deep(.grid-stack-item) {

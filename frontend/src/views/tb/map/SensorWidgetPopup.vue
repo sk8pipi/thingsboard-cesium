@@ -232,7 +232,7 @@
     opacity: 0.8;
   }
 
-  @media (max-width: 640px) {
+  @container map-screen (max-width: 640px) {
     .sensor-widget-popup {
       top: calc(var(--map-top-bar-offset, 0px) + 12px);
       right: 12px;

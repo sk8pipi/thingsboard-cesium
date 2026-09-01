@@ -373,7 +373,7 @@
     display: grid;
     align-content: start;
     gap: 0;
-    width: min(380px, calc(100vw - 24px));
+    width: min(380px, calc(100% - 24px));
     max-height: 100%;
     overflow-y: auto;
     box-sizing: border-box;
@@ -626,7 +626,7 @@
     cursor: not-allowed;
   }
 
-  @media (max-width: 420px) {
+  @container map-screen (max-width: 420px) {
     .map-top-bar-settings__header {
       gap: 10px;
       padding: 9px 12px;

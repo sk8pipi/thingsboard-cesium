@@ -9,7 +9,7 @@
           alt=""
           @error="logoLoadFailed = true"
         />
-        <Icon v-else class="map-screen-top-bar__brand-icon" icon="ant-design:cluster-outlined" :size="28" />
+        <Icon v-else class="map-screen-top-bar__brand-icon" icon="ant-design:cluster-outlined" :size="brandIconSize" />
         <span v-if="config.brand.name" class="map-screen-top-bar__brand-name">
           {{ config.brand.name }}
         </span>
@@ -29,7 +29,7 @@
           :aria-label="action.label"
           @click="handleAction(action.type)"
         >
-          <Icon :icon="actionIcon(action.type)" :size="20" />
+          <Icon :icon="actionIcon(action.type)" :size="actionIconSize" />
           <span v-if="action.type !== 'fullscreen'" class="map-screen-top-bar__action-label">
             {{ action.label }}
           </span>
@@ -53,11 +53,14 @@
       mode?: 'runtime' | 'editor';
       dashboardTitle?: string;
       isFullscreen?: boolean;
+      responsiveHeight?: number;
+      screenScale?: number;
     }>(),
     {
       dashboardTitle: '',
       isFullscreen: false,
       mode: 'runtime',
+      screenScale: 1,
     },
   );
 
@@ -69,15 +72,25 @@
   const resolvedLogoUrl = ref('');
   let logoRequestId = 0;
 
+  const normalizedScreenScale = computed(() => Math.min(2, Math.max(0.67, Number(props.screenScale) || 1)));
+  const brandIconSize = computed(() => Math.round(Math.min(40, Math.max(22, 28 * normalizedScreenScale.value))));
+  const actionIconSize = computed(() => Math.round(Math.min(30, Math.max(18, 20 * normalizedScreenScale.value))));
+
   const headerStyle = computed<CSSProperties>(() => {
-    const configuredLogoHeight = Number(props.config.brand.logoHeight) || 34;
-    const maximumLogoHeight = Math.max(20, Number(props.config.height) - 16);
+    const scale = normalizedScreenScale.value;
+    const renderedHeight = Number(props.responsiveHeight) > 0 ? Number(props.responsiveHeight) : props.config.height;
+    const configuredLogoHeight = (Number(props.config.brand.logoHeight) || 34) * scale;
+    const maximumLogoHeight = Math.max(20, renderedHeight - 12);
     const logoHeight = Math.min(configuredLogoHeight, maximumLogoHeight);
-    const logoMaxWidth = Number(props.config.brand.logoMaxWidth) || 120;
+    const logoMaxWidth = Math.min(240, (Number(props.config.brand.logoMaxWidth) || 120) * scale);
     return {
-      '--map-top-bar-height': `${props.config.height}px`,
+      '--map-top-bar-height': `${renderedHeight}px`,
       '--map-logo-height': `${logoHeight}px`,
       '--map-logo-max-width': `${logoMaxWidth}px`,
+      '--map-top-bar-padding': `${Math.min(32, Math.max(8, 22 * scale))}px`,
+      '--map-title-font-size': `${Math.min(36, Math.max(16, 24 * scale))}px`,
+      '--map-action-font-size': `${Math.min(18, Math.max(12, 14 * scale))}px`,
+      '--map-action-height': `${Math.min(52, Math.max(34, 38 * scale))}px`,
     };
   });
 
@@ -131,11 +144,16 @@
     --map-top-bar-height: 64px;
     --map-logo-height: 34px;
     --map-logo-max-width: 120px;
+    --map-top-bar-padding: 22px;
+    --map-title-font-size: 24px;
+    --map-action-font-size: 14px;
+    --map-action-height: 38px;
     --map-top-bar-background: rgba(7, 17, 29, 0.94);
     --map-top-bar-border: rgba(123, 160, 191, 0.28);
     --map-top-bar-text: #f4f7fb;
     --map-top-bar-muted: #a9b9c8;
     --map-top-bar-accent: #36bffa;
+
     position: relative;
     z-index: 20;
     display: grid;
@@ -143,7 +161,7 @@
     align-items: center;
     width: 100%;
     height: var(--map-top-bar-height);
-    padding: 0 22px;
+    padding: 0 var(--map-top-bar-padding);
     box-sizing: border-box;
     color: var(--map-top-bar-text);
     background: var(--map-top-bar-background);
@@ -192,7 +210,7 @@
     overflow: hidden;
     padding: 0 24px;
     color: var(--map-top-bar-text);
-    font-size: 24px;
+    font-size: var(--map-title-font-size);
     font-weight: 650;
     letter-spacing: 0;
     line-height: 1.2;
@@ -211,12 +229,12 @@
     align-items: center;
     justify-content: center;
     min-width: 76px;
-    height: 38px;
+    height: var(--map-action-height);
     padding: 0 12px;
     box-sizing: border-box;
     color: var(--map-top-bar-muted);
     font: inherit;
-    font-size: 14px;
+    font-size: var(--map-action-font-size);
     letter-spacing: 0;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid transparent;
@@ -247,7 +265,7 @@
     white-space: nowrap;
   }
 
-  @media (max-width: 900px) {
+  @container map-screen (max-width: 900px) {
     .map-screen-top-bar {
       padding: 0 14px;
     }
@@ -277,7 +295,7 @@
     }
   }
 
-  @media (max-width: 560px) {
+  @container map-screen (max-width: 560px) {
     .map-screen-top-bar {
       padding: 0 8px;
     }
@@ -303,7 +321,7 @@
     }
   }
 
-  @media (max-width: 360px) {
+  @container map-screen (max-width: 360px) {
     .map-screen-top-bar {
       padding: 0 6px;
     }

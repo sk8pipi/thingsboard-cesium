@@ -32,6 +32,8 @@
       sensorTypeStylesIgnoreOffline?: boolean;
       sensorDeviceTypeStyles?: Record<string, SensorPointStyleOverride>;
       cameraStylesIgnoreOffline?: boolean;
+      resolutionScale?: number;
+      screenScale?: number;
     }>(),
     {
       sensorPoints: () => [],
@@ -46,6 +48,8 @@
       sensorTypeStylesIgnoreOffline: false,
       sensorDeviceTypeStyles: () => ({}),
       cameraStylesIgnoreOffline: false,
+      resolutionScale: 1,
+      screenScale: 1,
     },
   );
 
@@ -68,6 +72,8 @@
   let hoveredOverlayEntity: Cesium.Entity | null = null;
   let sensorRenderVersion = 0;
   let cameraRenderVersion = 0;
+  let resizeObserver: ResizeObserver | undefined;
+  let resizeFrame = 0;
   const sensorLabelDistanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 1200);
   const cameraLabelDistanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 2500);
 
@@ -131,6 +137,19 @@
     return props.enableSensorTypeStyles ? 38 : 20;
   }
 
+  function getPointScreenScale() {
+    return Math.min(1.4, Math.max(0.85, Number(props.screenScale) || 1));
+  }
+
+  function applyPointScreenScale() {
+    const scale = new Cesium.ConstantProperty(getPointScreenScale());
+    for (const entity of [...(sensorDataSource?.entities.values || []), ...(cameraDataSource?.entities.values || [])]) {
+      if (entity.billboard) entity.billboard.scale = scale;
+      if (entity.label) entity.label.scale = scale;
+    }
+    viewer?.scene.requestRender();
+  }
+
   function getCameraColor(point: CameraMapPoint) {
     if (props.cameraStylesIgnoreOffline) return '#2EF527';
     return isOfflinePoint(point) ? '#94a3b8' : '#2EF527';
@@ -179,12 +198,28 @@
     });
 
     viewer.scene.globe.depthTestAgainstTerrain = true;
+    viewer.resolutionScale = props.resolutionScale;
 
     sensorDataSource = new Cesium.CustomDataSource('sensor-points');
     cameraDataSource = new Cesium.CustomDataSource('camera-points');
     viewer.dataSources.add(sensorDataSource);
     viewer.dataSources.add(cameraDataSource);
     applyBasePointVisibility();
+  }
+
+  function resizeViewer() {
+    if (!viewer || viewer.isDestroyed()) return;
+    viewer.resolutionScale = props.resolutionScale;
+    viewer.forceResize();
+    viewer.scene.requestRender();
+  }
+
+  function scheduleViewerResize() {
+    if (resizeFrame) cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = 0;
+      resizeViewer();
+    });
   }
 
   async function loadBaseTileset() {
@@ -440,12 +475,14 @@
           image: buildSensorBillboard(point),
           width: getSensorBillboardSize(),
           height: getSensorBillboardSize(),
+          scale: getPointScreenScale(),
           verticalOrigin: Cesium.VerticalOrigin.CENTER,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         label: {
           text: getPointLabelText(point),
           font: '11px sans-serif',
+          scale: getPointScreenScale(),
           show: false,
           fillColor: Cesium.Color.WHITE,
           showBackground: true,
@@ -497,12 +534,14 @@
           image: buildCameraBillboard(point),
           width: getSensorBillboardSize(),
           height: getSensorBillboardSize(),
+          scale: getPointScreenScale(),
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         label: {
           text: getPointLabelText(point),
           font: '14px sans-serif',
+          scale: getPointScreenScale(),
           show: false,
           fillColor: Cesium.Color.WHITE,
           showBackground: true,
@@ -748,6 +787,10 @@
 
   onMounted(async () => {
     await createViewer();
+    if (typeof ResizeObserver !== 'undefined' && cesiumEl.value) {
+      resizeObserver = new ResizeObserver(scheduleViewerResize);
+      resizeObserver.observe(cesiumEl.value);
+    }
     if (!props.globeOnly) {
       await loadBaseTileset();
       await renderSceneModels(props.sceneModels || []);
@@ -765,7 +808,18 @@
 
     bindOverlayClick();
     bindOverlayHover();
+    scheduleViewerResize();
   });
+
+  watch(
+    () => props.resolutionScale,
+    () => scheduleViewerResize(),
+  );
+
+  watch(
+    () => props.screenScale,
+    () => applyPointScreenScale(),
+  );
 
   watch(
     () => props.sensorPoints,
@@ -827,6 +881,10 @@
   );
 
   onBeforeUnmount(() => {
+    resizeObserver?.disconnect();
+    resizeObserver = undefined;
+    if (resizeFrame) cancelAnimationFrame(resizeFrame);
+    resizeFrame = 0;
     clickHandler?.destroy();
     clickHandler = undefined;
     hoverHandler?.destroy();
@@ -848,6 +906,7 @@
   .cesium-container {
     width: 100%;
     height: 100%;
-    min-height: 600px;
+    min-width: 0;
+    min-height: 0;
   }
 </style>

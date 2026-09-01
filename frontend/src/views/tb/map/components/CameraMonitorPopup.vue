@@ -356,7 +356,7 @@
     top: calc(var(--map-top-bar-offset, 0px) + 16px);
     right: 16px;
     z-index: 1700;
-    width: min(460px, calc(100vw - 24px));
+    width: min(460px, calc(100% - 24px));
     max-height: calc(100% - var(--map-top-bar-offset, 0px) - 32px);
     border-radius: 16px;
     overflow-x: hidden;
@@ -565,7 +565,7 @@
     color: #fbbf24;
   }
 
-  @media (max-width: 768px) {
+  @container map-screen (max-width: 768px) {
     .camera-monitor-popup {
       top: calc(var(--map-top-bar-offset, 0px) + 12px);
       right: 12px;

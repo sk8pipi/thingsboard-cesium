@@ -4,9 +4,9 @@
 
 - 任务编号：video-iot-capacity-test
 - 任务名称：视频容量基线与多摄像头复用指南
-- 当前状态：待人工提交
+- 当前状态：已完成
 - 当前主 Agent：主 Agent
-- 最后更新：2026-08-29
+- 最后更新：2026-08-31
 
 ## 目标
 
@@ -66,6 +66,7 @@
 ## 人工 Git 交付
 
 - AI 未执行 git add、commit、push、merge、rebase 或 PR 操作。
+- 用户已完成并推送提交 `5adfe42`（文档（视频）：添加可复用的多摄像头入门指南）；2026-08-31 核对工作树干净且本地分支与远端一致，任务已从中央活动登记移除。
 - 建议主仓库提交分组：启动阻塞修复；Hook/Nginx 修复；容量测试事实源。
 - WVP 修复位于独立嵌套 Git 仓库，必须由用户在该仓库另建分支并单独提交。
 - 建议 commit message：`test(video): record local video and telemetry capacity baseline`

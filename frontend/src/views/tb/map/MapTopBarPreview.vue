@@ -123,6 +123,7 @@
   .top-bar-preview {
     width: 100%;
     height: 100%;
+    container: map-screen / size;
     min-height: 640px;
     overflow: hidden;
     color: #edf4f8;
@@ -252,7 +253,7 @@
     font-size: 13px;
   }
 
-  @media (max-width: 720px) {
+  @container map-screen (max-width: 720px) {
     .top-bar-preview__summary {
       right: 14px;
       left: 14px;
