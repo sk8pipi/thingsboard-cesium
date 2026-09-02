@@ -629,7 +629,7 @@
     type MapTopBarConfig,
     type SensorDeviceTypeStyles,
   } from './mapTemplateConfig';
-  import { useMapScreenResponsive } from './mapScreenResponsive';
+  import { calculateGridStackCellHeight, useMapScreenResponsive } from './mapScreenResponsive';
   import {
     collectMapTemplateDeviceRefs,
     formatTemplateDeviceNames,
@@ -781,7 +781,9 @@
     if (grid.getColumn() !== metrics.columns) {
       grid.column(metrics.columns, 'move');
     }
-    grid.cellHeight(Math.round(metrics.cellHeight * 100) / 100);
+    const renderedRows = Math.max(1, Number(grid.getRow?.()) || metrics.rows);
+    const cellHeight = calculateGridStackCellHeight(metrics.canvasHeight, renderedRows);
+    grid.cellHeight(Math.round(cellHeight * 100) / 100);
     grid.margin(Math.round(metrics.margin * 100) / 100);
     queueMicrotask(() => {
       applyingScreenMetrics = false;
@@ -1641,6 +1643,7 @@
 
     layout.value.forEach((item) => {
       const widget = widgets.value[item.i];
+      if (!widget) return;
 
       const widgetKey = (widget?.widgetKey || widget?.type) as LocalWidgetKey | undefined;
 
@@ -1657,6 +1660,7 @@
         void mountWidget(item.i, widgetKey);
       }
     });
+    applyScreenMetrics();
   }
 
   function syncLayoutFromGrid() {

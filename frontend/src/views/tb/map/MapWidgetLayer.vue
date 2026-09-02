@@ -16,7 +16,7 @@
   import type { AlarmFocusPayload } from '../dashboard/runtime/widgets/alarm/focus';
   import type { MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
   import type { MapPoint } from './types/mapPointTypes';
-  import { mapScreenCanvasStyle, type MapScreenMetrics } from './mapScreenResponsive';
+  import { calculateGridStackCellHeight, mapScreenCanvasStyle, type MapScreenMetrics } from './mapScreenResponsive';
 
   type WidgetData = DashboardWidget & {
     type?: LocalWidgetKey;
@@ -51,7 +51,9 @@
     if (grid.getColumn() !== props.screenMetrics.columns) {
       grid.column(props.screenMetrics.columns, 'move');
     }
-    grid.cellHeight(Math.round(props.screenMetrics.cellHeight * 100) / 100);
+    const renderedRows = Math.max(1, Number(grid.getRow?.()) || props.screenMetrics.rows);
+    const cellHeight = calculateGridStackCellHeight(props.screenMetrics.canvasHeight, renderedRows);
+    grid.cellHeight(Math.round(cellHeight * 100) / 100);
     grid.margin(Math.round(props.screenMetrics.margin * 100) / 100);
   }
 
@@ -175,6 +177,7 @@
     }
 
     grid.setStatic(true);
+    applyScreenMetrics();
   }
 
   function onStorage(e: StorageEvent) {

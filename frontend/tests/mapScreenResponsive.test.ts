@@ -4,7 +4,7 @@ import {
   normalizeMapTemplateState,
   resolveMapTemplateViewportForLayout,
 } from '../src/views/tb/map/mapTemplateConfig';
-import { calculateMapScreenMetrics } from '../src/views/tb/map/mapScreenResponsive';
+import { calculateGridStackCellHeight, calculateMapScreenMetrics } from '../src/views/tb/map/mapScreenResponsive';
 
 function closeTo(actual: number, expected: number, tolerance = 0.02) {
   assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} should be close to ${expected}`);
@@ -26,7 +26,7 @@ function testBaselineViewport() {
   assert.equal(metrics.columns, 12);
   assert.equal(metrics.rows, 25);
   assert.equal(metrics.margin, 10);
-  closeTo(metrics.cellHeight, 31.04);
+  closeTo(metrics.cellHeight, 40.64);
   assert.equal(metrics.compact, false);
   assert.equal(metrics.cesiumResolutionScale, 1);
 }
@@ -111,7 +111,12 @@ function testRuntimeAndEditorUseOccupiedLayoutRows() {
 
   assert.equal(viewport.rows, 21);
   assert.equal(metrics.rows, 21);
-  closeTo(metrics.rows * (metrics.cellHeight + metrics.margin) - metrics.margin, metrics.canvasHeight);
+  closeTo(metrics.rows * metrics.cellHeight, metrics.canvasHeight);
+}
+
+function testGridStackRenderedRowsFillCanvas() {
+  closeTo(calculateGridStackCellHeight(900, 18), 50);
+  closeTo(calculateGridStackCellHeight(900, 21) * 21, 900);
 }
 
 function testEmptyLayoutKeepsConfiguredRows() {
@@ -148,6 +153,7 @@ testUltraWideViewportFillsWidgetCanvas();
 testFourKPixelBudgetAndFullWidgetCanvas();
 testEditorWideViewportDoesNotShrinkWidgets();
 testRuntimeAndEditorUseOccupiedLayoutRows();
+testGridStackRenderedRowsFillCanvas();
 testEmptyLayoutKeepsConfiguredRows();
 testCompactFallback();
 testLegacyTemplateMigration();

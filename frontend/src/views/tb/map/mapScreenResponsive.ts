@@ -70,7 +70,7 @@ export function calculateMapScreenMetrics(options: CalculateMapScreenMetricsOpti
   const canvasLeft = 0;
   const canvasTop = topBarHeight;
   const margin = clamp(BASE_GRID_MARGIN * scale, MIN_GRID_MARGIN, MAX_GRID_MARGIN);
-  const cellHeight = Math.max(4, (canvasHeight + margin) / Math.max(1, rows) - margin);
+  const cellHeight = calculateGridStackCellHeight(canvasHeight, rows);
   const renderedPixels = width * height;
   const cesiumResolutionScale = renderedPixels ? clamp(Math.sqrt(CESIUM_PIXEL_BUDGET / renderedPixels), 0.65, 1) : 1;
 
@@ -93,6 +93,13 @@ export function calculateMapScreenMetrics(options: CalculateMapScreenMetricsOpti
     margin,
     cesiumResolutionScale,
   };
+}
+
+/** GridStack v12 uses cellHeight as the complete row pitch; margins inset item content. */
+export function calculateGridStackCellHeight(canvasHeight: number, rows: number): number {
+  const normalizedHeight = Math.max(0, Number(canvasHeight) || 0);
+  const normalizedRows = Math.max(1, Math.round(Number(rows) || 1));
+  return normalizedHeight / normalizedRows;
 }
 
 export function mapScreenCssVars(metrics: MapScreenMetrics): CSSProperties {
