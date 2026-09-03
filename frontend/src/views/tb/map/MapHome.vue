@@ -95,7 +95,7 @@
   import { Authority } from '/@/enums/authorityEnum';
   import { usePermission } from '/@/hooks/web/usePermission';
   import { customerDashboardList, getDashboardById, type DashboardInfo } from '/@/api/tb/dashboard';
-  import { getCustomerAssetInfoList, getTenantAssetInfoList, type AssetInfo } from '/@/api/tb/asset';
+  import { getCustomerAssetInfoList, type AssetInfo } from '/@/api/tb/asset';
   import { getCustomerDeviceInfoList, getTenantDeviceInfoList, type DeviceInfo } from '/@/api/tb/device';
   import { findRelationListByFromAndType } from '/@/api/tb/relation';
   import { EntityType } from '/@/enums/entityTypeEnum';
@@ -209,7 +209,6 @@
 
   const isSysAdminMap = computed(() => userStore.getAuthority === Authority.SYS_ADMIN);
   const isCustomerUserMap = computed(() => userStore.getAuthority === Authority.CUSTOMER_USER);
-  const isTenantAdminMap = computed(() => userStore.getAuthority === Authority.TENANT_ADMIN);
   const assignedTemplateState = ref<AssignedTemplateState | null>(null);
   const currentAssignedTemplateTitle = ref('');
   const defaultTopBarConfig = createDefaultMapTopBarConfig();
@@ -243,7 +242,7 @@
   const assetRelationResolving = ref(false);
   const assetCatalogError = ref('');
   const assetRelationError = ref('');
-  const showAssetSelector = computed(() => isCustomerUserMap.value || isTenantAdminMap.value);
+  const showAssetSelector = computed(() => isCustomerUserMap.value);
   const assetFilterError = computed(() => assetCatalogError.value || assetRelationError.value);
   const assetFilterStorageDashboardId = computed(
     () =>
@@ -501,9 +500,7 @@
         sortProperty: 'name',
         sortOrder: 'ASC' as const,
       };
-      const result = isCustomerUserMap.value
-        ? await getCustomerAssetInfoList(params, userStore.getUserInfo?.customerId?.id || '')
-        : await getTenantAssetInfoList(params);
+      const result = await getCustomerAssetInfoList(params, userStore.getUserInfo?.customerId?.id || '');
       assets.push(...(result.data || []));
       hasNext = Boolean(result.hasNext);
       page += 1;

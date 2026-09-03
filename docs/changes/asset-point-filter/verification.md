@@ -20,6 +20,7 @@
 | `git diff --check` | 通过 | 无空白错误；仅治理文档存在 Git 的 LF→CRLF 提示。 |
 | `scripts/validate-agent-governance.ps1` | 通过 | 活动任务、档案和 Agent 配置符合仓库治理规则。 |
 | 独立验证复核 | 通过 | 首轮发现的 requested/applied 显示不一致、403/404 回退和宽松关系匹配均已修复，二次复核无 P0/P1。 |
+| 客户用户入口角色隔离 | 通过 | `MapHome` 仅在真实权限为 `CUSTOMER_USER` 时挂载资产选择并允许资产目录加载；租户管理员不再进入该分支。 |
 | `pnpm run type:check` | 仓库既有阻塞 | 退出码 2、共 239 行既有类型错误；本次实现/测试文件匹配为 0。 |
 | `pnpm run build` | 仓库既有阻塞 | 现有生产环境配置缺少 `VITE_BUILD_COMPRESS`，在压缩配置读取 `undefined.split` 时失败。 |
 
