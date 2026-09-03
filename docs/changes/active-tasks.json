@@ -1,24 +1,29 @@
 {
-    "schemaVersion":  1,
-    "updatedAt":  "2026-08-31",
-    "tasks":  [
-                  {
-                      "taskId":  "cesium-screen-responsive",
-                      "name":  "Cesium 大屏多分辨率自适应",
-                      "status":  "待人工提交",
-                      "owner":  "主 Agent",
-                      "taskDirectory":  "docs/changes/cesium-screen-responsive",
-                      "worktree":  ".",
-                      "fileScopes":  [
-                                         "frontend/src/views/tb/map",
-                                         "frontend/tests/mapScreenResponsive.test.ts",
-                                         "docs/changes/cesium-screen-responsive",
-                                         "docs/changes/active-tasks.json"
-                                     ],
-                      "sharedResources":  [
-                                              "无独占共享运行时资源"
-                                          ],
-                      "lastUpdated":  "2026-09-01"
-                  }
-              ]
+  "schemaVersion": 1,
+  "updatedAt": "2026-09-02",
+  "tasks": [
+    {
+      "taskId": "asset-point-filter",
+      "name": "Cesium 大屏按资产显示传感器与监控点位",
+      "status": "待人工提交",
+      "owner": "主 Agent",
+      "taskDirectory": "docs/changes/asset-point-filter",
+      "worktree": ".",
+      "fileScopes": [
+        "frontend/src/views/tb/map/MapHome.vue",
+        "frontend/src/views/tb/map/components/MapScreenTopBar.vue",
+        "frontend/src/views/tb/map/components/MapAssetSelector.vue",
+        "frontend/src/views/tb/map/services/mapAssetPointFilterService.ts",
+        "frontend/src/views/tb/map/selectedMapAssetStorage.ts",
+        "frontend/tests/mapAssetPointFilter.test.ts",
+        "docs/changes/cesium-screen-responsive/delivery.md",
+        "docs/changes/asset-point-filter",
+        "docs/changes/active-tasks.json"
+      ],
+      "sharedResources": [
+        "无独占共享运行时资源"
+      ],
+      "lastUpdated": "2026-09-02"
+    }
+  ]
 }

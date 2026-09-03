@@ -15,7 +15,22 @@
       :responsive-height="mapScreen.metrics.value.topBarHeight"
       :screen-scale="mapScreen.metrics.value.uiScale"
       @action="handleTopBarAction"
-    />
+    >
+      <template #runtime-actions>
+        <MapAssetSelector
+          v-if="showAssetSelector"
+          :assets="assetSelectorOptions"
+          :selected-asset-id="appliedAssetId"
+          :catalog-loading="assetCatalogLoading"
+          :resolving="assetRelationResolving"
+          :error="assetFilterError"
+          :visible-point-count="filteredMapPoints.length"
+          :total-point-count="mapPoints.length"
+          @select="requestAssetSelection"
+          @retry="retryAssetFilter"
+        />
+      </template>
+    </MapScreenTopBar>
 
     <CesiumMap
       ref="cesiumMapRef"
@@ -45,6 +60,11 @@
       @alarm-focus="onAlarmFocus"
     />
 
+    <div v-if="assetFilterEmpty" class="map-asset-empty-state" role="status">
+      <strong>{{ appliedAssetName }}</strong>
+      <span>该资产及其子资产下没有可显示的传感器或监控点位</span>
+    </div>
+
     <SensorWidgetPopup
       v-if="!showDefaultGlobeOnly"
       :visible="sensorPreviewVisible"
@@ -53,7 +73,7 @@
       :export-enabled="isCustomerUserMap"
       :runtime-devices="assignedTemplateRuntimeDevices"
       :runtime="datasourceRuntime"
-      @close="sensorPreviewVisible = false"
+      @close="closeSensorPopup"
     />
 
     <CameraMonitorPopup
@@ -75,13 +95,18 @@
   import { Authority } from '/@/enums/authorityEnum';
   import { usePermission } from '/@/hooks/web/usePermission';
   import { customerDashboardList, getDashboardById, type DashboardInfo } from '/@/api/tb/dashboard';
+  import { getCustomerAssetInfoList, getTenantAssetInfoList, type AssetInfo } from '/@/api/tb/asset';
   import { getCustomerDeviceInfoList, getTenantDeviceInfoList, type DeviceInfo } from '/@/api/tb/device';
+  import { findRelationListByFromAndType } from '/@/api/tb/relation';
+  import { EntityType } from '/@/enums/entityTypeEnum';
+  import { RelationTypeGroup } from '/@/enums/relationEnum';
   import CesiumMap from './CesiumMap.vue';
   import MapWidgetLayer from './MapWidgetLayer.vue';
   import { createDatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
   import SensorWidgetPopup from './SensorWidgetPopup.vue';
   import CameraMonitorPopup from './components/CameraMonitorPopup.vue';
   import MapScreenTopBar from './components/MapScreenTopBar.vue';
+  import MapAssetSelector from './components/MapAssetSelector.vue';
   import { getMapWidgetStorageKey } from './mapWidgetStorage';
   import { resolveSensorDeviceType } from './services/sensorPointStyleService';
   import { getMapPointStorageKey, loadMapPoints } from './mapPointStorage';
@@ -121,6 +146,12 @@
   import { useMapScreenResponsive } from './mapScreenResponsive';
   import { executeMapTopBarAction, getAvailableMapTopBarActions } from './mapTopBarActions';
   import {
+    AssetRelationTraversalLimitError,
+    filterMapPointsByDeviceIds,
+    resolveAssetDeviceIds,
+  } from './services/mapAssetPointFilterService';
+  import { clearSelectedMapAssetId, loadSelectedMapAssetId, saveSelectedMapAssetId } from './selectedMapAssetStorage';
+  import {
     clearSelectedMapTemplateId,
     loadSelectedMapTemplateId,
     saveSelectedMapTemplateId,
@@ -128,6 +159,11 @@
 
   const DEVICE_POINT_REFRESH_MS = 30000;
   type AssignedTemplateState = MapTemplateState;
+  type MapAssetSelectorOption = {
+    id: string;
+    name: string;
+    description?: string;
+  };
   type CesiumMapExpose = {
     flyToPoint: (point: MapPointLocation) => void;
     flyToOverview: () => void | Promise<void>;
@@ -168,9 +204,12 @@
   let templateReloading = false;
   let mapTemplateRuntimeAvailable = true;
   let unsubscribeMapTemplateUpdates: (() => void) | undefined;
+  let assetCatalogRequestId = 0;
+  let assetFilterRequestId = 0;
 
   const isSysAdminMap = computed(() => userStore.getAuthority === Authority.SYS_ADMIN);
   const isCustomerUserMap = computed(() => userStore.getAuthority === Authority.CUSTOMER_USER);
+  const isTenantAdminMap = computed(() => userStore.getAuthority === Authority.TENANT_ADMIN);
   const assignedTemplateState = ref<AssignedTemplateState | null>(null);
   const currentAssignedTemplateTitle = ref('');
   const defaultTopBarConfig = createDefaultMapTopBarConfig();
@@ -195,6 +234,26 @@
     ...mapScreen.cssVars.value,
   }));
   const currentAssignedTemplateDashboardId = ref('');
+  const assetSelectorOptions = ref<MapAssetSelectorOption[]>([]);
+  const requestedAssetId = ref('');
+  const appliedAssetId = ref('');
+  const appliedAssetDeviceIds = ref<Set<string> | null>(null);
+  const assetCatalogLoading = ref(false);
+  const assetCatalogLoaded = ref(false);
+  const assetRelationResolving = ref(false);
+  const assetCatalogError = ref('');
+  const assetRelationError = ref('');
+  const showAssetSelector = computed(() => isCustomerUserMap.value || isTenantAdminMap.value);
+  const assetFilterError = computed(() => assetCatalogError.value || assetRelationError.value);
+  const assetFilterStorageDashboardId = computed(
+    () =>
+      currentAssignedTemplateDashboardId.value ||
+      String(
+        userStore.getUserInfo?.additionalInfo?.homeDashboardId ||
+          userStore.getUserInfo?.additionalInfo?.defaultDashboardId ||
+          'map-home',
+      ),
+  );
   const storageKey = computed(() => getMapWidgetStorageKey());
   const assignedTemplateMapPoints = computed(() => assignedTemplateState.value?.mapPoints || []);
   const assignedTemplateRuntimeDevices = computed(() => assignedTemplateRuntimeDeviceMap.value);
@@ -213,12 +272,6 @@
 
     return mergeMapPoints(deviceMapPoints.value, manualMapPoints.value);
   });
-  const sensorPoints = computed(() =>
-    mapPoints.value.filter((point): point is SensorMapPoint => point.type === 'sensor'),
-  );
-  const cameraPoints = computed(() =>
-    mapPoints.value.filter((point): point is CameraMapPoint => point.type === 'camera'),
-  );
   const hasAssignedTemplate = computed(() => Boolean(assignedTemplateState.value));
   const hasSensorDeviceTypeStyles = computed(
     () => Object.keys(assignedTemplateState.value?.sensorDeviceTypeStyles || {}).length > 0,
@@ -235,8 +288,28 @@
     return false;
   });
   const showWidgetLayer = computed(() => isCustomerUserMap.value && hasAssignedTemplate.value);
-  const visibleSensorPoints = computed(() => (showDefaultGlobeOnly.value ? [] : sensorPoints.value));
-  const visibleCameraPoints = computed(() => (showDefaultGlobeOnly.value ? [] : cameraPoints.value));
+  const filteredMapPoints = computed(() => filterMapPointsByDeviceIds(mapPoints.value, appliedAssetDeviceIds.value));
+  const visibleSensorPoints = computed(() =>
+    showDefaultGlobeOnly.value
+      ? []
+      : filteredMapPoints.value.filter((point): point is SensorMapPoint => point.type === 'sensor'),
+  );
+  const visibleCameraPoints = computed(() =>
+    showDefaultGlobeOnly.value
+      ? []
+      : filteredMapPoints.value.filter((point): point is CameraMapPoint => point.type === 'camera'),
+  );
+  const visibleMapPoints = computed<MapPoint[]>(() => [...visibleSensorPoints.value, ...visibleCameraPoints.value]);
+  const appliedAssetName = computed(
+    () => assetSelectorOptions.value.find((asset) => asset.id === appliedAssetId.value)?.name || '所选资产',
+  );
+  const assetFilterEmpty = computed(
+    () =>
+      Boolean(appliedAssetId.value) &&
+      !assetRelationResolving.value &&
+      appliedAssetDeviceIds.value !== null &&
+      filteredMapPoints.value.length === 0,
+  );
 
   const homePath = computed(() => {
     return userStore.getUserInfo?.additionalInfo?.homePath || PageEnum.BASE_HOME;
@@ -407,6 +480,180 @@
     }
 
     return getTenantDeviceInfoList(params);
+  }
+
+  function getAssetFilterStorageIdentity() {
+    return {
+      userId: userStore.getUserInfo?.id?.id || '',
+      dashboardId: assetFilterStorageDashboardId.value,
+    };
+  }
+
+  async function loadAllAccessibleAssets() {
+    const assets: AssetInfo[] = [];
+    let page = 0;
+    let hasNext = true;
+
+    while (hasNext) {
+      const params = {
+        pageSize: 100,
+        page,
+        sortProperty: 'name',
+        sortOrder: 'ASC' as const,
+      };
+      const result = isCustomerUserMap.value
+        ? await getCustomerAssetInfoList(params, userStore.getUserInfo?.customerId?.id || '')
+        : await getTenantAssetInfoList(params);
+      assets.push(...(result.data || []));
+      hasNext = Boolean(result.hasNext);
+      page += 1;
+    }
+
+    return assets;
+  }
+
+  function toAssetSelectorOptions(assets: readonly AssetInfo[]) {
+    const options = new Map<string, MapAssetSelectorOption>();
+    assets.forEach((asset) => {
+      const id = String(asset.id?.id || '').trim();
+      if (!id || options.has(id)) return;
+
+      const name = String(asset.label || asset.name || id).trim();
+      const details = [asset.type, asset.label && asset.name && asset.label !== asset.name ? asset.name : '']
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+      options.set(id, {
+        id,
+        name,
+        description: details.join(' · '),
+      });
+    });
+    return [...options.values()].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
+  }
+
+  function clearAssetSelection() {
+    assetFilterRequestId += 1;
+    requestedAssetId.value = '';
+    appliedAssetId.value = '';
+    appliedAssetDeviceIds.value = null;
+    assetRelationResolving.value = false;
+    assetRelationError.value = '';
+    const { userId, dashboardId } = getAssetFilterStorageIdentity();
+    clearSelectedMapAssetId(userId, dashboardId);
+  }
+
+  function assetDisplayName(assetId: string) {
+    return assetSelectorOptions.value.find((asset) => asset.id === assetId)?.name || '所选资产';
+  }
+
+  function assetRelationErrorMessage(error: unknown, assetId: string) {
+    const assetName = assetDisplayName(assetId);
+    if (error instanceof AssetRelationTraversalLimitError) {
+      return `${assetName}的关系规模超过安全上限，请联系管理员检查资产关系`;
+    }
+    return `${assetName}的设备关系读取失败，仍保留上次成功的显示结果`;
+  }
+
+  async function requestAssetSelection(assetId: string) {
+    const normalizedAssetId = String(assetId || '').trim();
+    if (!normalizedAssetId) {
+      clearAssetSelection();
+      return;
+    }
+
+    if (assetCatalogLoaded.value && !assetSelectorOptions.value.some((asset) => asset.id === normalizedAssetId)) {
+      clearAssetSelection();
+      return;
+    }
+
+    const requestId = ++assetFilterRequestId;
+    requestedAssetId.value = normalizedAssetId;
+    assetRelationResolving.value = true;
+    assetRelationError.value = '';
+
+    try {
+      const result = await resolveAssetDeviceIds(normalizedAssetId, (currentAssetId) =>
+        findRelationListByFromAndType({
+          fromId: currentAssetId,
+          fromType: EntityType.ASSET,
+          relationType: 'Contains',
+          relationTypeGroup: RelationTypeGroup.COMMON,
+        }),
+      );
+      if (requestId !== assetFilterRequestId) return;
+
+      appliedAssetId.value = normalizedAssetId;
+      appliedAssetDeviceIds.value = result.deviceIds;
+      const { userId, dashboardId } = getAssetFilterStorageIdentity();
+      saveSelectedMapAssetId(userId, dashboardId, normalizedAssetId);
+    } catch (error) {
+      if (requestId !== assetFilterRequestId) return;
+      const status = getHttpStatus(error);
+      if (status === 403 || status === 404) {
+        const assetName = assetDisplayName(normalizedAssetId);
+        clearAssetSelection();
+        assetSelectorOptions.value = assetSelectorOptions.value.filter((asset) => asset.id !== normalizedAssetId);
+        assetCatalogLoaded.value = false;
+        assetRelationError.value = `${assetName}已删除或当前账号无权访问，已恢复显示全部资产`;
+      } else {
+        assetRelationError.value = assetRelationErrorMessage(error, normalizedAssetId);
+      }
+      console.warn('[MapHome] Failed to resolve asset point filter:', {
+        assetId: normalizedAssetId,
+        error,
+      });
+    } finally {
+      if (requestId === assetFilterRequestId) {
+        assetRelationResolving.value = false;
+      }
+    }
+  }
+
+  async function loadAssetCatalog() {
+    if (!showAssetSelector.value) return;
+    const requestId = ++assetCatalogRequestId;
+    assetCatalogLoading.value = true;
+    assetCatalogError.value = '';
+    let assetIdToRestore = '';
+
+    try {
+      const assets = await loadAllAccessibleAssets();
+      if (requestId !== assetCatalogRequestId) return;
+
+      assetSelectorOptions.value = toAssetSelectorOptions(assets);
+      assetCatalogLoaded.value = true;
+      const { userId, dashboardId } = getAssetFilterStorageIdentity();
+      const storedAssetId = loadSelectedMapAssetId(userId, dashboardId);
+      const candidateAssetId = requestedAssetId.value || storedAssetId;
+      if (candidateAssetId && assetSelectorOptions.value.some((asset) => asset.id === candidateAssetId)) {
+        assetIdToRestore = candidateAssetId;
+      } else if (candidateAssetId) {
+        clearAssetSelection();
+      }
+    } catch (error) {
+      if (requestId !== assetCatalogRequestId) return;
+      assetCatalogError.value = '资产目录加载失败，当前仍显示上次成功的点位结果';
+      console.warn('[MapHome] Failed to load asset catalog:', error);
+    } finally {
+      if (requestId === assetCatalogRequestId) {
+        assetCatalogLoading.value = false;
+      }
+    }
+
+    if (requestId === assetCatalogRequestId && assetIdToRestore) {
+      await requestAssetSelection(assetIdToRestore);
+    }
+  }
+
+  function retryAssetFilter() {
+    if (assetCatalogError.value || !assetCatalogLoaded.value) {
+      assetRelationError.value = '';
+      void loadAssetCatalog();
+      return;
+    }
+    if (requestedAssetId.value) {
+      void requestAssetSelection(requestedAssetId.value);
+    }
   }
 
   async function refreshDeviceMapPoints() {
@@ -603,10 +850,15 @@
     sensorPreviewVisible.value = true;
   }
 
+  function closeSensorPopup() {
+    sensorPreviewVisible.value = false;
+    selectedSensor.value = null;
+  }
+
   function findAlarmPoint(payload: AlarmFocusPayload) {
     const pointId = payload.pointId || '';
     const originatorId = payload.originatorId || '';
-    return mapPoints.value.find((point) => {
+    return visibleMapPoints.value.find((point) => {
       if (pointId && point.id === pointId) return true;
       if (originatorId && point.entityId === originatorId) return true;
       return false;
@@ -625,7 +877,9 @@
       return;
     }
 
-    if (Number.isFinite(payload.longitude) && Number.isFinite(payload.latitude)) {
+    if (payload.pointId || payload.originatorId) {
+      console.warn('[MapHome] Alarm point is not visible in the current asset filter:', payload);
+    } else if (Number.isFinite(payload.longitude) && Number.isFinite(payload.latitude)) {
       cesiumMapRef.value?.flyToPoint({
         longitude: payload.longitude as number,
         latitude: payload.latitude as number,
@@ -637,7 +891,7 @@
   }
 
   async function onCameraClick(camera: CameraMapPoint) {
-    sensorPreviewVisible.value = false;
+    closeSensorPopup();
     selectedCameraRuntime.value = {
       ...createCameraRuntimeFromTemplatePoint(camera),
     };
@@ -726,6 +980,22 @@
     cameraRuntimeRequestId += 1;
   }
 
+  watch(visibleSensorPoints, (points) => {
+    const sensor = selectedSensor.value;
+    if (!sensorPreviewVisible.value || !sensor) return;
+    if (!points.some((point) => point.id === sensor.id && point.entityId === sensor.entityId)) {
+      closeSensorPopup();
+    }
+  });
+
+  watch(visibleCameraPoints, (points) => {
+    const camera = selectedCameraRuntime.value;
+    if (!cameraPopupVisible.value || !camera?.entityId) return;
+    if (!points.some((point) => point.entityId === camera.entityId)) {
+      closeCameraPopup();
+    }
+  });
+
   function createCameraRuntimeFromTemplatePoint(camera: CameraMapPoint): CameraRuntimeInfo {
     const point = camera as CameraMapPoint & Partial<CameraRuntimeInfo> & Record<string, any>;
     return {
@@ -794,6 +1064,7 @@
     document.addEventListener('fullscreenchange', syncMapFullscreenState);
     datasourceRuntime.connect();
     await loadAssignedCustomerTemplate();
+    void loadAssetCatalog();
     if (!isSysAdminMap.value && !isCustomerUserMap.value) {
       void refreshDeviceMapPoints();
       devicePointRefreshTimer = window.setInterval(refreshDeviceMapPoints, DEVICE_POINT_REFRESH_MS);
@@ -802,6 +1073,8 @@
 
   onBeforeUnmount(() => {
     cameraRuntimeRequestId += 1;
+    assetCatalogRequestId += 1;
+    assetFilterRequestId += 1;
     window.removeEventListener('storage', onStorage);
     document.removeEventListener('fullscreenchange', syncMapFullscreenState);
     if (devicePointRefreshTimer) {
@@ -837,5 +1110,36 @@
   .map-widgets {
     z-index: 10;
     pointer-events: none;
+  }
+
+  .map-asset-empty-state {
+    position: absolute;
+    inset: 50% auto auto 50%;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: min(480px, calc(100% - 48px));
+    padding: 18px 24px;
+    box-sizing: border-box;
+    color: #d9e7f2;
+    text-align: center;
+    background: rgba(7, 17, 29, 0.82);
+    border: 1px solid rgba(123, 160, 191, 0.42);
+    border-radius: 8px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+  }
+
+  .map-asset-empty-state strong {
+    color: #f4f7fb;
+    font-size: 16px;
+  }
+
+  .map-asset-empty-state span {
+    margin-top: 6px;
+    color: #9fb3c4;
+    font-size: 13px;
   }
 </style>

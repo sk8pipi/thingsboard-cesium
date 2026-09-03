@@ -21,6 +21,7 @@
     </div>
 
     <nav class="map-screen-top-bar__actions" aria-label="Dashboard actions">
+      <slot v-if="mode === 'runtime'" name="runtime-actions"></slot>
       <ATooltip v-for="action in visibleActions" :key="action.id" :title="action.label">
         <button
           class="map-screen-top-bar__action"
