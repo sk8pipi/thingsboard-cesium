@@ -1,29 +1,25 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-03",
+  "updatedAt": "2026-09-04",
   "tasks": [
     {
-      "taskId": "asset-point-filter",
-      "name": "Cesium 大屏按资产显示传感器与监控点位",
+      "taskId": "project-readme",
+      "name": "完善项目 README 与展示图片",
       "status": "待人工提交",
       "owner": "主 Agent",
-      "taskDirectory": "docs/changes/asset-point-filter",
+      "taskDirectory": "docs/changes/project-readme",
       "worktree": ".",
       "fileScopes": [
-        "frontend/src/views/tb/map/MapHome.vue",
-        "frontend/src/views/tb/map/components/MapScreenTopBar.vue",
-        "frontend/src/views/tb/map/components/MapAssetSelector.vue",
-        "frontend/src/views/tb/map/services/mapAssetPointFilterService.ts",
-        "frontend/src/views/tb/map/selectedMapAssetStorage.ts",
-        "frontend/tests/mapAssetPointFilter.test.ts",
-        "docs/changes/cesium-screen-responsive/delivery.md",
-        "docs/changes/asset-point-filter",
+        "README.md",
+        "docs/images",
+        "docs/changes/project-readme",
+        "docs/changes/asset-point-filter/delivery.md",
         "docs/changes/active-tasks.json"
       ],
       "sharedResources": [
         "无独占共享运行时资源"
       ],
-      "lastUpdated": "2026-09-03"
+      "lastUpdated": "2026-09-04"
     }
   ]
 }
