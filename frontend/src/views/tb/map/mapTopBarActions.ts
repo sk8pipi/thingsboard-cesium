@@ -90,12 +90,15 @@ async function toggleMapTopBarFullscreen(
     return { type, status: 'unavailable' };
   }
 
-  if (fullscreenDocument.fullscreenElement) {
+  if (fullscreenDocument.fullscreenElement === fullscreenTarget) {
     if (typeof fullscreenDocument.exitFullscreen !== 'function') {
       return { type, status: 'unavailable' };
     }
     await fullscreenDocument.exitFullscreen();
   } else {
+    if (fullscreenDocument.fullscreenElement) {
+      return { type, status: 'unavailable', fullscreen: false };
+    }
     if (typeof fullscreenTarget.requestFullscreen !== 'function') {
       return { type, status: 'unavailable' };
     }
@@ -105,6 +108,6 @@ async function toggleMapTopBarFullscreen(
   return {
     type,
     status: 'executed',
-    fullscreen: Boolean(fullscreenDocument.fullscreenElement),
+    fullscreen: fullscreenDocument.fullscreenElement === fullscreenTarget,
   };
 }

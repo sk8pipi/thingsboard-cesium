@@ -3,17 +3,22 @@
   "updatedAt": "2026-09-04",
   "tasks": [
     {
-      "taskId": "project-readme",
-      "name": "完善项目 README 与展示图片",
+      "taskId": "map-widget-fullscreen",
+      "name": "地图大屏部件全屏与原位恢复",
       "status": "待人工提交",
       "owner": "主 Agent",
-      "taskDirectory": "docs/changes/project-readme",
+      "taskDirectory": "docs/changes/map-widget-fullscreen",
       "worktree": ".",
       "fileScopes": [
-        "README.md",
-        "docs/images",
-        "docs/changes/project-readme",
-        "docs/changes/asset-point-filter/delivery.md",
+        "frontend/src/views/tb/map/MapHome.vue",
+        "frontend/src/views/tb/map/MapWidgetLayer.vue",
+        "frontend/src/views/tb/map/MapTopBarPreview.vue",
+        "frontend/src/views/tb/map/mapTopBarActions.ts",
+        "frontend/src/views/tb/map/mapWidgetFullscreen.ts",
+        "frontend/src/views/tb/dashboard/runtime/widgets/TbCesiumMap.vue",
+        "frontend/tests/mapWidgetFullscreen.test.ts",
+        "docs/changes/map-widget-fullscreen",
+        "docs/changes/project-readme/delivery.md",
         "docs/changes/active-tasks.json"
       ],
       "sharedResources": [

@@ -51,6 +51,7 @@
 
     <MapWidgetLayer
       v-if="showWidgetLayer"
+      ref="mapWidgetLayerRef"
       class="map-widgets"
       :storage-key="storageKey"
       :data="assignedTemplateState"
@@ -58,6 +59,7 @@
       :runtime="datasourceRuntime"
       :screen-metrics="mapScreen.metrics.value"
       @alarm-focus="onAlarmFocus"
+      @widget-fullscreen-change="onWidgetFullscreenChange"
     />
 
     <div v-if="assetFilterEmpty" class="map-asset-empty-state" role="status">
@@ -168,6 +170,13 @@
     flyToPoint: (point: MapPointLocation) => void;
     flyToOverview: () => void | Promise<void>;
   };
+  type MapWidgetLayerExpose = {
+    exitWidgetFullscreen: (options?: { restoreFocus?: boolean; emitChange?: boolean }) => boolean;
+  };
+  type WidgetFullscreenChangePayload = {
+    active: boolean;
+    widgetId: string;
+  };
 
   const router = useRouter();
   const userStore = useUserStore();
@@ -190,7 +199,11 @@
 
   const mapHomeRef = ref<HTMLElement | null>(null);
   const cesiumMapRef = ref<CesiumMapExpose | null>(null);
+  const mapWidgetLayerRef = ref<MapWidgetLayerExpose | null>(null);
   const isMapFullscreen = ref(false);
+  const activeFullscreenWidgetId = ref('');
+  let widgetFullscreenOwnsBrowserFullscreen = false;
+  let widgetFullscreenRequestId = 0;
 
   const selectedSensor = ref<SensorMapPoint | null>(null);
   const sensorPreviewVisible = ref(false);
@@ -1033,8 +1046,71 @@
     };
   }
 
+  function isMapHomeBrowserFullscreen() {
+    return Boolean(mapHomeRef.value && document.fullscreenElement === mapHomeRef.value);
+  }
+
   function syncMapFullscreenState() {
-    isMapFullscreen.value = Boolean(document.fullscreenElement);
+    const wasMapFullscreen = isMapFullscreen.value;
+    const mapIsFullscreen = isMapHomeBrowserFullscreen();
+    isMapFullscreen.value = mapIsFullscreen;
+
+    if (activeFullscreenWidgetId.value && wasMapFullscreen && !mapIsFullscreen) {
+      widgetFullscreenRequestId += 1;
+      widgetFullscreenOwnsBrowserFullscreen = false;
+      activeFullscreenWidgetId.value = '';
+      mapWidgetLayerRef.value?.exitWidgetFullscreen({ emitChange: false });
+    }
+  }
+
+  async function onWidgetFullscreenChange(payload: WidgetFullscreenChangePayload) {
+    const requestId = ++widgetFullscreenRequestId;
+
+    if (!payload.active) {
+      if (!activeFullscreenWidgetId.value || activeFullscreenWidgetId.value === payload.widgetId) {
+        activeFullscreenWidgetId.value = '';
+      }
+
+      const shouldExitBrowserFullscreen = widgetFullscreenOwnsBrowserFullscreen;
+      widgetFullscreenOwnsBrowserFullscreen = false;
+      if (
+        shouldExitBrowserFullscreen &&
+        isMapHomeBrowserFullscreen() &&
+        typeof document.exitFullscreen === 'function'
+      ) {
+        try {
+          await document.exitFullscreen();
+        } catch (error) {
+          console.warn('[MapHome] Failed to exit browser fullscreen after restoring widget:', error);
+        }
+      }
+      return;
+    }
+
+    activeFullscreenWidgetId.value = payload.widgetId;
+    widgetFullscreenOwnsBrowserFullscreen = false;
+    const fullscreenTarget = mapHomeRef.value;
+    if (!fullscreenTarget || isMapHomeBrowserFullscreen() || document.fullscreenElement) return;
+    if (typeof fullscreenTarget.requestFullscreen !== 'function') return;
+
+    try {
+      await fullscreenTarget.requestFullscreen();
+      const requestIsCurrent =
+        requestId === widgetFullscreenRequestId && activeFullscreenWidgetId.value === payload.widgetId;
+      if (requestIsCurrent && isMapHomeBrowserFullscreen()) {
+        widgetFullscreenOwnsBrowserFullscreen = true;
+      } else if (isMapHomeBrowserFullscreen() && typeof document.exitFullscreen === 'function') {
+        await document.exitFullscreen();
+      }
+    } catch (error) {
+      // Fullscreen API can be denied by browser policy. The in-page overlay remains usable.
+      console.warn('[MapHome] Browser fullscreen unavailable; keeping widget in page fullscreen:', error);
+    }
+  }
+
+  function onMapKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || !activeFullscreenWidgetId.value) return;
+    mapWidgetLayerRef.value?.exitWidgetFullscreen();
   }
 
   function openHome() {
@@ -1059,6 +1135,7 @@
   onMounted(async () => {
     window.addEventListener('storage', onStorage);
     document.addEventListener('fullscreenchange', syncMapFullscreenState);
+    document.addEventListener('keydown', onMapKeydown);
     datasourceRuntime.connect();
     await loadAssignedCustomerTemplate();
     void loadAssetCatalog();
@@ -1074,6 +1151,14 @@
     assetFilterRequestId += 1;
     window.removeEventListener('storage', onStorage);
     document.removeEventListener('fullscreenchange', syncMapFullscreenState);
+    document.removeEventListener('keydown', onMapKeydown);
+    widgetFullscreenRequestId += 1;
+    widgetFullscreenOwnsBrowserFullscreen = false;
+    activeFullscreenWidgetId.value = '';
+    mapWidgetLayerRef.value?.exitWidgetFullscreen({ restoreFocus: false, emitChange: false });
+    if (isMapHomeBrowserFullscreen() && typeof document.exitFullscreen === 'function') {
+      void document.exitFullscreen().catch(() => undefined);
+    }
     if (devicePointRefreshTimer) {
       window.clearInterval(devicePointRefreshTimer);
       devicePointRefreshTimer = undefined;

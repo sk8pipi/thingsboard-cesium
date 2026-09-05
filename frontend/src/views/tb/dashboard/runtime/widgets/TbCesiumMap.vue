@@ -9,6 +9,18 @@
   Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
   const el = ref<HTMLDivElement | null>(null);
   let viewer: Cesium.Viewer | null = null;
+  let resizeObserver: ResizeObserver | null = null;
+  let resizeFrame = 0;
+
+  function scheduleViewerResize() {
+    if (resizeFrame) cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = 0;
+      if (!viewer || viewer.isDestroyed()) return;
+      viewer.resize();
+      viewer.scene.requestRender();
+    });
+  }
 
   // 选择你要的建筑模式：'osm'（OSM 建筑） or 'google'（写实 3D Tiles）
   const BUILDINGS_MODE: 'osm' | 'google' = 'osm';
@@ -34,6 +46,11 @@
       selectionIndicator: false,
       shouldAnimate: true,
     });
+
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(scheduleViewerResize);
+      resizeObserver.observe(el.value);
+    }
 
     // 3) ✅ 开启地形（World Terrain）
     // 这是“能看到起伏地形”的关键
@@ -73,6 +90,10 @@
   });
 
   onBeforeUnmount(() => {
+    resizeObserver?.disconnect();
+    resizeObserver = null;
+    if (resizeFrame) cancelAnimationFrame(resizeFrame);
+    resizeFrame = 0;
     try {
       viewer?.destroy();
     } finally {

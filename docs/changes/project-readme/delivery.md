@@ -4,7 +4,7 @@
 
 - 任务编号：project-readme
 - 任务名称：完善项目 README 与展示图片
-- 当前状态：待人工提交
+- 当前状态：已完成
 - 当前主 Agent：主 Agent
 - 最后更新：2026-09-04
 
@@ -34,7 +34,7 @@
 - 已完成：写入完整中文 README，覆盖项目定位、问题、功能、架构、技术栈、快速开始、协同开发、致谢、许可证与免责声明。
 - 已完成：两张指定图片按原始文件精确复制到稳定仓库路径。
 - 已完成：仓库内链接、代码围栏、图片哈希、空白错误和 Agent 治理校验。
-- 未验证：GitHub 线上最终渲染，需要用户提交并推送后查看。
+- 已完成：用户已将变更提交并推送到 `main`，提交为 `0bd93f5`。
 
 ## 工作包与文件所有权
 
@@ -56,4 +56,5 @@
 ## 人工 Git 交付
 
 - 建议 commit message：`docs: improve project README and development guide`
+- 重要提交引用：`0bd93f5 docs: improve project README and multi-agent development guide`
 - AI Git 写操作：未执行

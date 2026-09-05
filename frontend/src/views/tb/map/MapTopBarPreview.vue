@@ -112,7 +112,7 @@
   }
 
   function syncFullscreenState() {
-    isFullscreen.value = Boolean(document.fullscreenElement);
+    isFullscreen.value = Boolean(previewRoot.value && document.fullscreenElement === previewRoot.value);
   }
 
   onMounted(() => document.addEventListener('fullscreenchange', syncFullscreenState));
