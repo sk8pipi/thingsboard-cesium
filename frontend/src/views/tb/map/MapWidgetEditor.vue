@@ -2554,11 +2554,6 @@
     const point = findAlarmPoint(payload);
     if (point) {
       cesiumMapRef.value?.flyToPoint(point);
-      if (point.type === 'sensor') {
-        onSensorClick(point);
-      } else {
-        void onCameraClick(point);
-      }
       return;
     }
 
