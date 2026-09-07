@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "../types/**/*.d.ts",
+    "../src/views/tb/relation/form.vue",
+    "../src/views/tb/relation/relationEntityOptions.ts",
+    "./relationEntityOptions.test.ts"
+  ]
+}

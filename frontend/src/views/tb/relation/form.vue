@@ -21,7 +21,7 @@
   </BasicModal>
 </template>
 <script lang="ts" setup name="ViewsTbRelationForm">
-  import { ref, unref, computed } from 'vue';
+  import { ref, unref, computed, onBeforeUnmount } from 'vue';
   import { useI18n } from '/@/hooks/web/useI18n';
   import { useMessage } from '/@/hooks/web/useMessage';
   import { router } from '/@/router';
@@ -34,7 +34,7 @@
   import { EntityRelation, saveRelation } from '/@/api/tb/relation';
   import { Authority } from '/@/enums/authorityEnum';
   import { RelationTypeGroup } from '/@/enums/relationEnum';
-  import { isEmpty } from 'lodash-es';
+  import { debounce, isEmpty } from 'lodash-es';
   import { usePermission } from '/@/hooks/web/usePermission';
   import { ENTITY_TYPE_OPTIONS, EntityType } from '/@/enums/entityTypeEnum';
   import { getTenantDeviceInfoList } from '/@/api/tb/device';
@@ -44,6 +44,18 @@
   import { customerList } from '/@/api/tb/customer';
   import { userList } from '/@/api/tb/user';
   import { ruleChainList } from '/@/api/tb/ruleChain';
+  import { currentTenantDashboardList } from '/@/api/tb/dashboard';
+  import {
+    buildRelationSaveData,
+    changeRelationEntityType,
+    createRelationEntityOptionSource,
+    isRelationEntitySelectionRequired,
+    isRelationEntityDropdownNearBottom,
+    type RelationDirection,
+    type RelationEntityOption,
+    type RelationEntityOptionPage,
+    type RelationEntityOptionQuery,
+  } from './relationEntityOptions';
 
   const emit = defineEmits(['success', 'register']);
 
@@ -53,7 +65,7 @@
   const { showMessage } = useMessage();
   const { meta } = unref(router.currentRoute);
   const record = ref<EntityRelation>({} as EntityRelation);
-  const direction = ref('From');
+  const direction = ref<RelationDirection>('From');
 
   const isNewRecord = ref(true);
 
@@ -72,13 +84,16 @@
         item.value == EntityType.CUSTOMER ||
         item.value == EntityType.USER ||
         item.value == EntityType.DASHBOARD ||
-        item.value == EntityType.EDGE ||
         item.value == EntityType.RULE_CHAIN
       );
     });
   });
-  const fromIdOptions = ref<Array<any>>([]);
-  const toIdOptions = ref<Array<any>>([]);
+  const fromOptionSource = createRelationEntityOptionSource(fetchRelationEntityPage);
+  const toOptionSource = createRelationEntityOptionSource(fetchRelationEntityPage);
+  const entitySearchHandlers = {
+    From: debounce((text: string) => void resetEntitySearch('From', text), 300),
+    To: debounce((text: string) => void resetEntitySearch('To', text), 300),
+  };
 
   const inputFormSchemas: FormSchema[] = [
     { field: 'typeGroup', component: 'Input', defaultValue: RelationTypeGroup.COMMON, show: false },
@@ -100,17 +115,15 @@
         options: entityTypeOptions,
         onChange: (text) => onEntityTypeChange(text, 'From'),
       },
-      required: true,
+      required: () => isRelationEntitySelectionRequired(direction.value, 'From'),
       show: direction.value == 'To',
       colProps: { lg: 10, md: 10 },
     },
     {
       field: 'from.id',
       component: 'Select',
-      componentProps: {
-        options: fromIdOptions,
-      },
-      required: true,
+      componentProps: () => getEntityIdComponentProps('From'),
+      required: () => isRelationEntitySelectionRequired(direction.value, 'From'),
       show: direction.value == 'To',
       colProps: { lg: 14, md: 14 },
     },
@@ -122,17 +135,15 @@
         options: entityTypeOptions,
         onChange: (text) => onEntityTypeChange(text, 'To'),
       },
-      required: true,
+      required: () => isRelationEntitySelectionRequired(direction.value, 'To'),
       show: direction.value == 'From',
       colProps: { lg: 10, md: 10 },
     },
     {
       field: 'to.id',
       component: 'Select',
-      componentProps: {
-        options: toIdOptions,
-      },
-      required: true,
+      componentProps: () => getEntityIdComponentProps('To'),
+      required: () => isRelationEntitySelectionRequired(direction.value, 'To'),
       show: direction.value == 'From',
       colProps: { lg: 14, md: 14 },
     },
@@ -162,11 +173,13 @@
     record.value = { ...data } as EntityRelation;
     isNewRecord.value = direction.value == 'From' ? isEmpty(record.value.to?.id) : isEmpty(record.value.from?.id);
 
-    await onEntityTypeChange(
-      direction.value == 'From' ? record.value.to?.entityType : record.value.from?.entityType,
-      direction.value == 'From' ? 'To' : 'From',
-    );
-    setFieldsValue(record.value);
+    const relatedEntity = direction.value == 'From' ? record.value.to : record.value.from;
+    const relatedName = direction.value == 'From' ? (data as any).toName : (data as any).fromName;
+    const selectedOption = relatedEntity?.id
+      ? { label: relatedName || relatedEntity.id, value: relatedEntity.id }
+      : null;
+    await resetEntityOptions(relatedEntity?.entityType, direction.value == 'From' ? 'To' : 'From', '', selectedOption);
+    await setFieldsValue(record.value);
     updateSchema([
       {
         label: t('tb.relation.form.relationType'),
@@ -188,18 +201,15 @@
           onChange: (text) => onEntityTypeChange(text, 'From'),
           disabled: !isNewRecord.value,
         },
-        required: true,
+        required: () => isRelationEntitySelectionRequired(direction.value, 'From'),
         show: direction.value == 'To',
         colProps: { lg: 8, md: 8 },
       },
       {
         field: 'from.id',
         component: 'Select',
-        componentProps: {
-          options: fromIdOptions,
-          disabled: !isNewRecord.value,
-        },
-        required: true,
+        componentProps: () => getEntityIdComponentProps('From', !isNewRecord.value),
+        required: () => isRelationEntitySelectionRequired(direction.value, 'From'),
         show: direction.value == 'To',
         colProps: { lg: 16, md: 16 },
       },
@@ -212,18 +222,15 @@
           onChange: (text) => onEntityTypeChange(text, 'To'),
           disabled: !isNewRecord.value,
         },
-        required: true,
+        required: () => isRelationEntitySelectionRequired(direction.value, 'To'),
         show: direction.value == 'From',
         colProps: { lg: 8, md: 8 },
       },
       {
         field: 'to.id',
         component: 'Select',
-        componentProps: {
-          options: toIdOptions,
-          disabled: !isNewRecord.value,
-        },
-        required: true,
+        componentProps: () => getEntityIdComponentProps('To', !isNewRecord.value),
+        required: () => isRelationEntitySelectionRequired(direction.value, 'To'),
         show: direction.value == 'From',
         colProps: { lg: 16, md: 16 },
       },
@@ -233,10 +240,13 @@
 
   async function handleSubmit() {
     try {
-      const data = await validate();
+      const formValues = await validate();
+      const data = buildRelationSaveData(formValues, record.value, direction.value) as EntityRelation & Recordable;
+      data.typeGroup ||= RelationTypeGroup.COMMON;
       setModalProps({ confirmLoading: true });
-      // console.log('submit', params, data, record);
-      if (!isEmpty(data.additionalInfo)) {
+      if (isEmpty(data.additionalInfo)) {
+        delete data.additionalInfo;
+      } else if (typeof data.additionalInfo === 'string') {
         try {
           data.additionalInfo = JSON.parse(data.additionalInfo);
         } catch (e) {
@@ -244,7 +254,11 @@
           return;
         }
       }
-      const res = await saveRelation({ ...data });
+      if (!data.from?.id || !data.from.entityType || !data.to?.id || !data.to.entityType) {
+        showMessage(t('common.validateError'), 'error');
+        return;
+      }
+      await saveRelation({ ...data });
       showMessage(isNewRecord.value ? t('tb.relation.action.addSuccess') : t('tb.relation.action.editSuccess'));
       setTimeout(closeModal);
       emit('success', data);
@@ -258,63 +272,141 @@
     }
   }
 
-  async function onEntityTypeChange(entityType: EntityType, direction: 'From' | 'To') {
-    let options: Array<any> = [];
-    switch (entityType) {
-      case EntityType.DEVICE:
-        const deviceListResult = await getTenantDeviceInfoList({
-          pageSize: 50,
-          page: 0,
-          sortProperty: 'name',
-          sortOrder: 'ASC',
-        });
-        options = deviceListResult.data.map((device) => ({ label: device.name, value: device.id.id }));
-        break;
-      case EntityType.ASSET:
-        const assetListResult = await getTenantAssetInfoList({
-          pageSize: 50,
-          page: 0,
-          sortProperty: 'name',
-          sortOrder: 'ASC',
-        });
-        options = assetListResult.data.map((device) => ({ label: device.name, value: device.id.id }));
-        break;
-      case EntityType.ENTITY_VIEW:
-        const entityViewListResult = await getTenantEntityViewInfos({
-          pageSize: 50,
-          page: 0,
-          sortProperty: 'name',
-          sortOrder: 'ASC',
-        });
-        options = entityViewListResult.data.map((device) => ({ label: device.name, value: device.id.id }));
-        break;
-      case EntityType.TENANT:
-        const tenantResult = await tenantById(userStore.getUserInfo.tenantId.id);
-        options = [{ label: tenantResult.title, id: tenantResult.id.id }];
-        break;
-      case EntityType.CUSTOMER:
-        const customerListResult = await customerList({
-          pageSize: 50,
-          page: 0,
-          sortProperty: 'title',
-          sortOrder: 'ASC',
-        });
-        options = customerListResult.data.map((device) => ({ label: device.name, value: device.id.id }));
-        break;
-      case EntityType.USER:
-        const userListResult = await userList({ pageSize: 50, page: 0, sortProperty: 'email', sortOrder: 'ASC' });
-        options = userListResult.data.map((device) => ({ label: device.name, value: device.id.id }));
-        break;
-      case EntityType.RULE_CHAIN:
-        const ruleChainResult = await ruleChainList(
-          { pageSize: 50, page: 0, sortProperty: 'name', sortOrder: 'ASC' },
-          'CORE',
-        );
-        options = ruleChainResult.data.map((ruleChain) => ({ label: ruleChain.name, value: ruleChain.id.id }));
-        break;
-      default:
-        options = [];
-    }
-    direction == 'From' ? (fromIdOptions.value = options) : (toIdOptions.value = options);
+  function getOptionSource(direction: 'From' | 'To') {
+    return direction == 'From' ? fromOptionSource : toOptionSource;
   }
+
+  function getEntityIdComponentProps(direction: 'From' | 'To', disabled = false) {
+    const source = getOptionSource(direction);
+    return {
+      options: source.state.options,
+      disabled,
+      allowClear: true,
+      showSearch: true,
+      filterOption: false,
+      loading: source.state.loading,
+      notFoundContent: source.state.loading ? '加载中…' : undefined,
+      onSearch: entitySearchHandlers[direction],
+      onPopupScroll: (event: Event) => onEntityOptionsScroll(event, direction),
+      onDropdownVisibleChange: (open: boolean) => {
+        if (
+          open &&
+          source.state.entityType &&
+          source.state.hasNext &&
+          source.state.nextPage === 0 &&
+          !source.state.loading
+        ) {
+          void loadNextEntityOptions(direction);
+        }
+      },
+      onSelect: (value: string, option: RelationEntityOption) => {
+        source.state.selectedOption = { label: String(option.label || value), value: String(value) };
+      },
+      onClear: () => {
+        source.state.selectedOption = null;
+      },
+    };
+  }
+
+  function mapEntityPage(result: any, label: (item: any) => string): RelationEntityOptionPage {
+    return {
+      data: (result?.data || [])
+        .map((item: any) => ({ label: label(item) || item?.id?.id, value: item?.id?.id }))
+        .filter((option: RelationEntityOption) => Boolean(option.value)),
+      hasNext: Boolean(result?.hasNext),
+      totalElements: Number(result?.totalElements ?? 0),
+    };
+  }
+
+  async function fetchRelationEntityPage(query: RelationEntityOptionQuery): Promise<RelationEntityOptionPage> {
+    const params = {
+      pageSize: query.pageSize,
+      page: query.page,
+      textSearch: query.textSearch || undefined,
+      sortProperty: 'name',
+      sortOrder: 'ASC' as const,
+    };
+    switch (query.entityType as EntityType) {
+      case EntityType.DEVICE:
+        return mapEntityPage(await getTenantDeviceInfoList(params), (item) => item.name);
+      case EntityType.ASSET:
+        return mapEntityPage(await getTenantAssetInfoList(params), (item) => item.name);
+      case EntityType.ENTITY_VIEW:
+        return mapEntityPage(await getTenantEntityViewInfos(params), (item) => item.name);
+      case EntityType.TENANT: {
+        const tenant = await tenantById(userStore.getUserInfo.tenantId.id);
+        return {
+          data: [{ label: tenant.title || tenant.id.id, value: tenant.id.id }],
+          hasNext: false,
+          totalElements: 1,
+        };
+      }
+      case EntityType.CUSTOMER:
+        return mapEntityPage(
+          await customerList({ ...params, sortProperty: 'title' }),
+          (item) => item.title || item.name,
+        );
+      case EntityType.USER:
+        return mapEntityPage(
+          await userList({ ...params, sortProperty: 'email' }),
+          (item) => [item.firstName, item.lastName].filter(Boolean).join(' ') || item.email || item.name,
+        );
+      case EntityType.DASHBOARD:
+        return mapEntityPage(
+          await currentTenantDashboardList({ ...params, sortProperty: 'title' }),
+          (item) => item.title,
+        );
+      case EntityType.RULE_CHAIN:
+        return mapEntityPage(await ruleChainList(params, 'CORE'), (item) => item.name);
+      default:
+        return { data: [], hasNext: false, totalElements: 0 };
+    }
+  }
+
+  async function resetEntityOptions(
+    entityType: EntityType | undefined,
+    direction: 'From' | 'To',
+    textSearch = '',
+    selectedOption?: RelationEntityOption | null,
+  ) {
+    try {
+      await getOptionSource(direction).reset(entityType, textSearch, selectedOption);
+    } catch (error) {
+      console.warn('Failed to load relation entity options', error);
+      showMessage('关联实体加载失败，请重试', 'error');
+    }
+  }
+
+  async function onEntityTypeChange(entityType: EntityType, direction: 'From' | 'To') {
+    entitySearchHandlers[direction].cancel();
+    const values = getFieldsValue();
+    await setFieldsValue(changeRelationEntityType(values, direction, entityType));
+    await resetEntityOptions(entityType, direction, '', null);
+  }
+
+  async function resetEntitySearch(direction: 'From' | 'To', textSearch: string) {
+    const source = getOptionSource(direction);
+    await resetEntityOptions(source.state.entityType as EntityType | undefined, direction, textSearch);
+  }
+
+  async function loadNextEntityOptions(direction: 'From' | 'To') {
+    try {
+      await getOptionSource(direction).loadNext();
+    } catch (error) {
+      console.warn('Failed to load the next relation entity page', error);
+      showMessage('关联实体加载失败，请重试', 'error');
+    }
+  }
+
+  function onEntityOptionsScroll(event: Event, direction: 'From' | 'To') {
+    const target = event.target as HTMLElement;
+    if (target && isRelationEntityDropdownNearBottom(target)) void loadNextEntityOptions(direction);
+  }
+
+  onBeforeUnmount(() => {
+    entitySearchHandlers.From.cancel();
+    entitySearchHandlers.To.cancel();
+    fromOptionSource.cancel();
+    toOptionSource.cancel();
+  });
 </script>
