@@ -20,6 +20,8 @@
         <MapAssetSelector
           v-if="showAssetSelector"
           :assets="assetSelectorOptions"
+          :tree="assetTree"
+          :warning="assetTreeWarning"
           :selected-asset-id="appliedAssetId"
           :catalog-loading="assetCatalogLoading"
           :resolving="assetRelationResolving"
@@ -28,6 +30,7 @@
           :total-point-count="mapPoints.length"
           @select="requestAssetSelection"
           @retry="retryAssetFilter"
+          @refresh="loadAssetCatalog"
         />
       </template>
     </MapScreenTopBar>
@@ -154,6 +157,11 @@
   } from './services/mapAssetPointFilterService';
   import { clearSelectedMapAssetId, loadSelectedMapAssetId, saveSelectedMapAssetId } from './selectedMapAssetStorage';
   import {
+    createAssetRelationCache,
+    loadMapAssetHierarchy,
+    type MapAssetTreeNode,
+  } from './services/mapAssetHierarchyService';
+  import {
     clearSelectedMapTemplateId,
     loadSelectedMapTemplateId,
     saveSelectedMapTemplateId,
@@ -247,6 +255,19 @@
   }));
   const currentAssignedTemplateDashboardId = ref('');
   const assetSelectorOptions = ref<MapAssetSelectorOption[]>([]);
+  const assetTree = ref<MapAssetTreeNode[]>([]);
+  const assetTreeWarning = ref('');
+  function newAssetRelationCache() {
+    return createAssetRelationCache((assetId) =>
+      findRelationListByFromAndType({
+        fromId: assetId,
+        fromType: EntityType.ASSET,
+        relationType: 'Contains',
+        relationTypeGroup: RelationTypeGroup.COMMON,
+      }),
+    );
+  }
+  let assetRelations = newAssetRelationCache();
   const requestedAssetId = ref('');
   const appliedAssetId = ref('');
   const appliedAssetDeviceIds = ref<Set<string> | null>(null);
@@ -582,14 +603,7 @@
     assetRelationError.value = '';
 
     try {
-      const result = await resolveAssetDeviceIds(normalizedAssetId, (currentAssetId) =>
-        findRelationListByFromAndType({
-          fromId: currentAssetId,
-          fromType: EntityType.ASSET,
-          relationType: 'Contains',
-          relationTypeGroup: RelationTypeGroup.COMMON,
-        }),
-      );
+      const result = await resolveAssetDeviceIds(normalizedAssetId, assetRelations.fetch);
       if (requestId !== assetFilterRequestId) return;
 
       appliedAssetId.value = normalizedAssetId;
@@ -603,6 +617,7 @@
         const assetName = assetDisplayName(normalizedAssetId);
         clearAssetSelection();
         assetSelectorOptions.value = assetSelectorOptions.value.filter((asset) => asset.id !== normalizedAssetId);
+        assetTree.value = [];
         assetCatalogLoaded.value = false;
         assetRelationError.value = `${assetName}已删除或当前账号无权访问，已恢复显示全部资产`;
       } else {
@@ -622,6 +637,11 @@
   async function loadAssetCatalog() {
     if (!showAssetSelector.value) return;
     const requestId = ++assetCatalogRequestId;
+    assetFilterRequestId += 1;
+    assetRelationResolving.value = false;
+    assetRelations.clear();
+    const relations = newAssetRelationCache();
+    assetRelations = relations;
     assetCatalogLoading.value = true;
     assetCatalogError.value = '';
     let assetIdToRestore = '';
@@ -630,7 +650,18 @@
       const assets = await loadAllAccessibleAssets();
       if (requestId !== assetCatalogRequestId) return;
 
-      assetSelectorOptions.value = toAssetSelectorOptions(assets);
+      const options = toAssetSelectorOptions(assets);
+      const hierarchy = await loadMapAssetHierarchy(
+        options,
+        relations.fetch,
+        () => requestId === assetCatalogRequestId,
+      );
+      if (requestId !== assetCatalogRequestId) return;
+      assetSelectorOptions.value = options;
+      assetTree.value = hierarchy.roots;
+      assetTreeWarning.value = hierarchy.cycleDetected
+        ? '检测到循环资产关系，已停止循环展开，请联系管理员检查关联。'
+        : '';
       assetCatalogLoaded.value = true;
       const { userId, dashboardId } = getAssetFilterStorageIdentity();
       const storedAssetId = loadSelectedMapAssetId(userId, dashboardId);
@@ -642,7 +673,10 @@
       }
     } catch (error) {
       if (requestId !== assetCatalogRequestId) return;
-      assetCatalogError.value = '资产目录加载失败，当前仍显示上次成功的点位结果';
+      assetCatalogError.value =
+        error instanceof AssetRelationTraversalLimitError
+          ? '资产层级规模超过上限，请联系管理员检查资产关系'
+          : '资产层级未完整加载，保留上次成功的目录和点位，请重试';
       console.warn('[MapHome] Failed to load asset catalog:', error);
     } finally {
       if (requestId === assetCatalogRequestId) {
@@ -1141,6 +1175,7 @@
   });
 
   onBeforeUnmount(() => {
+    assetRelations.clear();
     cameraRuntimeRequestId += 1;
     assetCatalogRequestId += 1;
     assetFilterRequestId += 1;

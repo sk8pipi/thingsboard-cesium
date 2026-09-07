@@ -6,6 +6,14 @@
           <header class="map-asset-selector__panel-header">
             <strong>按资产显示点位</strong>
             <span>{{ visiblePointCount }}/{{ totalPointCount }} 个点位</span>
+            <button
+              class="map-asset-selector__refresh"
+              type="button"
+              :disabled="catalogLoading"
+              @click="emit('refresh')"
+            >
+              刷新目录
+            </button>
           </header>
 
           <input
@@ -20,19 +28,19 @@
             <span>{{ error }}</span>
             <button type="button" @click="emit('retry')">重试</button>
           </div>
+          <div v-if="warning" class="map-asset-selector__warning" role="status">{{ warning }}</div>
 
           <div v-if="catalogLoading" class="map-asset-selector__state">
             <Icon icon="ant-design:loading-outlined" :size="18" />
             <span>正在加载资产目录…</span>
           </div>
 
-          <div v-else class="map-asset-selector__options" role="listbox" aria-label="可选资产">
+          <div v-else class="map-asset-selector__options">
             <button
               type="button"
               class="map-asset-selector__option"
               :class="{ 'map-asset-selector__option--selected': !selectedAssetId }"
-              role="option"
-              :aria-selected="!selectedAssetId"
+              :aria-pressed="!selectedAssetId"
               @click="selectAsset('')"
             >
               <Icon icon="ant-design:global-outlined" :size="18" />
@@ -42,24 +50,57 @@
               </span>
             </button>
 
-            <button
-              v-for="asset in filteredAssets"
-              :key="asset.id"
-              type="button"
-              class="map-asset-selector__option"
-              :class="{ 'map-asset-selector__option--selected': selectedAssetId === asset.id }"
-              role="option"
-              :aria-selected="selectedAssetId === asset.id"
-              @click="selectAsset(asset.id)"
-            >
-              <Icon icon="ant-design:apartment-outlined" :size="18" />
-              <span class="map-asset-selector__option-copy">
-                <strong>{{ asset.name }}</strong>
-                <small v-if="asset.description">{{ asset.description }}</small>
-              </span>
-            </button>
+            <div role="tree" aria-label="可选资产">
+              <div
+                v-for="{ node, depth } in visibleRows"
+                :key="node.key"
+                class="map-asset-selector__tree-row"
+                :class="{ 'map-asset-selector__option--selected': selectedAssetId === node.id }"
+                :style="{ paddingLeft: Math.min(depth, 8) * 16 + 'px' }"
+                role="treeitem"
+                :aria-level="depth + 1"
+                :aria-selected="selectedAssetId === node.id"
+                :aria-expanded="node.children.length ? isExpanded(node.key) : undefined"
+                :aria-label="node.path.join(' / ')"
+                tabindex="0"
+                @keydown.enter.prevent="selectAsset(node.id, node.key)"
+                @keydown.space.prevent="selectAsset(node.id, node.key)"
+                @keydown.right.prevent="setExpanded(node.key, true)"
+                @keydown.left.prevent="setExpanded(node.key, false)"
+              >
+                <button
+                  v-if="node.children.length"
+                  class="map-asset-selector__expand"
+                  type="button"
+                  :aria-label="(isExpanded(node.key) ? '收起 ' : '展开 ') + node.name"
+                  :aria-expanded="isExpanded(node.key)"
+                  :disabled="Boolean(searchText.trim())"
+                  @click="setExpanded(node.key, !isExpanded(node.key))"
+                  @keydown.stop
+                >
+                  <Icon
+                    :icon="isExpanded(node.key) ? 'ant-design:down-outlined' : 'ant-design:right-outlined'"
+                    :size="12"
+                  />
+                </button>
+                <span v-else class="map-asset-selector__expand-spacer"></span>
+                <button
+                  class="map-asset-selector__option"
+                  type="button"
+                  :title="node.path.join(' / ')"
+                  @click="selectAsset(node.id, node.key)"
+                  @keydown.stop
+                >
+                  <Icon icon="ant-design:apartment-outlined" :size="18" />
+                  <span class="map-asset-selector__option-copy">
+                    <strong>{{ node.name }}</strong>
+                    <small v-if="node.description">{{ node.description }}</small>
+                  </span>
+                </button>
+              </div>
+            </div>
 
-            <div v-if="!filteredAssets.length" class="map-asset-selector__state">
+            <div v-if="!visibleRows.length && !error" class="map-asset-selector__state">
               {{ assets.length ? '没有匹配的资产' : '当前权限范围内没有资产' }}
             </div>
           </div>
@@ -94,7 +135,13 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, ref } from 'vue';
+  import { computed, ref, watch } from 'vue';
+  import {
+    findMapAssetPath,
+    flattenMapAssetTree,
+    searchMapAssetTree,
+    type MapAssetTreeNode,
+  } from '../services/mapAssetHierarchyService';
   import { Popover as APopover } from 'ant-design-vue';
   import { Icon } from '/@/components/Icon';
 
@@ -107,6 +154,8 @@
   const props = withDefaults(
     defineProps<{
       assets?: readonly MapAssetSelectorOption[];
+      tree?: readonly MapAssetTreeNode[];
+      warning?: string;
       selectedAssetId?: string;
       catalogLoading?: boolean;
       resolving?: boolean;
@@ -116,6 +165,8 @@
     }>(),
     {
       assets: () => [],
+      tree: () => [],
+      warning: '',
       selectedAssetId: '',
       catalogLoading: false,
       resolving: false,
@@ -128,31 +179,108 @@
   const emit = defineEmits<{
     select: [assetId: string];
     retry: [];
+    refresh: [];
   }>();
 
   const popoverOpen = ref(false);
   const searchText = ref('');
+  const expandedKeys = ref(new Set<string>());
+  const selectedPathKey = ref('');
+  const allRows = computed(() => flattenMapAssetTree(props.tree, new Set(), true));
+  const selectedPath = computed(() => {
+    const preferred = allRows.value.find(
+      ({ node }) => node.key === selectedPathKey.value && node.id === props.selectedAssetId,
+    );
+    return preferred?.node || findMapAssetPath(props.tree, props.selectedAssetId).slice(-1)[0];
+  });
   const selectedAsset = computed(() => props.assets.find((asset) => asset.id === props.selectedAssetId));
-  const selectedAssetName = computed(() => selectedAsset.value?.name || '全部资产');
+  const selectedAssetName = computed(
+    () => selectedPath.value?.path.join(' / ') || selectedAsset.value?.name || '全部资产',
+  );
   const triggerTitle = computed(() => {
     const state = props.error ? `；${props.error}` : props.resolving ? '；正在解析设备关系' : '';
     return `${selectedAssetName.value}：显示 ${props.visiblePointCount}/${props.totalPointCount} 个点位${state}`;
   });
-  const filteredAssets = computed(() => {
-    const keyword = searchText.value.trim().toLocaleLowerCase();
-    if (!keyword) return props.assets;
-    return props.assets.filter((asset) =>
-      `${asset.name} ${asset.description || ''}`.toLocaleLowerCase().includes(keyword),
-    );
-  });
+  const visibleRows = computed(() =>
+    flattenMapAssetTree(
+      searchMapAssetTree(props.tree, searchText.value),
+      expandedKeys.value,
+      Boolean(searchText.value.trim()),
+    ),
+  );
 
-  function selectAsset(assetId: string) {
+  function isExpanded(key: string) {
+    return Boolean(searchText.value.trim()) || expandedKeys.value.has(key);
+  }
+
+  function setExpanded(key: string, expanded: boolean) {
+    if (searchText.value.trim()) return;
+    const keys = new Set(expandedKeys.value);
+    if (expanded) keys.add(key);
+    else keys.delete(key);
+    expandedKeys.value = keys;
+  }
+
+  watch(
+    [() => props.tree, () => props.selectedAssetId, popoverOpen],
+    () => {
+      const valid = new Set(allRows.value.map(({ node }) => node.key));
+      const keys = new Set([...expandedKeys.value].filter((key) => valid.has(key)));
+      const selected = selectedPath.value;
+      if (selected) {
+        allRows.value.forEach(({ node }) => {
+          if (selected.key.startsWith(node.key + '/')) keys.add(node.key);
+        });
+      }
+      expandedKeys.value = keys;
+    },
+    { immediate: true },
+  );
+
+  function selectAsset(assetId: string, key = '') {
+    selectedPathKey.value = key;
     emit('select', assetId);
     popoverOpen.value = false;
   }
 </script>
 
 <style scoped>
+  .map-asset-selector__tree-row {
+    display: flex;
+    align-items: center;
+    border-radius: 4px;
+  }
+
+  .map-asset-selector__tree-row > .map-asset-selector__option {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .map-asset-selector__expand,
+  .map-asset-selector__expand-spacer {
+    flex: 0 0 26px;
+    width: 26px;
+    height: 34px;
+  }
+
+  .map-asset-selector__expand,
+  .map-asset-selector__refresh {
+    color: #91cfe8;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+  }
+
+  .map-asset-selector__refresh {
+    white-space: nowrap;
+  }
+
+  .map-asset-selector__warning {
+    padding: 8px 0;
+    color: #ffd591;
+    font-size: 12px;
+  }
+
   .map-asset-selector {
     min-width: 0;
   }
@@ -207,7 +335,7 @@
   }
 
   .map-asset-selector__panel {
-    width: min(360px, calc(100vw - 32px));
+    width: min(420px, calc(100vw - 32px));
     margin: -12px;
     padding: 12px;
     color: #dce9f4;
@@ -218,6 +346,7 @@
 
   .map-asset-selector__panel-header {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 16px;

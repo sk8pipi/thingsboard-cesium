@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "noEmit": true, "skipLibCheck": true },
+  "include": [
+    "../types/**/*.d.ts",
+    "../src/views/tb/map/MapHome.vue",
+    "../src/views/tb/map/components/MapAssetSelector.vue",
+    "../src/views/tb/map/services/mapAssetHierarchyService.ts",
+    "./mapAssetHierarchy.test.ts"
+  ]
+}

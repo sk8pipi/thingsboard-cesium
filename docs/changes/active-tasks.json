@@ -3,18 +3,19 @@
   "updatedAt": "2026-09-07",
   "tasks": [
     {
-      "taskId": "relation-entity-picker-pagination",
-      "name": "关联实体选择器分页与全量搜索",
+      "taskId": "map-asset-hierarchy",
+      "name": "大屏资产层级选择",
       "status": "待人工提交",
       "owner": "主 Agent",
-      "taskDirectory": "docs/changes/relation-entity-picker-pagination",
+      "taskDirectory": "docs/changes/map-asset-hierarchy",
       "worktree": ".",
       "fileScopes": [
-        "frontend/src/views/tb/relation/form.vue",
-        "frontend/src/views/tb/relation/relationEntityOptions.ts",
-        "frontend/tests/relationEntityOptions.test.ts",
-        "frontend/tests/tsconfig.relation-entity-options.json",
-        "docs/changes/relation-entity-picker-pagination",
+        "frontend/src/views/tb/map/MapHome.vue",
+        "frontend/src/views/tb/map/components/MapAssetSelector.vue",
+        "frontend/src/views/tb/map/services/mapAssetHierarchyService.ts",
+        "frontend/tests/mapAssetHierarchy.test.ts",
+        "frontend/tests/tsconfig.map-asset-hierarchy.json",
+        "docs/changes/map-asset-hierarchy",
         "docs/changes/active-tasks.json"
       ],
       "sharedResources": [],
