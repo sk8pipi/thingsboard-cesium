@@ -1,30 +1,37 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-04",
+  "updatedAt": "2026-09-07",
   "tasks": [
     {
-      "taskId": "map-widget-fullscreen",
-      "name": "地图大屏部件全屏与原位恢复",
+      "taskId": "alarm-trend-history",
+      "name": "报警趋势服务端持久化统计",
       "status": "待人工提交",
       "owner": "主 Agent",
-      "taskDirectory": "docs/changes/map-widget-fullscreen",
+      "taskDirectory": "docs/changes/alarm-trend-history",
       "worktree": ".",
       "fileScopes": [
-        "frontend/src/views/tb/map/MapHome.vue",
-        "frontend/src/views/tb/map/MapWidgetLayer.vue",
-        "frontend/src/views/tb/map/MapTopBarPreview.vue",
-        "frontend/src/views/tb/map/mapTopBarActions.ts",
-        "frontend/src/views/tb/map/mapWidgetFullscreen.ts",
-        "frontend/src/views/tb/dashboard/runtime/widgets/TbCesiumMap.vue",
-        "frontend/tests/mapWidgetFullscreen.test.ts",
-        "docs/changes/map-widget-fullscreen",
-        "docs/changes/project-readme/delivery.md",
+        "backend/dao/src/main/resources/sql",
+        "backend/dao/src/main/java/org/thingsboard/server/dao/alarm",
+        "backend/dao/src/main/java/org/thingsboard/server/dao/sql/alarm",
+        "backend/common/data/src/main/java/org/thingsboard/server/common/data/alarm",
+        "backend/application/src/main/java/org/thingsboard/server/controller/AlarmStatisticsController.java",
+        "backend/application/src/test/java/org/thingsboard/server/controller/AlarmStatisticsControllerTest.java",
+        "backend/dao/src/test/java/org/thingsboard/server/dao/alarm",
+        "backend/dao/src/test/java/org/thingsboard/server/dao/sql/alarm",
+        "backend/dao/src/test/resources/sql/psql/drop-all-tables.sql",
+        "frontend/src/views/tb/dashboard/runtime/widgets/alarm",
+        "frontend/tests/alarmTrendHistory.test.ts",
+        "scripts/start-thingsboard-video-local.ps1",
+        "scripts/alarm-trend",
+        "docs/ai/architecture-index.md",
+        "docs/ai/alarm-statistics-architecture.md",
+        "docs/api/alarm-statistics-api.md",
+        "docs/changes/alarm-trend-history",
+        "docs/changes/map-widget-fullscreen/delivery.md",
         "docs/changes/active-tasks.json"
       ],
-      "sharedResources": [
-        "无独占共享运行时资源"
-      ],
-      "lastUpdated": "2026-09-04"
+      "sharedResources": [],
+      "lastUpdated": "2026-09-07"
     }
   ]
 }

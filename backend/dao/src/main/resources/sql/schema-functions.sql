@@ -14,6 +14,13 @@
 -- limitations under the License.
 --
 
+-- BEGIN ALARM STATISTICS CAPTURE START
+-- Never advance the coverage boundary on restart or repeated schema installation.
+INSERT INTO alarm_statistics_state (id, capture_started_time)
+VALUES (true, floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint)
+ON CONFLICT (id) DO NOTHING;
+-- END ALARM STATISTICS CAPTURE START
+
 CREATE OR REPLACE FUNCTION create_or_update_active_alarm(
                                         t_id uuid, c_id uuid, a_id uuid, a_created_ts bigint,
                                         a_o_id uuid, a_o_type integer, a_type varchar,
@@ -56,6 +63,12 @@ BEGIN
              a_details,
              a_propagate, a_propagate_to_owner, a_propagate_to_tenant, a_propagation_types,
              false, 0, false, 0, NULL, 0);
+        INSERT INTO alarm_occurrence
+            (tenant_id, alarm_id, created_time, customer_id, originator_id, originator_type,
+             alarm_type, severity, record_source, recorded_at)
+        VALUES (t_id, a_id, a_created_ts, c_id, a_o_id, a_o_type,
+                a_type, a_severity, 'LIVE', floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint)
+        ON CONFLICT (tenant_id, alarm_id) DO NOTHING;
         INSERT INTO alarm_types (tenant_id, type) VALUES (t_id, a_type) ON CONFLICT (tenant_id, type) DO NOTHING;
         SELECT * INTO result FROM alarm_info a WHERE a.id = a_id AND a.tenant_id = t_id;
         RETURN json_build_object('success', true, 'created', true, 'modified', true, 'alarm', row_to_json(result))::text;
@@ -75,6 +88,8 @@ BEGIN
             OR propagate != a_propagate OR propagate_to_owner != a_propagate_to_owner OR
                propagate_to_tenant != a_propagate_to_tenant OR propagate_relation_types != a_propagation_types);
         GET DIAGNOSTICS row_count = ROW_COUNT;
+        UPDATE alarm_occurrence SET severity = a_severity
+        WHERE tenant_id = t_id AND alarm_id = existing.id AND severity IS DISTINCT FROM a_severity;
         SELECT * INTO result FROM alarm_info a WHERE a.id = existing.id AND a.tenant_id = t_id;
         IF row_count > 0 THEN
             RETURN json_build_object('success', true, 'modified', true, 'alarm', row_to_json(result), 'old', row_to_json(existing))::text;
@@ -118,6 +133,8 @@ BEGIN
         OR propagate != a_propagate OR propagate_to_owner != a_propagate_to_owner OR
            propagate_to_tenant != a_propagate_to_tenant OR propagate_relation_types != a_propagation_types);
     GET DIAGNOSTICS row_count = ROW_COUNT;
+    UPDATE alarm_occurrence SET severity = a_severity
+    WHERE tenant_id = t_id AND alarm_id = a_id AND severity IS DISTINCT FROM a_severity;
     SELECT * INTO result FROM alarm_info a WHERE a.id = a_id AND a.tenant_id = t_id;
     IF row_count > 0 THEN
         RETURN json_build_object('success', true, 'modified', row_count > 0, 'alarm', row_to_json(result), 'old', row_to_json(existing))::text;

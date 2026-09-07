@@ -17,6 +17,8 @@ DROP VIEW IF EXISTS alarm_info CASCADE;
 DROP VIEW IF EXISTS edge_acitve_attribute_view CASCADE;
 
 DROP TABLE IF EXISTS admin_settings;
+DROP TABLE IF EXISTS alarm_occurrence;
+DROP TABLE IF EXISTS alarm_statistics_state;
 DROP TABLE IF EXISTS entity_alarm;
 DROP TABLE IF EXISTS alarm_comment;
 DROP TABLE IF EXISTS alarm;

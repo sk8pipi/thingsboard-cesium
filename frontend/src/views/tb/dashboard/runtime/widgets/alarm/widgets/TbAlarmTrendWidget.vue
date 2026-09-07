@@ -21,6 +21,9 @@
         <i :style="{ backgroundColor: option.color }" aria-hidden="true"></i>
         {{ option.label }}
       </span>
+      <div v-if="hasLoaded && historicalDataIncomplete" class="alarm-trend__coverage" role="note">
+        {{ coverageMessage }}
+      </div>
     </div>
 
     <div class="alarm-trend__canvas">
@@ -121,13 +124,14 @@
   import { ALARM_SEVERITY_COLORS, AlarmSeverity } from '/@/enums/alarmEnum';
   import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
   import {
-    aggregateAlarmTrend,
     createAlarmTrendRange,
+    formatAlarmTrendBucketLabel,
+    formatAlarmTrendDate,
     type AlarmTrendBucket,
     type AlarmTrendMode,
     type AlarmTrendSeverity,
   } from '../alarmTrend';
-  import { fetchTenantAlarmsInRange } from '../alarmTrendApi';
+  import { fetchAlarmTrend } from '../alarmTrendApi';
 
   const props = defineProps<{
     config?: Record<string, any>;
@@ -177,6 +181,11 @@
   const buckets = ref(createAlarmTrendRange(mode.value).buckets);
   const loading = ref(false);
   const hasLoaded = ref(false);
+  const completeFrom = ref(0);
+  const historicalDataIncomplete = ref(false);
+  const coverageMessage = computed(
+    () => '完整统计自 ' + formatAlarmTrendDate(completeFrom.value) + ' 起，此前历史可能不完整（北京时间）',
+  );
   const error = ref('');
   const tooltip = reactive<AlarmTrendTooltip>({ visible: false, x: 0, y: 0, label: '', value: 0, rows: [] });
 
@@ -186,7 +195,6 @@
 
   const settings = computed(() => props.widget?.config?.settings || props.config?.settings || {});
   const pollMs = computed(() => Math.max(10_000, Number(settings.value.pollMs) || 60_000));
-  const pageSize = computed(() => Math.min(1000, Math.max(10, Number(settings.value.pageSize) || 100)));
   const maxValue = computed(() => Math.max(...buckets.value.map((bucket) => bucket.total), 0));
   const axisMax = computed(() => niceAxisMax(maxValue.value));
   const yTicks = computed(() =>
@@ -265,24 +273,7 @@
   }
 
   function formatTooltipLabel(bucket: AlarmTrendBucket) {
-    const date = new Date(bucket.startTs);
-    const dateText =
-      date.getFullYear() +
-      '-' +
-      String(date.getMonth() + 1).padStart(2, '0') +
-      '-' +
-      String(date.getDate()).padStart(2, '0');
-    if (mode.value === 'sevenDays') return dateText;
-
-    const endDate = new Date(bucket.endTs);
-    return (
-      dateText +
-      ' ' +
-      String(date.getHours()).padStart(2, '0') +
-      ':00–' +
-      String(endDate.getHours()).padStart(2, '0') +
-      ':00'
-    );
+    return formatAlarmTrendBucketLabel(bucket, mode.value);
   }
 
   function formatPercent(count: number, total: number) {
@@ -342,20 +333,15 @@
   async function reload() {
     const sequence = ++requestSequence;
     const requestMode = mode.value;
-    const now = Date.now();
-    const range = createAlarmTrendRange(requestMode, now);
     loading.value = true;
     error.value = '';
 
     try {
-      const alarms = await fetchTenantAlarmsInRange({
-        startTime: range.startTime,
-        endTime: range.endTime,
-        pageSize: pageSize.value,
-        shouldStop: () => disposed || sequence !== requestSequence,
-      });
+      const result = await fetchAlarmTrend(requestMode);
       if (disposed || sequence !== requestSequence) return;
-      buckets.value = aggregateAlarmTrend(alarms, requestMode, now);
+      buckets.value = result.buckets;
+      completeFrom.value = result.completeFrom;
+      historicalDataIncomplete.value = result.historicalDataIncomplete;
       hasLoaded.value = true;
     } catch (err: any) {
       if (disposed || sequence !== requestSequence) return;
@@ -514,6 +500,14 @@
     height: 100%;
     min-height: 180px;
     display: block;
+  }
+
+  .alarm-trend__coverage {
+    flex-basis: 100%;
+    color: #fcd34d;
+    font-size: 10px;
+    text-align: right;
+    pointer-events: none;
   }
 
   .alarm-trend__grid line {

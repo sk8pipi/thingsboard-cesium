@@ -998,3 +998,28 @@ CREATE TABLE IF NOT EXISTS ai_model (
     CONSTRAINT ai_model_name_unq_key        UNIQUE (tenant_id, name),
     CONSTRAINT ai_model_external_id_unq_key UNIQUE (tenant_id, external_id)
 );
+
+-- BEGIN ALARM STATISTICS SCHEMA (also used by the explicit migration generator)
+CREATE TABLE IF NOT EXISTS alarm_occurrence (
+    tenant_id uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
+    alarm_id uuid NOT NULL,
+    created_time bigint NOT NULL,
+    customer_id uuid,
+    originator_id uuid,
+    originator_type integer,
+    alarm_type varchar(255) NOT NULL,
+    severity varchar(255) NOT NULL,
+    record_source varchar(16) NOT NULL CHECK (record_source IN ('LIVE', 'BACKFILL')),
+    recorded_at bigint NOT NULL,
+    PRIMARY KEY (tenant_id, alarm_id)
+);
+CREATE INDEX IF NOT EXISTS idx_alarm_occurrence_tenant_time
+    ON alarm_occurrence (tenant_id, created_time) INCLUDE (severity);
+CREATE INDEX IF NOT EXISTS idx_alarm_occurrence_customer_time
+    ON alarm_occurrence (tenant_id, customer_id, created_time) INCLUDE (severity);
+
+CREATE TABLE IF NOT EXISTS alarm_statistics_state (
+    id boolean PRIMARY KEY DEFAULT true CHECK (id),
+    capture_started_time bigint NOT NULL
+);
+-- END ALARM STATISTICS SCHEMA

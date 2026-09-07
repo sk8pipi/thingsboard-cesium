@@ -1,113 +1,109 @@
-﻿import type { AlarmItem } from './types';
-
 export const ALARM_TREND_SEVERITIES = ['CRITICAL', 'MAJOR', 'MINOR', 'WARNING', 'INDETERMINATE'] as const;
-
+export const ALARM_TREND_TIME_ZONE = 'Asia/Shanghai';
 export type AlarmTrendSeverity = (typeof ALARM_TREND_SEVERITIES)[number];
 export type AlarmTrendMode = 'sevenDays' | 'twentyFourHours';
 export type AlarmTrendSeverityCounts = Record<AlarmTrendSeverity, number>;
-
 export interface AlarmTrendBucket {
   key: string;
   startTs: number;
   endTs: number;
   label: string;
   total: number;
-  /** Reserved for the future severity-stacked bar rendering. */
   severityCounts: AlarmTrendSeverityCounts;
 }
-
 export interface AlarmTrendRange {
   startTime: number;
   endTime: number;
   buckets: AlarmTrendBucket[];
 }
-
-function pad(value: number) {
-  return String(value).padStart(2, '0');
+export interface AlarmTrendResponse extends AlarmTrendRange {
+  mode: AlarmTrendMode;
+  timeZone: typeof ALARM_TREND_TIME_ZONE;
+  generatedAt: number;
+  completeFrom: number;
+  historicalDataIncomplete: boolean;
 }
-
-function createSeverityCounts(): AlarmTrendSeverityCounts {
-  return {
-    CRITICAL: 0,
-    MAJOR: 0,
-    MINOR: 0,
-    WARNING: 0,
-    INDETERMINATE: 0,
-  };
+function timeParts(timestamp: number) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: ALARM_TREND_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(timestamp);
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
 }
-
-function toSeverity(value: string): AlarmTrendSeverity {
-  return ALARM_TREND_SEVERITIES.includes(value as AlarmTrendSeverity) ? (value as AlarmTrendSeverity) : 'INDETERMINATE';
+export function formatAlarmTrendDate(timestamp: number) {
+  const date = timeParts(timestamp);
+  return date.year + '-' + date.month + '-' + date.day + ' ' + date.hour + ':' + date.minute + ':' + date.second;
 }
-
-function createDayBucket(now: Date, dayOffset: number): AlarmTrendBucket {
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-
-  return {
-    key: `day-${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`,
-    startTs: start.getTime(),
-    endTs: end.getTime(),
-    label: `${pad(start.getMonth() + 1)}/${pad(start.getDate())}`,
-    total: 0,
-    severityCounts: createSeverityCounts(),
-  };
+export function formatAlarmTrendBucketLabel(bucket: AlarmTrendBucket, mode: AlarmTrendMode) {
+  const start = formatAlarmTrendDate(bucket.startTs);
+  return mode === 'sevenDays' ? start.slice(0, 10) : start.slice(0, 16) + '–' + timeParts(bucket.endTs).hour + ':00';
 }
-
-function createHourBucket(now: Date, hourOffset: number): AlarmTrendBucket {
-  const start = new Date(now);
-  start.setMinutes(0, 0, 0);
-  start.setHours(start.getHours() + hourOffset);
-  const end = new Date(start);
-  end.setHours(end.getHours() + 1);
-
-  return {
-    key: `hour-${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}-${pad(start.getHours())}`,
-    startTs: start.getTime(),
-    endTs: end.getTime(),
-    label: `${pad(start.getHours())}:00`,
-    total: 0,
-    severityCounts: createSeverityCounts(),
-  };
-}
-
 export function createAlarmTrendRange(mode: AlarmTrendMode, nowTimestamp = Date.now()): AlarmTrendRange {
-  const now = new Date(nowTimestamp);
-  const buckets =
-    mode === 'sevenDays'
-      ? Array.from({ length: 7 }, (_, index) => createDayBucket(now, index - 6))
-      : Array.from({ length: 24 }, (_, index) => createHourBucket(now, index - 23));
-
+  const daily = mode === 'sevenDays';
+  const size = daily ? 86_400_000 : 3_600_000;
+  const count = daily ? 7 : 24;
+  const date = timeParts(nowTimestamp);
+  const currentStart = Date.parse(
+    date.year + '-' + date.month + '-' + date.day + 'T' + (daily ? '00' : date.hour) + ':00:00+08:00',
+  );
+  const startTime = currentStart - (count - 1) * size;
   return {
-    startTime: buckets[0]?.startTs ?? nowTimestamp,
+    startTime,
     endTime: nowTimestamp,
-    buckets,
+    buckets: Array.from({ length: count }, (_, index) => {
+      const startTs = startTime + index * size;
+      const parts = timeParts(startTs);
+      return {
+        key: (daily ? 'day-' : 'hour-') + startTs,
+        startTs,
+        endTs: startTs + size,
+        label: daily ? parts.month + '/' + parts.day : parts.hour + ':00',
+        total: 0,
+        severityCounts: { CRITICAL: 0, MAJOR: 0, MINOR: 0, WARNING: 0, INDETERMINATE: 0 },
+      };
+    }),
   };
 }
-
-export function aggregateAlarmTrend(
-  alarms: AlarmItem[],
-  mode: AlarmTrendMode,
-  nowTimestamp = Date.now(),
-): AlarmTrendBucket[] {
-  const range = createAlarmTrendRange(mode, nowTimestamp);
-  const seenAlarmIds = new Set<string>();
-
-  alarms.forEach((alarm, index) => {
-    const createdTime = Number(alarm.createdTime);
-    if (!Number.isFinite(createdTime) || createdTime < range.startTime || createdTime > range.endTime) return;
-
-    const fingerprint = alarm.id || `${createdTime}-${alarm.type}-${alarm.originator?.id || ''}-${index}`;
-    if (seenAlarmIds.has(fingerprint)) return;
-    seenAlarmIds.add(fingerprint);
-
-    const bucket = range.buckets.find((item) => createdTime >= item.startTs && createdTime < item.endTs);
-    if (!bucket) return;
-
-    bucket.total += 1;
-    bucket.severityCounts[toSeverity(alarm.severity)] += 1;
+// Missing or malformed statistics must never be displayed as zero.
+export function parseAlarmTrendResponse(value: unknown, mode: AlarmTrendMode): AlarmTrendResponse {
+  const data = value as AlarmTrendResponse;
+  const size = mode === 'sevenDays' ? 86_400_000 : 3_600_000;
+  if (
+    !data ||
+    data.mode !== mode ||
+    data.timeZone !== ALARM_TREND_TIME_ZONE ||
+    !Number.isSafeInteger(data.generatedAt) ||
+    !Number.isSafeInteger(data.startTime) ||
+    !Number.isSafeInteger(data.endTime) ||
+    !Number.isSafeInteger(data.completeFrom) ||
+    data.endTime < data.startTime ||
+    typeof data.historicalDataIncomplete !== 'boolean' ||
+    !Array.isArray(data.buckets) ||
+    data.buckets.length !== (mode === 'sevenDays' ? 7 : 24)
+  )
+    throw new Error('报警趋势统计响应不完整');
+  data.buckets.forEach((bucket, index) => {
+    if (
+      !bucket ||
+      typeof bucket.key !== 'string' ||
+      typeof bucket.label !== 'string' ||
+      bucket.startTs !== data.startTime + index * size ||
+      bucket.endTs !== bucket.startTs + size ||
+      !Number.isSafeInteger(bucket.total) ||
+      bucket.total < 0 ||
+      !bucket.severityCounts ||
+      ALARM_TREND_SEVERITIES.some(
+        (severity) => !Number.isSafeInteger(bucket.severityCounts[severity]) || bucket.severityCounts[severity] < 0,
+      ) ||
+      ALARM_TREND_SEVERITIES.reduce((sum, severity) => sum + bucket.severityCounts[severity], 0) !== bucket.total
+    )
+      throw new Error('报警趋势分组数据无效');
   });
-
-  return range.buckets;
+  return data;
 }

@@ -87,6 +87,12 @@ Write-Host 'Credentials remain in the local ignored environment file and are not
 
 Push-Location $backendRoot
 try {
+    Write-Host 'Building shared data and DAO modules required by the application.'
+    & $mavenCommand.Source -pl 'common/data,dao' -DskipTests install
+    if ($LASTEXITCODE -ne 0) {
+        throw "ThingsBoard shared backend modules build exited with code $LASTEXITCODE"
+    }
+
     & $mavenCommand.Source -pl application -DskipTests spring-boot:run
     if ($LASTEXITCODE -ne 0) {
         throw "ThingsBoard backend exited with code $LASTEXITCODE"
