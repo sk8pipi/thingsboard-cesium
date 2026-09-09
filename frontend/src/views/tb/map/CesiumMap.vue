@@ -1,12 +1,32 @@
 <template>
-  <div ref="cesiumEl" class="cesium-container"></div>
+  <div class="cesium-shell">
+    <div ref="cesiumEl" class="cesium-container"></div>
+    <div v-if="anchorWarnings.length" class="anchor-warnings" role="status">
+      <details
+        ><summary>点位定位提示（{{ anchorWarnings.length }}）</summary>
+        <div v-for="warning in anchorWarnings" :key="warning">{{ warning }}</div>
+        <button type="button" @click="renderSceneModels(props.sceneModels)">重试加载模型</button>
+      </details>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
   import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
   import * as Cesium from 'cesium';
-  import type { CameraMapPoint, MapPointLocation, SensorMapPoint } from './types/mapPointTypes';
-  import { BASE_MODEL_ASSET_ID, BASE_MODEL_CENTER, MODEL_AUTO_FLY_VIEW } from './mapSceneConfig';
+  import type { CameraMapPoint, MapPointLocation, MapPickedLocation, SensorMapPoint } from './types/mapPointTypes';
+  import { MODEL_AUTO_FLY_VIEW } from './mapSceneConfig';
+  import {
+    createModelAnchor,
+    createModelPlacementMatrix,
+    getEffectiveSceneModels,
+    getModelRevision,
+    resolveModelAnchor,
+    worldToLocation,
+    modelAnchorStatusText,
+    type AnchoredLocation,
+    type SceneModelRuntime,
+  } from './services/mapModelAnchorService';
   import type { MapSceneModel } from './mapTemplateConfig';
   import {
     buildSensorPointBillboard,
@@ -25,6 +45,7 @@
       flyToFirstSensor?: boolean;
       flyToFirstCamera?: boolean;
       mode?: MapInteractionMode;
+      pickModelId?: string;
       hideBasePoints?: boolean;
       globeOnly?: boolean;
       sceneModels?: MapSceneModel[];
@@ -41,6 +62,7 @@
       flyToFirstSensor: false,
       flyToFirstCamera: false,
       mode: 'default',
+      pickModelId: '',
       hideBasePoints: false,
       globeOnly: false,
       sceneModels: () => [],
@@ -56,15 +78,22 @@
   const emit = defineEmits<{
     (e: 'sensor-click', payload: SensorMapPoint): void;
     (e: 'camera-click', payload: CameraMapPoint): void;
-    (e: 'map-click', payload: Required<MapPointLocation>): void;
+    (e: 'map-click', payload: MapPickedLocation): void;
+    (e: 'pick-error', message: string): void;
+    (e: 'pick-start'): void;
   }>();
 
   const token = import.meta.env.VITE_CESIUM_ION_TOKEN as string;
   const cesiumEl = ref<HTMLDivElement | null>(null);
 
   let viewer: Cesium.Viewer | undefined;
-  let tileset: Cesium.Cesium3DTileset | undefined;
   let sceneModelTilesets: Cesium.Cesium3DTileset[] = [];
+  const modelRuntimes = new Map<string, SceneModelRuntime>();
+  const tilesetModelIds = new Map<Cesium.Cesium3DTileset, string>();
+  const anchorWarnings = ref<string[]>([]);
+  let modelLoadVersion = 0;
+  let pickVersion = 0;
+  let previewEntity: Cesium.Entity | undefined;
   let sensorDataSource: Cesium.CustomDataSource | undefined;
   let cameraDataSource: Cesium.CustomDataSource | undefined;
   let clickHandler: Cesium.ScreenSpaceEventHandler | undefined;
@@ -78,7 +107,7 @@
   const cameraLabelDistanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 2500);
 
   function applyBasePointVisibility() {
-    const visible = !props.hideBasePoints;
+    const visible = !props.hideBasePoints && !modelPickBusy;
     if (sensorDataSource) {
       sensorDataSource.show = visible;
     }
@@ -222,40 +251,9 @@
     });
   }
 
-  async function loadBaseTileset() {
-    if (!viewer || props.globeOnly || props.sceneModels.length) return;
-
-    try {
-      tileset = await Cesium.Cesium3DTileset.fromIonAssetId(BASE_MODEL_ASSET_ID, {
-        maximumScreenSpaceError: 16,
-      });
-
-      viewer.scene.primitives.add(tileset);
-
-      const lon = BASE_MODEL_CENTER.longitude;
-      const lat = BASE_MODEL_CENTER.latitude;
-      const cartographic = Cesium.Cartographic.fromDegrees(lon, lat);
-      const [sampled] = await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, [cartographic]);
-      const groundHeight = sampled.height ?? 0;
-
-      tileset.modelMatrix = Cesium.Transforms.headingPitchRollToFixedFrame(
-        Cesium.Cartesian3.fromDegrees(lon, lat, groundHeight + BASE_MODEL_CENTER.heightOffset),
-        new Cesium.HeadingPitchRoll(0, 0, 0),
-      );
-
-      await viewer.flyTo(tileset, {
-        offset: new Cesium.HeadingPitchRange(
-          0,
-          Cesium.Math.toRadians(-35),
-          Math.max(100, tileset.boundingSphere.radius * 2),
-        ),
-      });
-    } catch (error) {
-      console.error('Failed to load tileset from ion:', error);
-    }
-  }
-
   function clearSceneModels() {
+    modelRuntimes.clear();
+    tilesetModelIds.clear();
     if (!viewer) {
       sceneModelTilesets = [];
       return;
@@ -286,45 +284,67 @@
   }
 
   async function positionTileset(tilesetInstance: Cesium.Cesium3DTileset, model: MapSceneModel) {
-    if (!viewer) return;
-
-    const lon = model.longitude;
-    const lat = model.latitude;
-    const heightOffset = model.heightOffset ?? model.height ?? 0;
-    const cartographic = Cesium.Cartographic.fromDegrees(lon, lat);
-    const [sampled] = await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, [cartographic]);
-    const groundHeight = sampled?.height ?? 0;
-
-    tilesetInstance.modelMatrix = Cesium.Transforms.headingPitchRollToFixedFrame(
-      Cesium.Cartesian3.fromDegrees(lon, lat, groundHeight + heightOffset),
-      new Cesium.HeadingPitchRoll(
-        Cesium.Math.toRadians(model.heading ?? 0),
-        Cesium.Math.toRadians(model.pitch ?? 0),
-        Cesium.Math.toRadians(model.roll ?? 0),
-      ),
-    );
+    const activeViewer = viewer;
+    if (!activeViewer) throw new Error('地图尚未就绪');
+    const [sampled] = await Cesium.sampleTerrainMostDetailed(activeViewer.terrainProvider, [
+      Cesium.Cartographic.fromDegrees(model.longitude, model.latitude),
+    ]);
+    if (!Number.isFinite(sampled?.height)) throw new Error('无法获取模型基准地形高度');
+    const matrix = createModelPlacementMatrix(model, sampled.height);
+    if (!tilesetInstance.isDestroyed()) tilesetInstance.modelMatrix = matrix;
+    return matrix;
   }
 
   async function renderSceneModels(models: MapSceneModel[]) {
-    if (!viewer || props.globeOnly) return;
-
+    const activeViewer = viewer;
+    if (!activeViewer) return;
+    const version = ++modelLoadVersion;
+    clearPickPreview();
     clearSceneModels();
-    const visibleModels = models.filter((model) => model.visible !== false);
+    const effectiveModels = getEffectiveSceneModels(models, props.globeOnly);
+    effectiveModels.forEach((model) => modelRuntimes.set(model.id, { model: { ...model }, status: 'loading' }));
+    await refreshAnchoredPoints();
+    if (version !== modelLoadVersion || activeViewer.isDestroyed()) return;
+    const visibleModels = effectiveModels.filter((model) => model.visible !== false);
     for (const model of visibleModels) {
+      let instance: Cesium.Cesium3DTileset | null = null;
       try {
-        const tilesetInstance = await createTilesetFromModel(model);
-        if (!tilesetInstance || !viewer) continue;
-
-        viewer.scene.primitives.add(tilesetInstance);
-        await positionTileset(tilesetInstance, model);
-        sceneModelTilesets.push(tilesetInstance);
-      } catch (error) {
-        console.error('Failed to load scene model:', model, error);
+        instance = await createTilesetFromModel(model);
+        if (!instance) throw new Error('模型资源未配置');
+        if (version !== modelLoadVersion || activeViewer.isDestroyed()) {
+          instance.destroy();
+          return;
+        }
+        const matrix = await positionTileset(instance, model);
+        if (version !== modelLoadVersion || activeViewer.isDestroyed()) {
+          instance.destroy();
+          return;
+        }
+        activeViewer.scene.primitives.add(instance);
+        sceneModelTilesets.push(instance);
+        tilesetModelIds.set(instance, model.id);
+        modelRuntimes.set(model.id, { model: { ...model }, status: 'ready', matrix });
+      } catch {
+        if (instance && !instance.isDestroyed()) instance.destroy();
+        if (version !== modelLoadVersion) return;
+        modelRuntimes.set(model.id, { model: { ...model }, status: 'failed' });
+        console.warn('Failed to load scene model:', model.id);
       }
+      await refreshAnchoredPoints();
+      if (version !== modelLoadVersion) return;
     }
 
-    if (visibleModels.length && sceneModelTilesets[0]) {
-      await viewer.camera.flyTo({
+    if (!models.length && sceneModelTilesets[0]) {
+      const base = sceneModelTilesets[0];
+      await activeViewer.flyTo(base, {
+        offset: new Cesium.HeadingPitchRange(
+          0,
+          Cesium.Math.toRadians(-35),
+          Math.max(100, base.boundingSphere.radius * 2),
+        ),
+      });
+    } else if (visibleModels.length && sceneModelTilesets[0]) {
+      await activeViewer.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(
           MODEL_AUTO_FLY_VIEW.longitude,
           MODEL_AUTO_FLY_VIEW.latitude,
@@ -338,6 +358,33 @@
         duration: MODEL_AUTO_FLY_VIEW.duration,
       });
     }
+  }
+
+  function getResolvedPointLocation(point: AnchoredLocation): MapPointLocation {
+    return point.modelAnchor ? resolveModelAnchor(point, modelRuntimes).location : point;
+  }
+
+  function pointIsVisible(point: AnchoredLocation) {
+    return !point.modelAnchor || resolveModelAnchor(point, modelRuntimes).visible;
+  }
+
+  function pointDepthDistance(point: AnchoredLocation) {
+    return point.modelAnchor?.occlusion === 'physical' ? 0 : Number.POSITIVE_INFINITY;
+  }
+
+  function updateAnchorWarnings() {
+    anchorWarnings.value = [...props.sensorPoints, ...props.cameraPoints].flatMap((point) => {
+      if (!point.modelAnchor) return [];
+      const { status } = resolveModelAnchor(point, modelRuntimes);
+      return status === 'attached' ? [] : [`${point.name}：${modelAnchorStatusText(status)}`];
+    });
+  }
+
+  async function refreshAnchoredPoints() {
+    if (!viewer || viewer.isDestroyed()) return;
+    await Promise.all([renderSensorPoints(props.sensorPoints), renderCameraPoints(props.cameraPoints)]);
+    updateAnchorWarnings();
+    viewer?.scene.requestRender();
   }
 
   async function resolvePositions<T extends MapPointLocation>(points: T[], defaultOffset: number) {
@@ -462,7 +509,7 @@
     const renderVersion = ++sensorRenderVersion;
     const uniquePoints = uniquePointsById(points);
     sensorDataSource.entities.removeAll();
-    const positions = await resolvePositions(uniquePoints, 2);
+    const positions = await resolvePositions(uniquePoints.map(getResolvedPointLocation), 2);
     if (renderVersion !== sensorRenderVersion || !sensorDataSource) return;
 
     uniquePoints.forEach((point, index) => {
@@ -470,14 +517,19 @@
       sensorDataSource?.entities.add({
         id: point.id,
         name: point.name,
+        show: pointIsVisible(point),
         position: positions[index],
+        point: point.modelAnchor
+          ? { pixelSize: 4, color: Cesium.Color.CYAN, disableDepthTestDistance: pointDepthDistance(point) }
+          : undefined,
         billboard: {
           image: buildSensorBillboard(point),
           width: getSensorBillboardSize(),
           height: getSensorBillboardSize(),
           scale: getPointScreenScale(),
-          verticalOrigin: Cesium.VerticalOrigin.CENTER,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          verticalOrigin: point.modelAnchor ? Cesium.VerticalOrigin.BOTTOM : Cesium.VerticalOrigin.CENTER,
+          pixelOffset: point.modelAnchor ? new Cesium.Cartesian2(0, -4) : Cesium.Cartesian2.ZERO,
+          disableDepthTestDistance: pointDepthDistance(point),
         },
         label: {
           text: getPointLabelText(point),
@@ -489,7 +541,7 @@
           backgroundColor: Cesium.Color.fromCssColorString('rgba(0, 0, 0, 0.6)'),
           pixelOffset: new Cesium.Cartesian2(0, -22),
           distanceDisplayCondition: sensorLabelDistanceDisplayCondition,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          disableDepthTestDistance: pointDepthDistance(point),
         },
         properties: {
           overlayType: 'sensor',
@@ -521,7 +573,7 @@
     const renderVersion = ++cameraRenderVersion;
     const uniquePoints = uniquePointsById(points);
     cameraDataSource.entities.removeAll();
-    const positions = await resolvePositions(uniquePoints, 3);
+    const positions = await resolvePositions(uniquePoints.map(getResolvedPointLocation), 3);
     if (renderVersion !== cameraRenderVersion || !cameraDataSource) return;
 
     uniquePoints.forEach((point, index) => {
@@ -529,14 +581,19 @@
       cameraDataSource?.entities.add({
         id: point.id,
         name: point.name,
+        show: pointIsVisible(point),
         position: positions[index],
+        point: point.modelAnchor
+          ? { pixelSize: 4, color: Cesium.Color.CYAN, disableDepthTestDistance: pointDepthDistance(point) }
+          : undefined,
         billboard: {
           image: buildCameraBillboard(point),
           width: getSensorBillboardSize(),
           height: getSensorBillboardSize(),
           scale: getPointScreenScale(),
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          pixelOffset: point.modelAnchor ? new Cesium.Cartesian2(0, -4) : Cesium.Cartesian2.ZERO,
+          disableDepthTestDistance: pointDepthDistance(point),
         },
         label: {
           text: getPointLabelText(point),
@@ -548,7 +605,7 @@
           backgroundColor: Cesium.Color.fromCssColorString('rgba(15, 23, 42, 0.85)'),
           pixelOffset: new Cesium.Cartesian2(0, -38),
           distanceDisplayCondition: cameraLabelDistanceDisplayCondition,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          disableDepthTestDistance: pointDepthDistance(point),
         },
         properties: {
           overlayType: 'camera',
@@ -571,11 +628,11 @@
     });
   }
 
-  function flyToPoint(point: MapPointLocation) {
+  function flyToPoint(point: AnchoredLocation) {
     if (!viewer) return;
-
+    const location = getResolvedPointLocation(point);
     viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(point.longitude, point.latitude, (point.height ?? 0) + 120),
+      destination: Cesium.Cartesian3.fromDegrees(location.longitude, location.latitude, (location.height ?? 0) + 120),
     });
   }
 
@@ -606,6 +663,8 @@
   }
 
   function toSensorPayload(entity: Cesium.Entity): SensorMapPoint {
+    const point = props.sensorPoints.find((item) => item.id === String(entity.id));
+    if (point) return { ...point, ...getResolvedPointLocation(point) };
     const datasource = parseDatasource(entity.properties?.datasource?.getValue?.());
     const sensorStyleOverride = parseDatasource(entity.properties?.sensorStyleOverride?.getValue?.());
     const timestamp = Date.now();
@@ -646,6 +705,8 @@
   }
 
   function toCameraPayload(entity: Cesium.Entity): CameraMapPoint {
+    const point = props.cameraPoints.find((item) => item.id === String(entity.id));
+    if (point) return { ...point, ...getResolvedPointLocation(point) };
     const timestamp = Date.now();
     return {
       id: String(entity.properties?.pointId?.getValue?.() ?? entity.id),
@@ -673,13 +734,7 @@
 
     let cartesian: Cesium.Cartesian3 | undefined;
 
-    if (viewer.scene.pickPositionSupported) {
-      const picked = viewer.scene.pickPosition(position);
-      if (Cesium.defined(picked)) {
-        cartesian = picked;
-      }
-    }
-
+    // 模型表面由统一拾取流程处理；地形路径不能使用图标或模型的深度。
     if (!cartesian) {
       const ray = viewer.camera.getPickRay(position);
       if (ray) {
@@ -698,11 +753,127 @@
     };
   }
 
-  function isEditorManagedPickEntity(entity: Cesium.Entity | null) {
-    if (!entity) return false;
-    if (String(entity.id) === '__editable_map_point_delete__') return true;
-    const pointId = entity.properties?.pointId?.getValue?.();
-    return typeof pointId === 'string' && pointId.length > 0;
+  function clearPickPreview() {
+    ++pickVersion;
+    if (previewEntity && viewer && !viewer.isDestroyed()) viewer.entities.remove(previewEntity);
+    previewEntity = undefined;
+    viewer?.scene.requestRender();
+  }
+
+  function isCurrentModelPick(location: MapPickedLocation) {
+    if (modelPickBusy) return false;
+    const anchor = location.modelAnchor;
+    if (!anchor) return false;
+    const runtime = modelRuntimes.get(anchor.modelId);
+    if (
+      !runtime ||
+      runtime.status !== 'ready' ||
+      runtime.model.visible === false ||
+      getModelRevision(runtime.model) !== anchor.modelRevision
+    )
+      return false;
+    const current = resolveModelAnchor(location, modelRuntimes);
+    return (
+      current.status === 'attached' &&
+      Cesium.Cartesian3.distance(
+        Cesium.Cartesian3.fromDegrees(current.location.longitude, current.location.latitude, current.location.height),
+        Cesium.Cartesian3.fromDegrees(location.longitude, location.latitude, location.height),
+      ) < 0.01
+    );
+  }
+
+  function getPointAnchorStatus(point: AnchoredLocation) {
+    return point.modelAnchor ? resolveModelAnchor(point, modelRuntimes).status : 'ground';
+  }
+
+  let modelPickBusy = false;
+  async function pickModelSurface(position: Cesium.Cartesian2) {
+    const activeViewer = viewer;
+    if (!activeViewer || modelPickBusy) return;
+    emit('pick-start');
+    clearPickPreview();
+    const targetId = props.pickModelId;
+    const sceneVersion = modelLoadVersion;
+    modelPickBusy = true;
+    const version = pickVersion;
+    const sourceSensor = sensorDataSource;
+    const sourceCamera = cameraDataSource;
+    try {
+      if (sourceSensor) sourceSensor.show = false;
+      if (sourceCamera) sourceCamera.show = false;
+      // 必须等隐藏后的深度缓冲刷新，不能在同一帧中直接拾取。
+      await new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+          remove();
+          reject(new Error('画面尚未更新，请重试'));
+        }, 1500);
+        const remove = activeViewer.scene.postRender.addEventListener(() => {
+          window.clearTimeout(timer);
+          remove();
+          resolve();
+        });
+        activeViewer.scene.requestRender();
+      });
+      if (
+        version !== pickVersion ||
+        activeViewer.isDestroyed() ||
+        props.pickModelId !== targetId ||
+        sceneVersion !== modelLoadVersion ||
+        props.mode !== 'pickPoint'
+      )
+        return;
+      const picked = activeViewer.scene.pick(position);
+      const target = sceneModelTilesets.find((item) => picked?.primitive === item);
+      let location: MapPickedLocation;
+      if (target) {
+        const modelId = tilesetModelIds.get(target);
+        const runtime = modelId ? modelRuntimes.get(modelId) : undefined;
+        if (targetId && modelId !== targetId) throw new Error('请点击所选模型的不透明表面');
+        if (!activeViewer.scene.pickPositionSupported) throw new Error('当前环境不支持模型表面拾取');
+        if (runtime?.status !== 'ready' || !runtime.matrix || runtime.model.visible === false || !target.tilesLoaded)
+          throw new Error('模型尚未就绪，请靠近目标表面并等待加载完成');
+        const world = activeViewer.scene.pickPosition(position);
+        if (!Cesium.defined(world)) throw new Error('无法获取模型表面位置，请换一个视角重试');
+        location = { ...worldToLocation(world), modelAnchor: createModelAnchor(runtime.model, runtime.matrix, world) };
+      } else {
+        if (targetId) throw new Error('请点击所选模型的不透明表面，不能选择地形或其他模型');
+        if (picked && picked.primitive !== activeViewer.scene.globe)
+          throw new Error('该对象不支持安装点位，请选择模型表面或地形');
+        // 可见模型加载不完整时，空白像素可能是尚未出现的建筑，不能悄悄选到其下的地形。
+        if (
+          [...modelRuntimes.values()].some(
+            (runtime) => runtime.model.visible !== false && runtime.status !== 'ready',
+          ) ||
+          sceneModelTilesets.some((tileset) => tileset.show && !tileset.tilesLoaded)
+        )
+          throw new Error('场景模型尚未就绪，请等待加载完成后再选点');
+        const ground = getPickedLocation(position);
+        if (!ground) throw new Error('没有选中有效位置，请点击模型表面或地形');
+        location = ground;
+      }
+      const world = Cesium.Cartesian3.fromDegrees(location.longitude, location.latitude, location.height);
+      previewEntity = activeViewer.entities.add({
+        position: world,
+        point: {
+          pixelSize: 9,
+          color: Cesium.Color.YELLOW,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+      emit('map-click', location);
+    } catch (error) {
+      if (version === pickVersion && !activeViewer.isDestroyed()) {
+        emit('pick-error', error instanceof Error ? error.message : '模型表面拾取失败');
+      }
+    } finally {
+      modelPickBusy = false;
+      if (!activeViewer.isDestroyed()) {
+        applyBasePointVisibility();
+        activeViewer.scene.requestRender();
+      }
+    }
   }
 
   function bindOverlayClick() {
@@ -714,16 +885,7 @@
       if (!viewer) return;
 
       if (props.mode === 'pickPoint') {
-        const picked = viewer.scene.pick(movement.position);
-        const pickedEntity = picked?.id ? (picked.id as Cesium.Entity) : null;
-        if (isEditorManagedPickEntity(pickedEntity)) {
-          return;
-        }
-
-        const location = getPickedLocation(movement.position);
-        if (location) {
-          emit('map-click', location);
-        }
+        void pickModelSurface(movement.position);
         return;
       }
 
@@ -783,6 +945,10 @@
     flyToOverview,
     getViewer: () => viewer,
     getPointEntity,
+    getResolvedPointLocation,
+    clearPickPreview,
+    isCurrentModelPick,
+    getPointAnchorStatus,
   });
 
   onMounted(async () => {
@@ -791,10 +957,8 @@
       resizeObserver = new ResizeObserver(scheduleViewerResize);
       resizeObserver.observe(cesiumEl.value);
     }
-    if (!props.globeOnly) {
-      await loadBaseTileset();
-      await renderSceneModels(props.sceneModels || []);
-    }
+    await renderSceneModels(props.sceneModels || []);
+    if (!viewer || viewer.isDestroyed()) return;
     await nextTick();
     await renderSensorPoints(props.sensorPoints || []);
     await renderCameraPoints(props.cameraPoints || []);
@@ -827,6 +991,7 @@
       if (!viewer) return;
       await renderSensorPoints(value || []);
       applyBasePointVisibility();
+      updateAnchorWarnings();
     },
     { deep: true },
   );
@@ -837,6 +1002,7 @@
       if (!viewer) return;
       await renderCameraPoints(value || []);
       applyBasePointVisibility();
+      updateAnchorWarnings();
     },
     { deep: true },
   );
@@ -854,12 +1020,12 @@
   );
 
   watch(
-    () => props.sceneModels,
-    async (value) => {
+    () => JSON.stringify([props.sceneModels, props.globeOnly]),
+    async () => {
       if (!viewer) return;
-      await renderSceneModels(value || []);
+      await renderSceneModels(props.sceneModels || []);
     },
-    { deep: true },
+    { flush: 'sync' },
   );
 
   watch(
@@ -873,14 +1039,24 @@
     () => props.mode,
     (mode) => {
       if (mode === 'pickPoint') {
+        clearPickPreview();
         clearOverlayHover();
+      } else {
+        // 保留已选候选点供确认弹窗预览，但终止尚未完成的拾取。
+        ++pickVersion;
       }
       bindOverlayClick();
       bindOverlayHover();
     },
   );
 
+  watch(() => props.pickModelId, clearPickPreview);
+
   onBeforeUnmount(() => {
+    ++modelLoadVersion;
+    ++sensorRenderVersion;
+    ++cameraRenderVersion;
+    clearPickPreview();
     resizeObserver?.disconnect();
     resizeObserver = undefined;
     if (resizeFrame) cancelAnimationFrame(resizeFrame);
@@ -896,13 +1072,34 @@
     }
 
     viewer = undefined;
-    tileset = undefined;
     sensorDataSource = undefined;
     cameraDataSource = undefined;
   });
 </script>
 
 <style scoped>
+  .cesium-shell {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+  .anchor-warnings {
+    position: absolute;
+    top: calc(var(--map-top-bar-offset, 56px) + 12px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2;
+    max-width: 380px;
+    max-height: 160px;
+    overflow: auto;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: #172332e8;
+    color: #fde68a;
+    font-size: 12px;
+  }
   .cesium-container {
     width: 100%;
     height: 100%;

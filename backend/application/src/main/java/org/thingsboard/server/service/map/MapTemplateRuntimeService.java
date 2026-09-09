@@ -175,6 +175,22 @@ public class MapTemplateRuntimeService {
 
     private Map<String, DeviceRuntimeRequest> collectDeviceRuntimeRequests(JsonNode template) {
         Map<String, DeviceRuntimeRequest> requests = new LinkedHashMap<>();
+        // 地图隐藏不改变业务统计；只保留设备引用与采集字段，不恢复点位坐标/锚点。
+        JsonNode excludedIds = template.path("excludedDeviceIds");
+        if (excludedIds.isArray()) {
+            for (JsonNode id : excludedIds) {
+                String deviceId = id.asText("");
+                if (!isUuid(deviceId)) {
+                    continue;
+                }
+                DeviceRuntimeRequest request = requests.computeIfAbsent(deviceId, DeviceRuntimeRequest::new);
+                request.getAttributeKeys().addAll(BASE_ATTRIBUTE_KEYS);
+                request.getTelemetryKeys().addAll(BASE_TELEMETRY_KEYS);
+                JsonNode binding = template.path("excludedDeviceBindings").path(deviceId);
+                collectDatasourceKeys(binding.path("datasource").path("keys"), request);
+                collectDatasourceKeys(binding.path("telemetryKeys"), request);
+            }
+        }
         JsonNode mapPoints = template.path("mapPoints");
         if (!mapPoints.isArray()) {
             collectWidgetRuntimeRequests(template.path("widgets"), requests);

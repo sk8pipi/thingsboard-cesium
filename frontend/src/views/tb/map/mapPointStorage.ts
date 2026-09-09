@@ -1,4 +1,4 @@
-import type { MapPoint, MapPointEntityType, SensorMapPoint } from './types/mapPointTypes';
+import type { MapModelAnchor, MapPoint, MapPointEntityType, SensorMapPoint } from './types/mapPointTypes';
 
 const MAP_POINT_STORAGE_KEY = 'tb_cesium_map_points_v1';
 const LEGACY_DEMO_POINT_IDS = new Set(['sensor-001', 'camera-virtual-oilwell-cam-001']);
@@ -8,7 +8,7 @@ function shouldKeepPoint(point: MapPoint) {
   return !LEGACY_DEMO_POINT_IDS.has(point.id) && !LEGACY_DEMO_ENTITY_IDS.has(point.entityId);
 }
 
-function normalizeMapPoint(point: unknown): MapPoint | null {
+export function normalizeMapPoint(point: unknown): MapPoint | null {
   if (!point || typeof point !== 'object') return null;
 
   const rawPoint = point as Record<string, unknown>;
@@ -20,6 +20,14 @@ function normalizeMapPoint(point: unknown): MapPoint | null {
   ).trim();
 
   const basePoint = {
+    // 保留无效/未来版本绑定，由统一解析器显式提示，不能静默退回设备定位。
+    modelAnchor:
+      rawPoint.modelAnchor && typeof rawPoint.modelAnchor === 'object'
+        ? (rawPoint.modelAnchor as MapModelAnchor)
+        : undefined,
+    positionSource: rawPoint.positionSource === 'template' ? ('template' as const) : undefined,
+    deviceLocationSynced:
+      typeof rawPoint.deviceLocationSynced === 'boolean' ? rawPoint.deviceLocationSynced : undefined,
     id: String(rawPoint.id || ''),
     type: rawPoint.type,
     name: String(rawPoint.name || rawPoint.entityName || rawPoint.id || ''),

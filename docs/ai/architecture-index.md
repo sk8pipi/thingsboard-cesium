@@ -24,6 +24,7 @@ decisions.md 和 verification.md。实际使用子 Agent、独立 worktree 或�
 | Video API 请求、响应、权限、错误码、调用生命周期 | docs/ai/video-platform-architecture.md、docs/api/video-api.md | 架构文档决定边界，API 文档决定调用契约 |
 | Cesium 摄像头点位和视频弹窗 | docs/ai/video-platform-architecture.md、docs/api/video-api.md | 必须保持 tbDeviceId 和 Video API 边界 |
 | Vue 3 前端、普通 Cesium 地图、仪表盘运行时 | docs/ai/project-architecture.md | 若触及摄像头或播放，再追加视频文档 |
+| 统一选点、模型锚点、设备位置同步、模板移除/恢复、点位遮挡 | docs/ai/map-model-anchor-architecture.md | 草稿与确认写回分层、模板排除不删设备；摄像头仍须读视频架构和 API |
 | ThingsBoard Java 后端、DAO、权限、数据库 | docs/ai/project-architecture.md | 若触及视频绑定或状态，再追加视频文档 |
 | 报警趋势持久化、报警历史统计、采集与补录 | docs/ai/alarm-statistics-architecture.md、docs/api/alarm-statistics-api.md | 历史计数独立于现存报警，迁移须单独批准 |
 | video-platform/、本地视频容器、相关启动脚本 | docs/ai/video-platform-architecture.md | 不得泄露本地密钥或并行争用共享端口 |

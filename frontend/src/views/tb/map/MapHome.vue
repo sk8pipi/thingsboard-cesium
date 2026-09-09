@@ -93,6 +93,11 @@
 </template>
 
 <script setup lang="ts">
+  import {
+    filterExcludedMapPoints,
+    mergeDeviceMapPoint,
+    mergePointRuntimeFields,
+  } from './services/mapPointPositionService';
   import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
   import { useRouter } from 'vue-router';
   import { useUserStore } from '/@/store/modules/user';
@@ -223,6 +228,7 @@
   let cameraRuntimeRequestId = 0;
   let devicePointRefreshTimer: number | undefined;
   let templateReloading = false;
+  let queuedTemplateReload = '';
   let mapTemplateRuntimeAvailable = true;
   let unsubscribeMapTemplateUpdates: (() => void) | undefined;
   let assetCatalogRequestId = 0;
@@ -300,7 +306,10 @@
   const sceneModels = computed(() => assignedTemplateState.value?.scene?.models || []);
   const mapPoints = computed(() => {
     if (isCustomerUserMap.value) {
-      return applyAssignedTemplatePointStatuses(assignedTemplateMapPoints.value);
+      return filterExcludedMapPoints(
+        applyAssignedTemplatePointStatuses(assignedTemplateMapPoints.value),
+        assignedTemplateState.value?.excludedDeviceIds,
+      );
     }
 
     return mergeMapPoints(deviceMapPoints.value, manualMapPoints.value);
@@ -359,18 +368,7 @@
       const manualPoint = manualPointMap.get(dynamicPoint.entityId);
       if (!manualPoint) return dynamicPoint;
 
-      const useDeviceInfoLocation = dynamicPoint.locationSource === 'deviceInfo';
-      return {
-        ...dynamicPoint,
-        ...manualPoint,
-        longitude: useDeviceInfoLocation ? dynamicPoint.longitude : manualPoint.longitude,
-        latitude: useDeviceInfoLocation ? dynamicPoint.latitude : manualPoint.latitude,
-        height: useDeviceInfoLocation ? dynamicPoint.height : manualPoint.height,
-        locationSource: useDeviceInfoLocation ? 'deviceInfo' : 'manual',
-        online: dynamicPoint.online,
-        statusText: dynamicPoint.statusText,
-        color: dynamicPoint.color,
-      } as MapPoint;
+      return mergeDeviceMapPoint(dynamicPoint, manualPoint);
     });
     const dynamicEntityIds = new Set(dynamicPoints.map((point) => point.entityId).filter(Boolean));
     const manualOnlyPoints = manualPoints.filter((point) => !dynamicEntityIds.has(point.entityId));
@@ -423,18 +421,7 @@
       online === undefined ? (point as any).color : online ? (point.type === 'camera' ? 'green' : 'blue') : 'gray';
 
     return {
-      ...point,
-      ...runtime,
-      id: point.id,
-      type: point.type,
-      name: point.name,
-      longitude: point.longitude,
-      latitude: point.latitude,
-      height: point.height,
-      locationSource: point.locationSource,
-      entityType: point.entityType,
-      entityId: point.entityId,
-      entityName: point.entityName,
+      ...mergePointRuntimeFields(point, runtime),
       online: online ?? point.online,
       streamOnline: streamOnline ?? (point as any).streamOnline,
       streamAlive: online === false ? false : ((runtime as any).streamAlive ?? (point as any).streamAlive),
@@ -747,6 +734,7 @@
 
   async function loadAssignedTemplateFromDashboard(dashboardId: string) {
     const dashboard = await getDashboardById(dashboardId);
+    if (dashboardId !== currentAssignedTemplateDashboardId.value) return;
     currentAssignedTemplateTitle.value = dashboard.title || '';
     assignedTemplateState.value = normalizeMapTemplateState(dashboard.configuration?.[DASHBOARD_MAP_WIDGET_CONFIG_KEY]);
     await refreshAssignedTemplatePointStatuses();
@@ -754,7 +742,11 @@
 
   async function refreshAssignedDashboardTemplate(dashboardId: string) {
     const normalizedDashboardId = String(dashboardId || '').trim();
-    if (!normalizedDashboardId || templateReloading) return;
+    if (!normalizedDashboardId || normalizedDashboardId !== currentAssignedTemplateDashboardId.value) return;
+    if (templateReloading) {
+      queuedTemplateReload = normalizedDashboardId;
+      return;
+    }
 
     templateReloading = true;
     try {
@@ -766,6 +758,9 @@
       console.warn('[MapHome] Failed to refresh assigned dashboard template:', error);
     } finally {
       templateReloading = false;
+      const queued = queuedTemplateReload;
+      queuedTemplateReload = '';
+      if (queued && queued === currentAssignedTemplateDashboardId.value) void refreshAssignedDashboardTemplate(queued);
     }
   }
 
@@ -950,9 +945,14 @@
           const latestTemplateState = normalizeMapTemplateState(
             dashboard.configuration?.[DASHBOARD_MAP_WIDGET_CONFIG_KEY],
           );
-          const latestCameras = (latestTemplateState?.mapPoints || []).filter(
-            (point): point is CameraMapPoint => point.type === 'camera',
-          );
+          if (latestTemplateState.excludedDeviceIds.includes(camera.entityId)) {
+            if (requestId === cameraRuntimeRequestId) closeCameraPopup();
+            return;
+          }
+          const latestCameras = filterExcludedMapPoints(
+            latestTemplateState.mapPoints,
+            latestTemplateState.excludedDeviceIds,
+          ).filter((point): point is CameraMapPoint => point.type === 'camera');
           const sameEntityName = camera.entityName
             ? latestCameras.filter((point) => point.entityName === camera.entityName)
             : [];

@@ -45,6 +45,7 @@
   import type { AlarmFocusPayload } from '../dashboard/runtime/widgets/alarm/focus';
   import type { MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
   import type { MapPoint } from './types/mapPointTypes';
+  import { getMapBusinessPoints, type MapTemplateState } from './mapTemplateConfig';
   import { calculateGridStackCellHeight, mapScreenCanvasStyle, type MapScreenMetrics } from './mapScreenResponsive';
   import {
     moveMapWidgetToFullscreen,
@@ -57,7 +58,10 @@
     config: TbWidgetConfig;
   };
 
-  type WidgetLayerData = {
+  type WidgetLayerData = Pick<
+    Partial<MapTemplateState>,
+    'excludedDeviceIds' | 'excludedPointTypes' | 'excludedDeviceBindings'
+  > & {
     layout?: GridItem[];
     widgets?: Record<string, any>;
     mapPoints?: MapPoint[];
@@ -311,7 +315,7 @@
             host: 'dashboard',
             readonly: true,
             runtimeDevices: props.runtimeDevices,
-            templatePoints: props.data?.mapPoints || null,
+            templatePoints: getMapBusinessPoints(props.data),
             emit: (event: string, payload?: unknown) => {
               if (event === 'alarm-focus') emit('alarm-focus', payload as AlarmFocusPayload);
             },

@@ -3,6 +3,36 @@ import type { GridItem, WidgetAppearance } from '../dashboard/runtime/types';
 import type { SensorPopupBinding } from './sensorPopupWidgetStorage';
 import { normalizeDeviceTypeStyleKey, type SensorPointStyleOverride } from './services/sensorPointStyleService';
 import type { MapPoint } from './types/mapPointTypes';
+import type { TemplatePointLike } from '../dashboard/runtime/widgets/aggregate/templateDeviceResolver';
+
+/** 仅保留业务筛选/采集字段，不保存安装坐标、模型锚点或历史位置。 */
+export function toMapBusinessBinding(point: TemplatePointLike): TemplatePointLike {
+  return {
+    entityType: point.entityType,
+    entityId: point.entityId,
+    entityName: point.entityName,
+    name: point.name,
+    type: point.type,
+    deviceCategory: point.deviceCategory,
+    deviceProfile: point.deviceProfile,
+    deviceType: point.deviceType,
+    sensorType: point.sensorType,
+    telemetryKeys: point.telemetryKeys,
+    datasource: point.datasource,
+  };
+}
+
+export function getMapBusinessPoints(state?: Partial<MapTemplateState> | null): TemplatePointLike[] {
+  return [
+    ...(state?.mapPoints || []),
+    ...(state?.excludedDeviceIds || []).map((id) => ({
+      ...toMapBusinessBinding(state?.excludedDeviceBindings?.[id] || {}),
+      entityType: 'DEVICE',
+      entityId: id,
+      type: state?.excludedPointTypes?.[id],
+    })),
+  ];
+}
 
 export const DASHBOARD_MAP_WIDGET_CONFIG_KEY = '__mapWidgetEditor';
 
@@ -13,6 +43,8 @@ export type MapTemplateScene = {
 };
 
 export type MapSceneModel = {
+  /** 同 URL 的模型内容被替换时递增，用于提示重新校准锚点。 */
+  revision?: string;
   id: string;
   name: string;
   type: '3d-tiles';
@@ -200,6 +232,11 @@ export type MapTemplateState = {
   layout: GridItem[];
   widgets: Record<string, any>;
   mapPoints: MapPoint[];
+  /** 仅当前模板隐藏的设备 UUID，不删除设备或改变设备权限。 */
+  excludedDeviceIds: string[];
+  /** 移除点的类型提示，不保存旧位置或模型绑定。 */
+  excludedPointTypes: Record<string, 'sensor' | 'camera'>;
+  excludedDeviceBindings: Record<string, TemplatePointLike>;
   sensorPopupBindings: SensorPopupBinding;
   sensorDeviceTypeStyles: SensorDeviceTypeStyles;
   appearance: MapTemplateAppearance;
@@ -209,7 +246,7 @@ export type MapTemplateState = {
 
 export function createDefaultMapTemplateState(): MapTemplateState {
   return {
-    version: 6,
+    version: 7,
     scene: {
       globeOnly: true,
       models: [],
@@ -218,6 +255,9 @@ export function createDefaultMapTemplateState(): MapTemplateState {
     layout: [],
     widgets: {},
     mapPoints: [],
+    excludedDeviceIds: [],
+    excludedPointTypes: {},
+    excludedDeviceBindings: {},
     sensorPopupBindings: {},
     sensorDeviceTypeStyles: {},
     appearance: { ...DEFAULT_MAP_TEMPLATE_APPEARANCE },
@@ -274,11 +314,21 @@ export function normalizeMapTemplateState(state?: Partial<MapTemplateState> | nu
   const scene: Partial<MapTemplateScene> = state?.scene || {};
   const sourceVersion = Number(state?.version || 1);
   const layout = Array.isArray(state?.layout) ? state.layout : [];
+  const excludedDeviceIds = Array.isArray(state?.excludedDeviceIds)
+    ? [
+        ...new Set(
+          state.excludedDeviceIds
+            .filter((id) => typeof id === 'string')
+            .map((id) => id.trim())
+            .filter(Boolean),
+        ),
+      ]
+    : [];
 
   return {
     ...fallback,
     ...(state || {}),
-    version: sourceVersion < 6 ? 6 : sourceVersion,
+    version: sourceVersion < 7 ? 7 : sourceVersion,
     scene: {
       ...fallback.scene,
       ...scene,
@@ -288,8 +338,20 @@ export function normalizeMapTemplateState(state?: Partial<MapTemplateState> | nu
     layout,
     widgets: state?.widgets && typeof state.widgets === 'object' ? state.widgets : {},
     mapPoints: Array.isArray(state?.mapPoints) ? state.mapPoints : [],
+    excludedDeviceIds,
+    excludedPointTypes: Object.fromEntries(
+      Object.entries(state?.excludedPointTypes || {}).filter(
+        ([id, type]) => excludedDeviceIds.includes(id) && (type === 'sensor' || type === 'camera'),
+      ),
+    ),
     sensorPopupBindings:
       state?.sensorPopupBindings && typeof state.sensorPopupBindings === 'object' ? state.sensorPopupBindings : {},
+    excludedDeviceBindings: Object.fromEntries(
+      excludedDeviceIds.map((id) => [
+        id,
+        { ...toMapBusinessBinding(state?.excludedDeviceBindings?.[id] || {}), entityType: 'DEVICE', entityId: id },
+      ]),
+    ),
     sensorDeviceTypeStyles: normalizeSensorDeviceTypeStyles(state?.sensorDeviceTypeStyles),
     appearance: {
       ...fallback.appearance,

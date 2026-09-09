@@ -54,6 +54,7 @@ export function collectMapTemplateDeviceRefs(state?: Partial<MapTemplateState> |
   };
 
   const normalized = normalizeMapTemplateState(state);
+  normalized.excludedDeviceIds.forEach((id) => addDevice(id, normalized.excludedDeviceBindings[id]?.entityName));
   normalized.mapPoints.forEach((point) => {
     if (point.entityType === 'DEVICE') addDevice(point.entityId, point.entityName || point.name);
     addDatasource((point as any).datasource, point.entityName || point.name);

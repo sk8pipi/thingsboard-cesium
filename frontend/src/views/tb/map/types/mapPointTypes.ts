@@ -18,6 +18,11 @@ export interface MapPointLocation {
 }
 
 export interface BaseMapPoint extends MapPointLocation {
+  /** 模板定位优先；仅管理员确认保存时同步 ThingsBoard，读取页面不写回。 */
+  positionSource?: 'template';
+  /** 当前模板位置已经成功同步设备；不是历史坐标备份。 */
+  deviceLocationSynced?: boolean;
+  modelAnchor?: MapModelAnchor;
   id: string;
   type: MapPointType;
   name: string;
@@ -34,6 +39,17 @@ export interface BaseMapPoint extends MapPointLocation {
   createdAt: number;
   updatedAt: number;
 }
+
+export interface MapModelAnchor {
+  frameVersion: 1;
+  modelId: string;
+  modelRevision: string;
+  localPosition: { x: number; y: number; z: number };
+  fallbackWorldPosition: { longitude: number; latitude: number; height: number };
+  occlusion: 'physical' | 'alwaysVisible';
+}
+
+export type MapPickedLocation = Required<MapPointLocation> & { modelAnchor?: MapModelAnchor };
 
 export interface SensorDatasourceKey {
   name: string;

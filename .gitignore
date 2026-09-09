@@ -17,6 +17,9 @@ frontend/vite.config.ts.timestamp*
 backend/**/target/
 backend/**/build/
 backend/**/output/
+# This upstream Angular source directory is not generated build output.
+!backend/ui-ngx/src/app/modules/home/components/calculated-fields/components/output/
+!backend/ui-ngx/src/app/modules/home/components/calculated-fields/components/output/**
 backend/**/bin/
 backend/**/*.class
 

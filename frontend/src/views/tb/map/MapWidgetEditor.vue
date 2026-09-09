@@ -32,7 +32,7 @@
       :device-bindings="pointDeviceBindings"
       title="绑定监控点位 Device"
       ok-text="保存点位"
-      detail-hint="监控点位只绑定 ThingsBoard Device，播放地址和运行状态后续从 Device attributes / latest telemetry 读取。"
+      detail-hint="监控点位绑定 ThingsBoard Device，视频通过 Video API 获取。页面保存后才同步所选位置。"
       @cancel="cancelPointConfig"
       @ok="onCameraPointConfigured"
     />
@@ -67,6 +67,9 @@
           <button class="mw-btn" type="button" :disabled="editorMode !== 'editing'" @click="openAddPanel">
             添加部件
           </button>
+          <button class="mw-btn" type="button" :disabled="editorMode !== 'editing'" @click="openRemovedPoints">
+            已移除点位（{{ draftExcludedDeviceIds.length }}）
+          </button>
           <button
             class="mw-btn"
             :class="{ active: pageSettingsVisible }"
@@ -96,7 +99,9 @@
             点位自定义
           </button>
           <button class="mw-btn" type="button" @click="cancelEdit">取消</button>
-          <button class="mw-btn primary" type="button" :disabled="!canSaveEdit" @click="saveEdit"> 保存 </button>
+          <button class="mw-btn primary" type="button" :disabled="!canSaveEdit" @click="saveEdit">
+            {{ saveFailures.length ? '保存 / 重试同步' : '保存' }}
+          </button>
         </template>
       </div>
     </div>
@@ -124,7 +129,66 @@
         @sensor-click="onSensorClick"
         @camera-click="onCameraClick"
         @map-click="onMapPicked"
+        @pick-error="onPickError"
+        @pick-start="errorMsg = ''"
       />
+
+      <div v-if="selectedEditPoint && editorMode === 'editing'" class="mw-point-panel">
+        <strong>{{ selectedEditPoint.name }}</strong>
+        <div>{{ selectedEditPoint.type === 'camera' ? '监控点位' : '传感器点位' }}</div>
+        <div>{{ locationDescription(selectedEditPoint) }}</div>
+        <div
+          >经度 {{ formatCoordinate(editPointLocation?.longitude) }}，纬度
+          {{ formatCoordinate(editPointLocation?.latitude) }}</div
+        >
+        <div>椭球高度 {{ formatHeight(editPointLocation?.height) }} m</div>
+        <div class="mw-dialog-actions">
+          <button class="mw-btn primary" @click="startRelocatingPoint(selectedEditPoint)">重新选点</button>
+          <button class="mw-btn" @click="removeDraftPoint(selectedEditPoint.id)">从当前大屏移除</button>
+          <button v-if="selectedEditPoint.type === 'sensor'" class="mw-btn" @click="openSelectedSensorConfig"
+            >配置数据弹窗</button
+          >
+          <button class="mw-btn" @click="editPointId = ''">关闭</button>
+        </div>
+        <label v-if="selectedEditPoint.modelAnchor">
+          遮挡方式
+          <select :value="selectedEditPoint.modelAnchor.occlusion" @change="changePointOcclusion">
+            <option value="physical">正常遮挡</option
+            ><option value="alwaysVisible">穿透显示</option>
+          </select>
+        </label>
+      </div>
+
+      <div v-if="removedPointsVisible" class="mw-dialog-mask" @click.self="closeRemovedPoints">
+        <div class="mw-dialog-card mw-removed-card">
+          <div class="mw-dialog-title">已从当前大屏移除的点位</div>
+          <p>设备及业务数据仍然保留。恢复使用设备当前位置，不恢复旧模型绑定。</p>
+          <p v-if="removedPointsLoading">正在核对设备权限……</p>
+          <p v-else-if="!removedPointEntries.length">没有已移除点位</p>
+          <div v-for="entry in removedPointEntries" :key="entry.deviceId" class="mw-removed-entry">
+            <span>{{ entry.name }}</span>
+            <small v-if="!entry.available">设备已删除、无权访问、读取失败或缺少点位类型</small>
+            <div class="mw-dialog-actions">
+              <button
+                class="mw-btn"
+                :disabled="!entry.available || removedPointsLoading"
+                @click="restoreRemovedPoint(entry, false)"
+                >恢复显示</button
+              >
+              <button
+                class="mw-btn"
+                :disabled="!entry.available || removedPointsLoading"
+                @click="restoreRemovedPoint(entry, true)"
+                >重新选点并恢复</button
+              >
+            </div>
+          </div>
+          <div class="mw-dialog-actions"
+            ><button class="mw-btn" :disabled="removedPointsLoading" @click="openRemovedPoints">重新加载</button
+            ><button class="mw-btn" @click="closeRemovedPoints">关闭</button></div
+          >
+        </div>
+      </div>
 
       <MapScreenTopBar
         class="mw-top-bar"
@@ -143,7 +207,11 @@
       />
 
       <div v-if="editorMode === 'pickingPoint'" class="mw-mode-banner">
-        <div class="mw-mode-banner__text">请在地图上点击选择点位，也可以拖动已有点位调整位置</div>
+        <div class="mw-mode-banner__text"
+          >{{
+            relocatingPointId ? '请选择新的安装位置' : '请点击安装位置'
+          }}：模型表面自动贴附并跟随，地形位置不绑定模型</div
+        >
         <button class="mw-btn" type="button" @click="cancelPickingPoint">取消选点</button>
       </div>
 
@@ -389,15 +457,28 @@
 
       <div v-if="pointTypeDialogVisible" class="mw-dialog-mask" @click.self="cancelPointTypeSelection">
         <div class="mw-dialog-card">
-          <div class="mw-dialog-title">选择点位类型</div>
+          <div class="mw-dialog-title">{{
+            relocatingPointId || restoringPoint ? '确认新的点位位置' : '选择点位类型'
+          }}</div>
+          <div class="mw-dialog-sub">{{ pendingPointLocation ? locationDescription(pendingPointLocation) : '' }}</div>
           <div class="mw-dialog-sub">
             经度 {{ formatCoordinate(pendingPointLocation?.longitude) }}，纬度
-            {{ formatCoordinate(pendingPointLocation?.latitude) }}，高度
+            {{ formatCoordinate(pendingPointLocation?.latitude) }}，椭球高度
             {{ formatHeight(pendingPointLocation?.height) }} m
           </div>
           <div class="mw-dialog-actions">
-            <button class="mw-btn primary" type="button" @click="choosePointType('sensor')">传感器点位</button>
-            <button class="mw-btn primary" type="button" @click="choosePointType('camera')">监控点位</button>
+            <button
+              v-if="relocatingPointId || restoringPoint"
+              class="mw-btn primary"
+              type="button"
+              @click="confirmPointLocation"
+              >确认位置</button
+            >
+            <template v-else>
+              <button class="mw-btn primary" type="button" @click="choosePointType('sensor')">传感器点位</button>
+              <button class="mw-btn primary" type="button" @click="choosePointType('camera')">监控点位</button>
+            </template>
+            <button class="mw-btn" type="button" @click="retryPickingPoint">重新选点</button>
             <button class="mw-btn" type="button" @click="cancelPointTypeSelection">取消</button>
           </div>
         </div>
@@ -527,7 +608,12 @@
 
       <div v-if="dragHint" class="mw-toast">{{ dragHint }}</div>
       <div v-if="errorMsg" class="mw-error">{{ errorMsg }}</div>
+      <div v-if="saveStatus" class="mw-save-status" role="status">
+        <div>{{ saveStatus }}</div>
+        <div v-for="failure in saveFailures" :key="failure.deviceId">{{ failure.name }}：{{ failure.message }}</div>
+      </div>
     </div>
+    <div v-if="isSavingEdit" class="mw-saving-mask" role="status">正在保存，请勿关闭页面……</div>
   </div>
 </template>
 
@@ -536,11 +622,19 @@
   import { getAttributesByScope, getTimeseriesKeys } from '/@/api/tb/telemetry';
   import { getTenantAssetInfoList } from '/@/api/tb/asset';
   import type * as Cesium from 'cesium';
-  import { useRoute, useRouter } from 'vue-router';
+  import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
   import { GridStack } from 'gridstack';
   import 'gridstack/dist/gridstack.min.css';
   import { Icon } from '/@/components/Icon';
   import CesiumMap from './CesiumMap.vue';
+  import {
+    attachPoint,
+    getEffectiveSceneModels,
+    assertNoRemovedModelBindings,
+    isValidModelAnchor,
+  } from './services/mapModelAnchorService';
+  import { filterExcludedMapPoints, unifiedDeviceLocationWriteCandidates } from './services/mapPointPositionService';
+  import { getDeviceInfoById } from '/@/api/tb/device';
   import SelectDeviceDialog from './SelectDeviceDialog.vue';
   import SensorWidgetPopup from './SensorWidgetPopup.vue';
   import SensorPopupWidgetEditor from './SensorPopupWidgetEditor.vue';
@@ -550,7 +644,6 @@
   import MapTopBarSettingsPanel from './components/MapTopBarSettingsPanel.vue';
   import { getMapWidgetStorageKey } from './mapWidgetStorage';
   import { loadMapPoints, saveMapPoints } from './mapPointStorage';
-  import { useMapPointEditor } from './useMapPointEditor';
   import {
     getSensorPopupWidgets,
     loadSensorPopupBindings,
@@ -563,7 +656,8 @@
   import {
     applyDeviceInfoMapPointLocations,
     loadDeviceMapPointLocation,
-    saveDeviceMapPointLocations,
+    syncDeviceMapPointLocations,
+    type DeviceLocationSyncResult,
   } from './services/deviceMapPointService';
   import { getAssignedMapTemplateRuntime, type MapTemplateRuntimeDevices } from './services/mapTemplateRuntimeService';
   import {
@@ -582,6 +676,7 @@
     MapEditorMode,
     MapPoint,
     MapPointLocation,
+    MapPickedLocation,
     MapPointType,
     SensorMapPoint,
   } from './types/mapPointTypes';
@@ -617,6 +712,8 @@
   import {
     DASHBOARD_MAP_WIDGET_CONFIG_KEY,
     createDefaultMapTemplateState,
+    getMapBusinessPoints,
+    toMapBusinessBinding,
     createDefaultMapTopBarConfig,
     DEFAULT_MAP_TEMPLATE_VIEWPORT,
     mapTemplateAppearanceStyle,
@@ -642,6 +739,7 @@
   };
 
   type WidgetSnapshot = {
+    scene: MapTemplateScene;
     layout: GridItem[];
     widgets: Record<string, WidgetData>;
     appearance: WidgetAppearance;
@@ -668,7 +766,12 @@
     getViewer: () => Cesium.Viewer | undefined;
     getPointEntity: (pointId: string) => Cesium.Entity | null;
     flyToPoint: (point: MapPointLocation) => void;
+    getResolvedPointLocation: (point: MapPoint) => MapPointLocation;
+    clearPickPreview: () => void;
+    isCurrentModelPick: (location: MapPickedLocation) => boolean;
+    getPointAnchorStatus: (point: MapPoint) => string;
   };
+  type RemovedPointEntry = { deviceId: string; name: string; type?: MapPointType; available: boolean };
 
   function cloneJson<T>(value: T): T {
     return JSON.parse(JSON.stringify(value));
@@ -731,7 +834,25 @@
   const dragHint = ref('');
   let dragHintTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const pendingPointLocation = ref<Required<MapPointLocation> | null>(null);
+  const pendingPointLocation = ref<MapPickedLocation | null>(null);
+  const editPointId = ref('');
+  const relocatingPointId = ref('');
+  const restoringPoint = ref<MapPoint | null>(null);
+  const removedPointsVisible = ref(false);
+  const removedPointsLoading = ref(false);
+  const removedPointEntries = ref<RemovedPointEntry[]>([]);
+  let pointActionRequest = 0;
+  const originalExcludedDeviceIds = ref<string[]>([]);
+  const draftExcludedDeviceIds = ref<string[]>([]);
+  const originalExcludedPointTypes = ref<Record<string, MapPointType>>({});
+  const draftExcludedPointTypes = ref<Record<string, MapPointType>>({});
+  const originalExcludedDeviceBindings = ref<MapTemplateState['excludedDeviceBindings']>({});
+  const draftExcludedDeviceBindings = ref<MapTemplateState['excludedDeviceBindings']>({});
+  // 本次从设备读回的当前位置，仅避免恢复操作重写坐标；不是历史备份。
+  const restoredPositionReads = new Map<string, MapPointLocation>();
+  let editorDisposed = false;
+  const saveStatus = ref('');
+  const saveFailures = ref<DeviceLocationSyncResult['failed']>([]);
 
   const selectedSensor = ref<SensorMapPoint | null>(null);
   const sensorConfigVisible = ref(false);
@@ -827,31 +948,6 @@
           '',
       ) || undefined,
   });
-  const pointEditor = useMapPointEditor({
-    getViewer: () => cesiumMapRef.value?.getViewer() || null,
-    getPointEntity: (pointId) => cesiumMapRef.value?.getPointEntity(pointId) || null,
-    getPoints: () => draftMapPoints.value,
-    setPoints: (points) => {
-      draftMapPoints.value = cloneJson(points);
-    },
-    onPointDelete: (point) => {
-      removeDraftPoint(point.id);
-    },
-    onPointClick: (point) => {
-      if (editorMode.value !== 'pickingPoint') return;
-
-      editorMode.value = 'editing';
-      if (point.type === 'sensor') {
-        onSensorClick(point);
-        return;
-      }
-
-      void onCameraClick(point);
-    },
-    onPointDragEnd: (point) => {
-      showDragHint(point);
-    },
-  });
 
   let renderPatched = false;
 
@@ -864,7 +960,16 @@
   });
   const controlSwitchSettingsModel = computed(() => currentWidget.value?.config?.settings as any);
   const activeMapPoints = computed(() =>
-    editorMode.value === 'view' ? originalMapPoints.value : draftMapPoints.value,
+    filterExcludedMapPoints(
+      editorMode.value === 'view' ? originalMapPoints.value : draftMapPoints.value,
+      editorMode.value === 'view' ? originalExcludedDeviceIds.value : draftExcludedDeviceIds.value,
+    ),
+  );
+  const selectedEditPoint = computed(() => draftMapPoints.value.find((point) => point.id === editPointId.value));
+  const editPointLocation = computed(() =>
+    selectedEditPoint.value
+      ? cesiumMapRef.value?.getResolvedPointLocation(selectedEditPoint.value) || selectedEditPoint.value
+      : null,
   );
   const pointDeviceBindings = computed<DevicePointBindingInfo[]>(() =>
     draftMapPoints.value
@@ -1221,16 +1326,16 @@
     sensorStylePanelVisible.value = false;
   }
   const canSaveEdit = computed(
-    () =>
-      !isSavingEdit.value &&
-      canEditTemplate.value &&
-      (editorMode.value === 'editing' || editorMode.value === 'pickingPoint'),
+    () => !isSavingEdit.value && !removedPointsLoading.value && canEditTemplate.value && editorMode.value === 'editing',
   );
   const dashboardId = computed(() => String(route.query.dashboardId || ''));
   const isDashboardTemplateMode = computed(() => Boolean(dashboardId.value));
   const canEditTemplate = computed(() => isDashboardTemplateMode.value && hasPermission(Authority.TENANT_ADMIN));
   const templateGlobeOnly = computed(() =>
     isDashboardTemplateMode.value ? templateScene.value.globeOnly !== false : false,
+  );
+  const effectiveAnchorModels = computed(() =>
+    getEffectiveSceneModels(templateScene.value.models, templateGlobeOnly.value),
   );
   const cesiumInteractionMode = computed(() => (editorMode.value === 'pickingPoint' ? 'pickPoint' : 'default'));
   const pointTypeDialogVisible = computed(() => editorMode.value === 'selectingPointType');
@@ -1433,6 +1538,13 @@
     layout.value = normalized.layout;
     widgets.value = normalizeWidgetState(normalized.widgets);
     originalMapPoints.value = cloneJson(normalized.mapPoints);
+    originalExcludedDeviceIds.value = [...normalized.excludedDeviceIds];
+    draftExcludedDeviceIds.value = [...normalized.excludedDeviceIds];
+    originalExcludedPointTypes.value = { ...normalized.excludedPointTypes };
+    draftExcludedPointTypes.value = { ...normalized.excludedPointTypes };
+    originalExcludedDeviceBindings.value = cloneJson(normalized.excludedDeviceBindings);
+    draftExcludedDeviceBindings.value = cloneJson(normalized.excludedDeviceBindings);
+    originalMapPoints.value = filterExcludedMapPoints(originalMapPoints.value, normalized.excludedDeviceIds);
     draftMapPoints.value = cloneJson(originalMapPoints.value);
     originalSensorPopupBindings.value = cloneJson(normalized.sensorPopupBindings);
     draftSensorPopupBindings.value = cloneJson(originalSensorPopupBindings.value);
@@ -1448,7 +1560,23 @@
       viewport: cloneJson(templateViewport.value),
       layout: cloneJson(layout.value),
       widgets: cloneJson(widgets.value),
-      mapPoints: cloneJson(draftMapPoints.value),
+      excludedDeviceIds: [...draftExcludedDeviceIds.value],
+      excludedPointTypes: { ...draftExcludedPointTypes.value },
+      excludedDeviceBindings: cloneJson(draftExcludedDeviceBindings.value),
+      mapPoints: cloneJson(
+        filterExcludedMapPoints(draftMapPoints.value, draftExcludedDeviceIds.value).map((point) => {
+          if (!isValidModelAnchor(point.modelAnchor)) return point;
+          if (cesiumMapRef.value?.getPointAnchorStatus(point) !== 'attached') return point;
+          const location = cesiumMapRef.value?.getResolvedPointLocation(point) || point;
+          const fallback = { longitude: location.longitude, latitude: location.latitude, height: location.height ?? 0 };
+          return {
+            ...point,
+            ...fallback,
+            heightMode: 'absolute',
+            modelAnchor: { ...point.modelAnchor, fallbackWorldPosition: fallback },
+          };
+        }),
+      ),
       sensorPopupBindings: cloneJson(draftSensorPopupBindings.value),
     };
   }
@@ -1520,11 +1648,11 @@
     }
   }
 
-  function assertTenantAdminAccess() {
+  function assertTenantAdminAccess(targetDashboardId = dashboardId.value) {
     if (!hasPermission(Authority.TENANT_ADMIN)) {
       throw new Error('\u53ea\u6709\u79df\u6237\u7ba1\u7406\u5458\u53ef\u4ee5\u7f16\u8f91\u7528\u6237\u5927\u5c4f');
     }
-    if (!dashboardId.value) {
+    if (!targetDashboardId) {
       throw new Error('\u7f3a\u5c11\u5927\u5c4f\u6a21\u677f dashboardId');
     }
   }
@@ -1549,13 +1677,16 @@
     writableDashboard?: Dashboard,
     refreshRuntimeAfterSave = true,
   ) {
-    if (isDashboardTemplateMode.value) {
-      assertTenantAdminAccess();
+    if (writableDashboard || isDashboardTemplateMode.value) {
+      assertTenantAdminAccess(writableDashboard?.id?.id || dashboardId.value);
       const latest = writableDashboard || (await getWritableDashboard());
       assertDashboardTenantOwnership(latest);
 
       const deviceAccess = await inspectMapTemplateDeviceAccess(state);
-      const inaccessibleDevices = deviceAccess.filter((item) => !item.device);
+      const activeDeviceIds = new Set(
+        collectMapTemplateDeviceRefs({ ...state, excludedDeviceIds: [] }).map((item) => item.deviceId),
+      );
+      const inaccessibleDevices = deviceAccess.filter((item) => !item.device && activeDeviceIds.has(item.ref.deviceId));
       if (inaccessibleDevices.length) {
         throw new Error('Template contains inaccessible devices: ' + formatTemplateDeviceNames(inaccessibleDevices));
       }
@@ -1610,7 +1741,12 @@
             host: 'editor',
             readonly: editorMode.value === 'view',
             runtimeDevices: templateRuntimeDevices.value,
-            templatePoints: draftMapPoints.value,
+            templatePoints: getMapBusinessPoints({
+              mapPoints: draftMapPoints.value,
+              excludedDeviceIds: draftExcludedDeviceIds.value,
+              excludedPointTypes: draftExcludedPointTypes.value,
+              excludedDeviceBindings: draftExcludedDeviceBindings.value,
+            }),
             emit: (event: string, payload?: unknown) => {
               if (event === 'alarm-focus') onAlarmFocus(payload as AlarmFocusPayload);
             },
@@ -2046,6 +2182,7 @@
   }
 
   function closeAllOverlays() {
+    editPointId.value = '';
     addPanelVisible.value = false;
     aggregateConfigVisible.value = false;
     areaKeyCompareConfigVisible.value = false;
@@ -2065,70 +2202,37 @@
     }
   }
 
-  function samePointLocation(a?: MapPoint | null, b?: MapPoint | null) {
-    if (!a || !b) return false;
-    return a.longitude === b.longitude && a.latitude === b.latitude && (a.height ?? 0) === (b.height ?? 0);
-  }
-
   function getChangedDeviceLocationPoints(points: MapPoint[]) {
-    const originalById = new Map(originalMapPoints.value.map((point) => [point.id, point]));
-    const originalByEntityId = new Map(
-      originalMapPoints.value
-        .filter((point) => point.entityType === 'DEVICE' && point.entityId)
-        .map((point) => [point.entityId, point]),
-    );
-
-    return points.filter((point) => {
-      if (point.entityType !== 'DEVICE' || !point.entityId) return false;
-      const original = originalById.get(point.id) || originalByEntityId.get(point.entityId);
-      return !samePointLocation(original, point);
+    const baseline = originalMapPoints.value.map((point) => {
+      const currentRead = restoredPositionReads.get(point.entityId);
+      return currentRead ? ({ ...point, ...currentRead, deviceLocationSynced: true } as MapPoint) : point;
     });
-  }
-
-  function showDragHint(point: MapPoint) {
-    const longitude = formatCoordinate(point.longitude);
-    const latitude = formatCoordinate(point.latitude);
-    const hasHeight = point.height !== undefined && point.height !== null && !Number.isNaN(point.height);
-    const heightText = hasHeight ? ', height ' + formatHeight(point.height) + ' m' : '';
-
-    dragHint.value =
-      point.name +
-      ' moved to longitude ' +
-      longitude +
-      ', latitude ' +
-      latitude +
-      heightText +
-      '. Save to sync ThingsBoard.';
-
-    if (dragHintTimer) {
-      clearTimeout(dragHintTimer);
-    }
-
-    dragHintTimer = setTimeout(() => {
-      dragHint.value = '';
-      dragHintTimer = null;
-    }, 2400);
+    return unifiedDeviceLocationWriteCandidates(points, baseline);
   }
 
   function removeDraftPoint(pointId: string) {
-    const targetPoint = draftMapPoints.value.find((point) => point.id === pointId) || null;
-    draftMapPoints.value = draftMapPoints.value.filter((point) => point.id !== pointId);
-
-    if (targetPoint?.type === 'sensor') {
-      const nextBindings = cloneJson(draftSensorPopupBindings.value);
-      delete nextBindings[pointId];
-      draftSensorPopupBindings.value = nextBindings;
-    }
-
-    if (selectedSensor.value?.id === pointId) {
-      selectedSensor.value = null;
-      sensorConfigVisible.value = false;
-      sensorPreviewVisible.value = false;
-    }
-
-    if (selectedCameraPoint.value?.id === pointId) {
-      closeCameraPopup();
-    }
+    if (editorMode.value !== 'editing' || isSavingEdit.value) return;
+    const target = draftMapPoints.value.find((point) => point.id === pointId);
+    if (!target) return;
+    if (
+      !window.confirm(
+        '仅从当前大屏移除“' + target.name + '”？不会删除 ThingsBoard 设备或修改设备坐标。顶部保存后生效。',
+      )
+    )
+      return;
+    const removed = draftMapPoints.value.filter((point) => point.entityId === target.entityId);
+    draftMapPoints.value = draftMapPoints.value.filter((point) => point.entityId !== target.entityId);
+    draftExcludedDeviceIds.value = [...new Set([...draftExcludedDeviceIds.value, target.entityId])];
+    draftExcludedPointTypes.value = { ...draftExcludedPointTypes.value, [target.entityId]: target.type };
+    draftExcludedDeviceBindings.value = {
+      ...draftExcludedDeviceBindings.value,
+      [target.entityId]: toMapBusinessBinding(target),
+    };
+    restoredPositionReads.delete(target.entityId);
+    const bindings = cloneJson(draftSensorPopupBindings.value);
+    removed.forEach((point) => delete bindings[point.id]);
+    draftSensorPopupBindings.value = bindings;
+    closeAllOverlays();
   }
 
   function enterEdit() {
@@ -2142,9 +2246,13 @@
       sensorDeviceTypeStyles: cloneJson(templateSensorDeviceTypeStyles.value),
       topBar: cloneJson(templateTopBar.value),
       viewport: cloneJson(templateViewport.value),
+      scene: cloneJson(templateScene.value),
     };
     draftMapPoints.value = cloneJson(originalMapPoints.value);
     draftSensorPopupBindings.value = cloneJson(originalSensorPopupBindings.value);
+    draftExcludedDeviceIds.value = [...originalExcludedDeviceIds.value];
+    draftExcludedPointTypes.value = { ...originalExcludedPointTypes.value };
+    draftExcludedDeviceBindings.value = cloneJson(originalExcludedDeviceBindings.value);
 
     editorMode.value = 'editing';
     selectedWidgetId.value = '';
@@ -2205,43 +2313,255 @@
     return Array.from(bindingsByDevice.values()).filter((bindings) => bindings.length > 1);
   }
 
+  function clearPointPicking() {
+    pointActionRequest += 1;
+    pendingPointLocation.value = null;
+    relocatingPointId.value = '';
+    restoringPoint.value = null;
+    sensorPointDialogVisible.value = false;
+    cameraPointDialogVisible.value = false;
+    cesiumMapRef.value?.clearPickPreview();
+  }
+
+  function locationDescription(location: MapPointLocation & { modelAnchor?: MapPickedLocation['modelAnchor'] }) {
+    if (!location.modelAnchor) return '地面位置（不跟随模型）';
+    const model = effectiveAnchorModels.value.find((item) => item.id === location.modelAnchor?.modelId);
+    return '模型表面：' + (model?.name || location.modelAnchor.modelId) + '（跟随模型变化）';
+  }
+
+  function validatePickedLocation(location: MapPickedLocation) {
+    if (
+      !Number.isFinite(location.longitude) ||
+      Math.abs(location.longitude) > 180 ||
+      !Number.isFinite(location.latitude) ||
+      Math.abs(location.latitude) > 90 ||
+      !Number.isFinite(location.height ?? 0)
+    ) {
+      errorMsg.value = '位置无效，请重新选点';
+      return false;
+    }
+    if (
+      location.modelAnchor &&
+      (!isValidModelAnchor(location.modelAnchor) || !cesiumMapRef.value?.isCurrentModelPick(location))
+    ) {
+      errorMsg.value = '模型已变化或位置不可用，请重新选点';
+      return false;
+    }
+    return true;
+  }
+
   function startPickingPoint() {
-    if (editorMode.value !== 'editing') return;
-    clearDragHint();
+    if (editorMode.value !== 'editing' || isSavingEdit.value || removedPointsLoading.value) return false;
+    closeRemovedPoints();
+    clearPointPicking();
     closeAllOverlays();
     selectedWidgetId.value = '';
-    pendingPointLocation.value = null;
+    errorMsg.value = '';
     editorMode.value = 'pickingPoint';
+    return true;
   }
 
   function togglePickingPoint() {
-    if (editorMode.value === 'pickingPoint') {
-      cancelPickingPoint();
-      return;
-    }
-
-    startPickingPoint();
+    if (editorMode.value === 'pickingPoint') cancelPickingPoint();
+    else startPickingPoint();
   }
 
   function cancelPickingPoint() {
-    pendingPointLocation.value = null;
-    if (editorMode.value !== 'view') {
-      editorMode.value = 'editing';
-    }
+    if (isSavingEdit.value) return;
+    clearPointPicking();
+    if (editorMode.value !== 'view') editorMode.value = 'editing';
   }
 
-  function onMapPicked(location: Required<MapPointLocation>) {
-    if (editorMode.value !== 'pickingPoint') return;
+  function onPickError(message: string) {
+    errorMsg.value = message;
+  }
+
+  function onMapPicked(location: MapPickedLocation) {
+    if (editorMode.value !== 'pickingPoint' || isSavingEdit.value) return;
     pendingPointLocation.value = location;
     editorMode.value = 'selectingPointType';
   }
 
-  function cancelPointTypeSelection() {
+  function retryPickingPoint() {
+    if (isSavingEdit.value) return;
     pendingPointLocation.value = null;
+    cesiumMapRef.value?.clearPickPreview();
+    editorMode.value = 'pickingPoint';
+  }
+
+  function cancelPointTypeSelection() {
+    cancelPickingPoint();
+  }
+
+  function openPointActions(point: MapPoint) {
+    if (editorMode.value !== 'editing' || isSavingEdit.value) return;
+    closeAllOverlays();
+    editPointId.value = point.id;
+  }
+
+  function startRelocatingPoint(point: MapPoint) {
+    if (editorMode.value !== 'editing' || isSavingEdit.value) return;
+    if (startPickingPoint()) relocatingPointId.value = point.id;
+  }
+
+  function pointWithPickedLocation(point: MapPoint, location: MapPickedLocation): MapPoint {
+    const { modelAnchor: _oldAnchor, ...ground } = point;
+    const positioned = location.modelAnchor
+      ? attachPoint(point, location)
+      : {
+          ...ground,
+          longitude: location.longitude,
+          latitude: location.latitude,
+          height: location.height ?? 0,
+          heightMode: 'absolute' as const,
+          positionSource: 'template' as const,
+          locationSource: 'manual' as const,
+        };
+    return { ...positioned, deviceLocationSynced: false, updatedAt: Date.now() } as MapPoint;
+  }
+
+  function unexcludeDevice(deviceId: string) {
+    draftExcludedDeviceIds.value = draftExcludedDeviceIds.value.filter((id) => id !== deviceId);
+    const types = { ...draftExcludedPointTypes.value };
+    delete types[deviceId];
+    draftExcludedPointTypes.value = types;
+    const bindings = { ...draftExcludedDeviceBindings.value };
+    delete bindings[deviceId];
+    draftExcludedDeviceBindings.value = bindings;
+  }
+
+  function confirmPointLocation() {
+    if (isSavingEdit.value || editorMode.value !== 'selectingPointType') return;
+    const location = pendingPointLocation.value;
+    if (!location || !validatePickedLocation(location)) return;
+    const target = restoringPoint.value || draftMapPoints.value.find((point) => point.id === relocatingPointId.value);
+    if (!target) return;
+    const point = pointWithPickedLocation(target, location);
+    const next = cloneJson(draftMapPoints.value);
+    upsertDraftPoint(next, point);
+    draftMapPoints.value = next;
+    unexcludeDevice(point.entityId);
+    clearPointPicking();
     editorMode.value = 'editing';
+    editPointId.value = point.id;
+  }
+
+  function changePointOcclusion(event: Event) {
+    if (editorMode.value !== 'editing' || isSavingEdit.value) return;
+    const occlusion = (event.target as HTMLSelectElement).value;
+    if (occlusion !== 'physical' && occlusion !== 'alwaysVisible') return;
+    draftMapPoints.value = draftMapPoints.value.map((point) =>
+      point.id === editPointId.value && point.modelAnchor
+        ? { ...point, modelAnchor: { ...point.modelAnchor, occlusion }, updatedAt: Date.now() }
+        : point,
+    );
+  }
+
+  function openSelectedSensorConfig() {
+    const point = selectedEditPoint.value;
+    if (point?.type !== 'sensor' || isSavingEdit.value) return;
+    selectedSensor.value = point;
+    editPointId.value = '';
+    sensorConfigVisible.value = true;
+  }
+
+  function closeRemovedPoints() {
+    pointActionRequest += 1;
+    removedPointsVisible.value = false;
+    removedPointsLoading.value = false;
+  }
+
+  async function openRemovedPoints() {
+    if (editorMode.value !== 'editing' || isSavingEdit.value || removedPointsLoading.value) return;
+    closeAllOverlays();
+    removedPointsVisible.value = true;
+    removedPointsLoading.value = true;
+    removedPointEntries.value = [];
+    const request = ++pointActionRequest;
+    const ids = [...draftExcludedDeviceIds.value];
+    try {
+      for (let index = 0; index < ids.length; index += 8) {
+        const entries = await Promise.all(
+          ids.slice(index, index + 8).map(async (deviceId) => {
+            const type = draftExcludedPointTypes.value[deviceId];
+            try {
+              const device = await getDeviceInfoById(deviceId);
+              return { deviceId, name: device.label || device.name || deviceId, type, available: !!type };
+            } catch {
+              return { deviceId, name: deviceId, type, available: false };
+            }
+          }),
+        );
+        if (request !== pointActionRequest || !removedPointsVisible.value) return;
+        removedPointEntries.value.push(...entries);
+      }
+    } finally {
+      if (request === pointActionRequest) removedPointsLoading.value = false;
+    }
+  }
+
+  async function restoreRemovedPoint(entry: RemovedPointEntry, repick: boolean) {
+    if (
+      !entry.available ||
+      !entry.type ||
+      isSavingEdit.value ||
+      removedPointsLoading.value ||
+      editorMode.value !== 'editing' ||
+      !removedPointsVisible.value
+    )
+      return;
+    const request = ++pointActionRequest;
+    removedPointsLoading.value = true;
+    try {
+      const device = await getDeviceInfoById(entry.deviceId);
+      const location = repick ? null : await loadDeviceMapPointLocation(entry.deviceId);
+      if (request !== pointActionRequest || !removedPointsVisible.value) return;
+      if (!repick && !location) throw new Error('设备没有可用坐标，请使用“重新选点恢复”');
+      const point = {
+        ...toMapBusinessBinding(draftExcludedDeviceBindings.value[entry.deviceId] || {}),
+        id: entry.type + '_' + entry.deviceId,
+        type: entry.type,
+        name: device.label || device.name || entry.deviceId,
+        entityType: 'DEVICE',
+        entityId: entry.deviceId,
+        entityName: device.name,
+        longitude: location?.longitude ?? 0,
+        latitude: location?.latitude ?? 0,
+        height: location?.height ?? 0,
+        heightMode: 'absolute',
+        locationSource: location?.source || 'manual',
+        positionSource: 'template',
+        deviceLocationSynced: !repick,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as MapPoint;
+      closeRemovedPoints();
+      clearPointPicking();
+      if (repick) {
+        restoringPoint.value = point;
+        editorMode.value = 'pickingPoint';
+      } else {
+        if (location) restoredPositionReads.set(entry.deviceId, { ...location, heightMode: 'absolute' });
+        const next = cloneJson(draftMapPoints.value);
+        upsertDraftPoint(next, point);
+        draftMapPoints.value = next;
+        unexcludeDevice(entry.deviceId);
+        editPointId.value = point.id;
+      }
+    } catch (error) {
+      if (request === pointActionRequest)
+        errorMsg.value =
+          error instanceof Error && error.message === '设备没有可用坐标，请使用“重新选点恢复”'
+            ? error.message
+            : '设备信息读取失败或已无访问权限，请重试';
+    } finally {
+      if (request === pointActionRequest) removedPointsLoading.value = false;
+    }
   }
 
   function choosePointType(type: MapPointType) {
+    if (isSavingEdit.value || editorMode.value !== 'selectingPointType') return;
+    if (pendingPointLocation.value && !validatePickedLocation(pendingPointLocation.value)) return;
     if (!pendingPointLocation.value) {
       editorMode.value = 'editing';
       return;
@@ -2258,32 +2578,25 @@
   }
 
   function cancelPointConfig() {
-    sensorPointDialogVisible.value = false;
-    cameraPointDialogVisible.value = false;
-    pendingPointLocation.value = null;
-    editorMode.value = 'editing';
+    cancelPickingPoint();
   }
 
-  function createPointBase(
-    type: MapPointType,
-    deviceId: string,
-    deviceName: string,
-    deviceLocation?: Awaited<ReturnType<typeof loadDeviceMapPointLocation>>,
-  ) {
-    const now = Date.now();
+  function createPointBase(type: MapPointType, deviceId: string, deviceName: string) {
     const location = pendingPointLocation.value;
-    if (!location) {
-      throw new Error('Point location is missing.');
-    }
-
+    if (!location || !validatePickedLocation(location)) throw new Error('请重新选择有效位置');
+    const now = Date.now();
     return {
-      id: String(type) + '_' + String(now),
+      id: type + '_' + deviceId,
       type,
       name: deviceName,
-      longitude: deviceLocation?.longitude ?? location.longitude,
-      latitude: deviceLocation?.latitude ?? location.latitude,
-      height: deviceLocation?.height ?? location.height,
-      locationSource: (deviceLocation?.source || 'manual') as MapPoint['locationSource'],
+      longitude: location.longitude,
+      latitude: location.latitude,
+      height: location.height ?? 0,
+      heightMode: 'absolute' as const,
+      modelAnchor: location.modelAnchor,
+      positionSource: 'template' as const,
+      deviceLocationSynced: false,
+      locationSource: 'manual' as const,
       entityType: 'DEVICE' as const,
       entityId: deviceId,
       entityName: deviceName,
@@ -2292,68 +2605,70 @@
     };
   }
 
+  async function verifyNewPointDevice(deviceId: string, mode: string) {
+    if (isSavingEdit.value || editorMode.value !== mode || !ensureDeviceAvailableForNewPoint(deviceId)) return false;
+    const pending = pendingPointLocation.value;
+    const request = ++pointActionRequest;
+    try {
+      await getDeviceInfoById(deviceId);
+    } catch {
+      if (request === pointActionRequest) errorMsg.value = '无法读取设备或已无访问权限，请重试';
+      return false;
+    }
+    return (
+      request === pointActionRequest &&
+      !!pending &&
+      pending === pendingPointLocation.value &&
+      editorMode.value === mode &&
+      validatePickedLocation(pending) &&
+      ensureDeviceAvailableForNewPoint(deviceId)
+    );
+  }
+
+  function finishNewPoint(point: MapPoint) {
+    const next = cloneJson(draftMapPoints.value);
+    upsertDraftPoint(next, point);
+    draftMapPoints.value = next;
+    unexcludeDevice(point.entityId);
+    clearPointPicking();
+    editorMode.value = 'editing';
+    editPointId.value = point.id;
+  }
+
   async function onSensorPointConfigured(payload: {
     deviceId: string;
     deviceName: string;
     keys: string[];
     pollMs: number;
   }) {
-    if (!ensureDeviceAvailableForNewPoint(payload.deviceId)) return;
-    errorMsg.value = '';
-    const deviceLocation = await loadDeviceMapPointLocation(payload.deviceId).catch(() => null);
-
+    if (!(await verifyNewPointDevice(payload.deviceId, 'configuringSensorPoint'))) return;
     const point: SensorMapPoint = {
-      ...createPointBase('sensor', payload.deviceId, payload.deviceName, deviceLocation),
+      ...createPointBase('sensor', payload.deviceId, payload.deviceName),
       type: 'sensor',
       online: false,
-      statusText: '绂荤嚎',
+      statusText: '离线',
       color: 'gray',
       datasource: {
         entityType: 'DEVICE',
         entityId: payload.deviceId,
         entityName: payload.deviceName,
-        keys: (payload.keys || []).map((name) => ({
-          name,
-          type: 'timeseries',
-        })),
+        keys: (payload.keys || []).map((name) => ({ name, type: 'timeseries' })),
         pollMs: payload.pollMs,
       },
     };
-
-    const nextDraftPoints = cloneJson(draftMapPoints.value);
-    upsertDraftPoint(nextDraftPoints, point);
-    draftMapPoints.value = nextDraftPoints;
-    draftSensorPopupBindings.value = {
-      ...draftSensorPopupBindings.value,
-      [point.id]: draftSensorPopupBindings.value[point.id] || [],
-    };
-
-    sensorPointDialogVisible.value = false;
-    pendingPointLocation.value = null;
-    editorMode.value = 'editing';
+    draftSensorPopupBindings.value = { ...draftSensorPopupBindings.value, [point.id]: [] };
+    finishNewPoint(point);
   }
 
   async function onCameraPointConfigured(payload: { deviceId: string; deviceName: string }) {
-    if (!ensureDeviceAvailableForNewPoint(payload.deviceId)) return;
-    errorMsg.value = '';
-    const deviceLocation = await loadDeviceMapPointLocation(payload.deviceId).catch(() => null);
-
-    const point: CameraMapPoint = {
-      ...createPointBase('camera', payload.deviceId, payload.deviceName, deviceLocation),
+    if (!(await verifyNewPointDevice(payload.deviceId, 'configuringCameraPoint'))) return;
+    finishNewPoint({
+      ...createPointBase('camera', payload.deviceId, payload.deviceName),
       type: 'camera',
-      entityType: 'DEVICE',
       online: false,
-      statusText: '绂荤嚎',
+      statusText: '离线',
       color: 'gray',
-    };
-
-    const nextDraftPoints = cloneJson(draftMapPoints.value);
-    upsertDraftPoint(nextDraftPoints, point);
-    draftMapPoints.value = nextDraftPoints;
-
-    cameraPointDialogVisible.value = false;
-    pendingPointLocation.value = null;
-    editorMode.value = 'editing';
+    });
   }
 
   function openAddPanel() {
@@ -2388,76 +2703,47 @@
     templateSensorDeviceTypeStyles.value = cloneJson(widgetSnapshot.sensorDeviceTypeStyles);
     templateTopBar.value = cloneJson(widgetSnapshot.topBar);
     templateViewport.value = cloneJson(widgetSnapshot.viewport);
+    templateScene.value = cloneJson(widgetSnapshot.scene);
     renderGrid();
   }
 
   function leaveEditMode() {
-    if (!grid) return;
-
+    restoredPositionReads.clear();
     clearDragHint();
+    clearPointPicking();
+    closeRemovedPoints();
     editorMode.value = 'view';
-    addPanelVisible.value = false;
     appearancePanelVisible.value = false;
-    sensorStylePanelVisible.value = false;
-    pageSettingsVisible.value = false;
-    pendingPointLocation.value = null;
     selectedWidgetId.value = '';
     closeAllOverlays();
-
-    sensorPointDialogVisible.value = false;
-    cameraPointDialogVisible.value = false;
-
-    grid.setStatic(true);
-    grid.enableMove(false);
-    grid.enableResize(false);
+    grid?.setStatic(true);
+    grid?.enableMove(false);
+    grid?.enableResize(false);
   }
 
   function cancelEdit() {
-    if (!grid) return;
-
+    if (isSavingEdit.value) return;
     restoreWidgetSnapshot();
     draftMapPoints.value = cloneJson(originalMapPoints.value);
     draftSensorPopupBindings.value = cloneJson(originalSensorPopupBindings.value);
+    draftExcludedDeviceIds.value = [...originalExcludedDeviceIds.value];
+    draftExcludedPointTypes.value = { ...originalExcludedPointTypes.value };
+    draftExcludedDeviceBindings.value = cloneJson(originalExcludedDeviceBindings.value);
     leaveEditMode();
   }
 
-  async function saveEdit() {
-    if (!grid || !canSaveEdit.value || isSavingEdit.value) return;
-    if (!canEditTemplate.value) return;
-
-    const duplicateBindings = findDuplicateDeviceBindings(draftMapPoints.value);
-    if (duplicateBindings.length) {
-      const duplicate = duplicateBindings[0];
-      const pointNames = duplicate.map((binding) => '"' + binding.pointName + '"').join(', ');
-      errorMsg.value =
-        'Device ' +
-        (duplicate[0].deviceName || duplicate[0].deviceId) +
-        ' is bound to multiple points: ' +
-        pointNames +
-        '. Please remove duplicates before saving.';
-      return;
-    }
-
-    errorMsg.value = '';
-    syncLayoutFromGrid();
-    const state = getEditorState();
-    const changedDeviceLocationPoints = getChangedDeviceLocationPoints(state.mapPoints);
-    isSavingEdit.value = true;
-    try {
-      const writableDashboard = await getWritableDashboard();
-      if (changedDeviceLocationPoints.length) {
-        await saveDeviceMapPointLocations(changedDeviceLocationPoints);
-      }
-      await persistEditorState(state, writableDashboard, false);
-    } catch (error: any) {
-      errorMsg.value = error?.message || '鐐逛綅淇濆瓨澶辫触锛岃妫€鏌ヨ澶囦綅缃俊鎭悗閲嶈瘯';
-      return;
-    } finally {
-      isSavingEdit.value = false;
-    }
-
+  function adoptSavedState(state: MapTemplateState) {
     originalMapPoints.value = cloneJson(state.mapPoints);
+    draftMapPoints.value = cloneJson(state.mapPoints);
     originalSensorPopupBindings.value = cloneJson(state.sensorPopupBindings);
+    draftSensorPopupBindings.value = cloneJson(state.sensorPopupBindings);
+    originalExcludedDeviceIds.value = [...state.excludedDeviceIds];
+    draftExcludedDeviceIds.value = [...state.excludedDeviceIds];
+    originalExcludedPointTypes.value = { ...state.excludedPointTypes };
+    draftExcludedPointTypes.value = { ...state.excludedPointTypes };
+    originalExcludedDeviceBindings.value = cloneJson(state.excludedDeviceBindings);
+    draftExcludedDeviceBindings.value = cloneJson(state.excludedDeviceBindings);
+    restoredPositionReads.clear();
     widgetSnapshot = {
       layout: cloneJson(state.layout),
       widgets: cloneJson(state.widgets),
@@ -2465,17 +2751,132 @@
       sensorDeviceTypeStyles: cloneJson(state.sensorDeviceTypeStyles),
       topBar: cloneJson(state.topBar),
       viewport: cloneJson(state.viewport),
+      scene: cloneJson(state.scene),
     };
+  }
 
-    leaveEditMode();
+  async function saveEdit() {
+    if (!grid || !canSaveEdit.value || isSavingEdit.value || !canEditTemplate.value) return;
+    if (pendingPointLocation.value || relocatingPointId.value || restoringPoint.value) {
+      errorMsg.value = '请先确认或取消当前选点';
+      return;
+    }
+    if (findDuplicateDeviceBindings(draftMapPoints.value).length) {
+      errorMsg.value = '同一设备在当前模板中存在重复点位，请先移除重复点位';
+      return;
+    }
+    errorMsg.value = '';
+    syncLayoutFromGrid();
+    const state = getEditorState();
+    const candidates = getChangedDeviceLocationPoints(state.mapPoints);
+    for (const point of candidates) {
+      if (
+        !Number.isFinite(point.longitude) ||
+        Math.abs(point.longitude) > 180 ||
+        !Number.isFinite(point.latitude) ||
+        Math.abs(point.latitude) > 90 ||
+        !Number.isFinite(point.height ?? 0) ||
+        point.heightMode === 'relativeToGround'
+      ) {
+        errorMsg.value = '“' + point.name + '”坐标无效或不是绝对高度，请重新选点';
+        return;
+      }
+      if (point.modelAnchor && cesiumMapRef.value?.getPointAnchorStatus(point) !== 'attached') {
+        errorMsg.value = '“' + point.name + '”关联模型尚不可用或已隐藏，请加载/显示模型或重新选点后保存';
+        return;
+      }
+    }
+    if (
+      !window.confirm(
+        '保存当前大屏布局与点位？将直接同步 ' +
+          candidates.length +
+          ' 个设备的经纬度和高度；当前排除 ' +
+          state.excludedDeviceIds.length +
+          ' 个设备（不删除设备、不修改被移除设备的坐标）。不备份旧坐标。',
+      )
+    )
+      return;
+
+    isSavingEdit.value = true;
+    grid.setStatic(true);
+    closeAllOverlays();
+    closeRemovedPoints();
+    saveFailures.value = [];
+    saveStatus.value = '正在保存模板目标位置……';
+    let templateSaved = false;
+    let result: DeviceLocationSyncResult | null = null;
+    try {
+      const dashboard = await getWritableDashboard();
+      const targetDashboardId = dashboard.id.id;
+      if (editorDisposed) throw new Error('编辑页已关闭');
+      const previous = normalizeMapTemplateState(dashboard.configuration?.[DASHBOARD_MAP_WIDGET_CONFIG_KEY]);
+      assertNoRemovedModelBindings(
+        getEffectiveSceneModels(previous.scene.models, previous.scene.globeOnly),
+        getEffectiveSceneModels(state.scene.models, state.scene.globeOnly),
+        state.mapPoints,
+      );
+      const pendingIds = new Set(candidates.map((point) => point.entityId));
+      state.mapPoints = state.mapPoints.map((point) =>
+        pendingIds.has(point.entityId) ? { ...point, deviceLocationSynced: false } : point,
+      );
+      // 先持久化目标与待同步标志；模板权限/写入失败时绝不写设备。
+      await persistEditorState(state, dashboard, false);
+      templateSaved = true;
+      adoptSavedState(state);
+      if (candidates.length) {
+        saveStatus.value = '模板已保存，正在同步设备坐标……';
+        result = await syncDeviceMapPointLocations(candidates);
+        saveFailures.value = result.failed;
+        const succeeded = new Set(result.succeeded);
+        const finalState = cloneJson(state);
+        finalState.mapPoints = finalState.mapPoints.map((point) =>
+          succeeded.has(point.entityId) ? { ...point, deviceLocationSynced: true } : point,
+        );
+        const latest = await getDashboardById(targetDashboardId);
+        await persistEditorState(finalState, latest, false);
+        adoptSavedState(finalState);
+      }
+      if (result?.failed.length) {
+        saveStatus.value =
+          '模板已保存；坐标同步成功 ' +
+          result.succeeded.length +
+          ' 个，失败 ' +
+          result.failed.length +
+          ' 个。可再次保存重试；刷新后待同步标志仍保留。取消编辑不会撤销已保存结果。';
+      } else {
+        saveStatus.value = '模板已保存，设备坐标同步完成（' + candidates.length + ' 个）。';
+        leaveEditMode();
+        void refreshTemplateRuntime();
+      }
+    } catch {
+      if (!templateSaved) {
+        errorMsg.value = '模板保存未确认成功，未执行设备坐标同步。草稿已保留，请检查权限/网络后重试。';
+        saveStatus.value = '';
+      } else {
+        saveStatus.value =
+          '模板目标已保存；' +
+          (result
+            ? '设备坐标成功 ' +
+              result.succeeded.length +
+              ' 个、失败 ' +
+              result.failed.length +
+              ' 个，但同步状态保存未确认成功。'
+            : '设备同步未完成。') +
+          '请再次保存重试，已保存的数据不会自动撤销。';
+        errorMsg.value = '保存未全部完成，待同步状态已保留。';
+      }
+    } finally {
+      isSavingEdit.value = false;
+      const editing = editorMode.value !== 'view';
+      grid?.setStatic(!editing);
+      grid?.enableMove(editing);
+      grid?.enableResize(editing);
+    }
   }
 
   async function handleControlSwitchSettingsSave() {
-    if (!currentWidget.value) return;
-    const key = currentWidget.value.widgetKey as LocalWidgetKey;
-    const id = currentWidget.value.id;
-    void mountWidget(id, key);
-    await persistEditorState();
+    if (!currentWidget.value || isSavingEdit.value || editorMode.value !== 'editing') return;
+    void mountWidget(currentWidget.value.id, currentWidget.value.widgetKey as LocalWidgetKey);
     selectedWidgetId.value = '';
     addPanelVisible.value = false;
   }
@@ -2501,20 +2902,11 @@
   }
 
   async function persistSensorPopupWidgets(widgetsForSensor: PopupWidgetConfig[]) {
-    if (!selectedSensor.value) return;
-
+    if (!selectedSensor.value || isSavingEdit.value || editorMode.value !== 'editing') return;
     draftSensorPopupBindings.value = {
       ...draftSensorPopupBindings.value,
       [selectedSensor.value.id]: cloneJson(widgetsForSensor),
     };
-
-    try {
-      const state = getEditorState();
-      await persistEditorState(state);
-      originalSensorPopupBindings.value = cloneJson(state.sensorPopupBindings);
-    } catch (error: any) {
-      errorMsg.value = error?.message || String(error);
-    }
   }
 
   async function handleSensorPopupChanged(widgetsForSensor: PopupWidgetConfig[]) {
@@ -2527,6 +2919,10 @@
   }
 
   function onSensorClick(sensor: SensorMapPoint) {
+    if (editorMode.value !== 'view') {
+      openPointActions(sensor);
+      return;
+    }
     selectedSensor.value = sensor;
     closeCameraPopup();
 
@@ -2569,6 +2965,10 @@
   }
 
   async function onCameraClick(camera: CameraMapPoint) {
+    if (editorMode.value !== 'view') {
+      openPointActions(camera);
+      return;
+    }
     selectedSensor.value = null;
     sensorPreviewVisible.value = false;
     sensorConfigVisible.value = false;
@@ -2642,24 +3042,52 @@
   }
 
   function onExit() {
+    if (isSavingEdit.value) return;
+    if (editorMode.value !== 'view') {
+      if (!window.confirm('放弃尚未保存的草稿并退出？已完成的保存和同步不会撤销。')) return;
+      cancelEdit();
+    }
     router.push(isDashboardTemplateMode.value ? '/dashboard/list' : '/desktop/dashboard');
   }
 
-  watch(
-    () => editorMode.value,
-    async (mode) => {
-      if (mode === 'pickingPoint') {
-        await nextTick();
-        pointEditor.start();
-        return;
-      }
+  function onPointEscape(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || isSavingEdit.value) return;
+    if (editorMode.value !== 'view' && editorMode.value !== 'editing') cancelPickingPoint();
+    else {
+      editPointId.value = '';
+      closeRemovedPoints();
+    }
+  }
 
-      pointEditor.stop();
-    },
-    { immediate: true },
-  );
+  function canLeaveEditor() {
+    if (isSavingEdit.value) return false;
+    if (editorMode.value === 'view') return true;
+    if (!window.confirm('放弃尚未保存的草稿并离开？已完成的保存和同步不会撤销。')) return false;
+    cancelEdit();
+    return true;
+  }
+
+  onBeforeRouteLeave(() => canLeaveEditor());
+  onBeforeRouteUpdate((to, from) => {
+    if (isSavingEdit.value) return false;
+    if (to.query.dashboardId !== from.query.dashboardId) {
+      if (!canLeaveEditor()) return false;
+      // 同组件更换模板使用完整重载，避免旧草稿与新的路由 ID 混用。
+      window.location.assign(router.resolve(to).href);
+      return false;
+    }
+    return true;
+  });
+
+  function onEditorBeforeUnload(event: BeforeUnloadEvent) {
+    if (editorMode.value === 'view' && !isSavingEdit.value) return;
+    event.preventDefault();
+    event.returnValue = '';
+  }
 
   onMounted(async () => {
+    window.addEventListener('keydown', onPointEscape);
+    window.addEventListener('beforeunload', onEditorBeforeUnload);
     if (!hasPermission(Authority.TENANT_ADMIN)) {
       await router.replace('/map-home');
       return;
@@ -2713,9 +3141,13 @@
   });
 
   onBeforeUnmount(() => {
+    editorDisposed = true;
     cameraRuntimeRequestId += 1;
     clearDragHint();
-    pointEditor.destroy();
+    clearPointPicking();
+    closeRemovedPoints();
+    window.removeEventListener('keydown', onPointEscape);
+    window.removeEventListener('beforeunload', onEditorBeforeUnload);
     gridEl.value?.removeEventListener('click', onGridClick, true);
     grid?.destroy(false);
     grid = null;
@@ -2725,6 +3157,64 @@
 </script>
 
 <style scoped>
+  .mw-point-panel,
+  .mw-save-status {
+    z-index: 25;
+    position: absolute;
+    z-index: 35;
+    max-width: min(560px, calc(100% - 32px));
+    padding: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    border-radius: 12px;
+    background: rgba(8, 20, 34, 0.96);
+    color: #e2e8f0;
+    line-height: 1.8;
+    box-shadow: 0 8px 32px #0006;
+  }
+
+  .mw-point-panel {
+    top: 76px;
+    left: 16px;
+  }
+  .mw-point-panel select {
+    color: #fff;
+    background: #13263b;
+    padding: 4px;
+  }
+  .mw-save-status {
+    bottom: 16px;
+    left: 16px;
+    max-height: 35%;
+    overflow: auto;
+  }
+  .mw-dialog-card.mw-removed-card {
+    width: min(640px, calc(100% - 32px));
+    max-height: 80%;
+    overflow: auto;
+  }
+  .mw-removed-entry {
+    padding: 12px 0;
+    border-bottom: 1px solid #64748b66;
+  }
+  .mw-removed-entry small {
+    display: block;
+    color: #fbbf24;
+  }
+  .mw-point-panel .mw-dialog-actions {
+    flex-wrap: wrap;
+  }
+  .mw-saving-mask {
+    position: absolute;
+    inset: 0;
+    z-index: 9999;
+    display: grid;
+    place-items: center;
+    background: rgba(3, 10, 20, 0.72);
+    color: white;
+    cursor: wait;
+    font-size: 18px;
+  }
+
   .mw-editor {
     position: relative;
     container: map-editor / size;

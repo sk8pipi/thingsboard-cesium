@@ -539,6 +539,13 @@ export function useMapPointEditor(options: UseMapPointEditorOptions) {
 
       cancelHoverPick();
       candidatePointId = getPointIdFromEntity(pickedEntity);
+      // 模型绑定必须走明确的表面重新定位，不允许旧地面拖动改变锚点。
+      if (getPointById(candidatePointId)?.modelAnchor) {
+        candidatePointId = '';
+        candidateEntity = null;
+        downPosition = null;
+        return;
+      }
       candidateEntity = pickedEntity;
       downPosition = movement.position;
       movedAfterDown = false;

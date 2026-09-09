@@ -1,25 +1,27 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-07",
+  "updatedAt": "2026-09-09",
   "tasks": [
     {
-      "taskId": "map-asset-hierarchy",
-      "name": "大屏资产层级选择",
+      "taskId": "map-model-anchor",
+      "name": "三维模型点位锚定",
       "status": "待人工提交",
       "owner": "主 Agent",
-      "taskDirectory": "docs/changes/map-asset-hierarchy",
+      "taskDirectory": "docs/changes/map-model-anchor",
       "worktree": ".",
       "fileScopes": [
-        "frontend/src/views/tb/map/MapHome.vue",
-        "frontend/src/views/tb/map/components/MapAssetSelector.vue",
-        "frontend/src/views/tb/map/services/mapAssetHierarchyService.ts",
-        "frontend/tests/mapAssetHierarchy.test.ts",
-        "frontend/tests/tsconfig.map-asset-hierarchy.json",
-        "docs/changes/map-asset-hierarchy",
+        "frontend/src/views/tb/map",
+        "frontend/tests",
+        "backend/application/src/main/java/org/thingsboard/server/service/map/MapTemplateRuntimeService.java",
+        "backend/application/src/test/java/org/thingsboard/server/service/map/MapTemplateRuntimeServiceTest.java",
+        "docs/ai/architecture-index.md",
+        "docs/ai/map-model-anchor-architecture.md",
+        "docs/changes/map-model-anchor",
+        "docs/changes/map-asset-hierarchy/delivery.md",
         "docs/changes/active-tasks.json"
       ],
       "sharedResources": [],
-      "lastUpdated": "2026-09-07"
+      "lastUpdated": "2026-09-09"
     }
   ]
 }

@@ -1,5 +1,6 @@
 import {
   getAttributes,
+  getAttributesByScope,
   getLatestTimeseries,
   saveEntityAttributesV2,
   type TsKvEntity,
@@ -9,6 +10,7 @@ import { getDeviceById, getDeviceInfoById, saveDevice, type DeviceInfo } from '/
 import { EntityType } from '/@/enums/entityTypeEnum';
 import { Scope } from '/@/enums/telemetryEnum';
 import type { CameraMapPoint, MapPoint, SensorMapPoint } from '../types/mapPointTypes';
+import { usesTemplatePosition } from './mapPointPositionService';
 
 export type DeviceNodeKind = 'sensor' | 'camera';
 export type DeviceMapPointStatus = {
@@ -307,7 +309,7 @@ export async function applyDeviceInfoMapPointLocations(
   concurrency = DEFAULT_CONCURRENCY,
 ): Promise<MapPoint[]> {
   const deviceIds = uniqueBy(
-    points.filter((point) => point.entityType === 'DEVICE' && Boolean(point.entityId)),
+    points.filter((point) => point.entityType === 'DEVICE' && Boolean(point.entityId) && !usesTemplatePosition(point)),
     (point) => point.entityId,
   ).map((point) => point.entityId);
 
@@ -323,6 +325,7 @@ export async function applyDeviceInfoMapPointLocations(
   const locationMap = new Map(locations);
 
   return points.map((point) => {
+    if (usesTemplatePosition(point)) return point;
     const location = locationMap.get(point.entityId);
     if (!location) return point;
 
@@ -371,7 +374,7 @@ function sameLocation(
 
 export async function saveDeviceMapPointLocations(points: MapPoint[], concurrency = DEFAULT_CONCURRENCY) {
   const devicePoints = uniqueBy(
-    points.filter((point) => point.entityType === 'DEVICE' && Boolean(point.entityId)),
+    points.filter((point) => point.entityType === 'DEVICE' && Boolean(point.entityId) && !usesTemplatePosition(point)),
     (point) => point.entityId,
   );
 
@@ -395,6 +398,71 @@ export async function saveDeviceMapPointLocations(points: MapPoint[], concurrenc
       console.warn('[deviceMapPointService] Failed to sync device location attributes:', point.entityId, error);
     }
   });
+}
+
+export type DeviceLocationSyncResult = {
+  succeeded: string[];
+  failed: { deviceId: string; name: string; message: string }[];
+};
+
+/** 仅供管理员确认保存后的统一选点流程使用。包含已解析的模型位置，不存历史坐标。 */
+export async function syncDeviceMapPointLocations(
+  points: MapPoint[],
+  concurrency = DEFAULT_CONCURRENCY,
+): Promise<DeviceLocationSyncResult> {
+  const devicePoints = uniqueBy(
+    points.filter((point) => point.entityType === 'DEVICE' && Boolean(point.entityId)),
+    (point) => point.entityId,
+  );
+  const results = await mapWithConcurrency(
+    devicePoints,
+    Math.max(1, Math.min(8, Math.floor(concurrency) || 1)),
+    async (point) => {
+      try {
+        if (
+          ![point.longitude, point.latitude, point.height ?? 0].every(Number.isFinite) ||
+          Math.abs(point.longitude) > 180 ||
+          Math.abs(point.latitude) > 90 ||
+          point.heightMode === 'relativeToGround'
+        )
+          throw new Error('请重新选点，设备位置必须是有效经纬度和绝对高度');
+        // 两次读均成功后再写；API 继续执行 ThingsBoard 的设备权限校验。
+        const device = await getDeviceById(point.entityId);
+        const attributes = kvListToObject(
+          await getAttributesByScope({ entityType: EntityType.DEVICE, id: point.entityId } as any, Scope.SERVER_SCOPE, {
+            keys: LOCATION_KEYS.join(','),
+          }),
+        );
+        const targetAttributes = buildLocationAttributes(point);
+        if (Object.entries(targetAttributes).some(([key, value]) => toNumber(device.additionalInfo?.[key]) !== value)) {
+          await saveDevice({
+            ...device,
+            additionalInfo: {
+              ...(device.additionalInfo || {}),
+              // 读取兼容 lat/lon/lng/height 等别名，必须一并更新，避免旧别名优先覆盖新坐标。
+              ...targetAttributes,
+            },
+          });
+        }
+        if (Object.entries(targetAttributes).some(([key, value]) => toNumber(attributes[key]) !== value)) {
+          // 不吞属性写失败：Device additionalInfo 成功但属性失败也属于待重试。
+          await saveDeviceServerLocationAttributes(point);
+        }
+        return { deviceId: point.entityId };
+      } catch {
+        // 不把后端原始错误正文（可能包含敏感信息）直接显示或写日志。
+        return {
+          deviceId: point.entityId,
+          name: point.name || point.entityId,
+          message: '设备位置同步失败，请检查设备权限、坐标及网络后重试；部分字段可能已更新',
+        };
+      }
+    },
+  );
+  return {
+    succeeded: results.filter((result) => !('message' in result)).map((result) => result.deviceId),
+    failed: results.filter((result): result is DeviceLocationSyncResult['failed'][number] => 'message' in result),
+  };
 }
 
 export async function loadDeviceMapPoints(options: DeviceMapPointLoadOptions): Promise<MapPoint[]> {

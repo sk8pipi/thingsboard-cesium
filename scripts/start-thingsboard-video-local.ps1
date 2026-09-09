@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$EnvironmentFile
+    [string]$EnvironmentFile,
+    [switch]$RebuildNativeUi
 )
 
 Set-StrictMode -Version Latest
@@ -87,6 +88,23 @@ Write-Host 'Credentials remain in the local ignored environment file and are not
 
 Push-Location $backendRoot
 try {
+    # spring-boot:run resolves ui-ngx from the local Maven repository, not its source directory.
+    $nativeUiIndex = Join-Path $backendRoot 'ui-ngx\target\generated-resources\public\index.html'
+    if ($RebuildNativeUi -or -not (Test-Path -LiteralPath $nativeUiIndex -PathType Leaf)) {
+        Write-Host 'Building and installing the ThingsBoard native UI for port 8080.'
+        & $mavenCommand.Source -pl ui-ngx -DskipTests install
+    }
+    else {
+        Write-Host 'Packaging and installing the existing native UI build (use -RebuildNativeUi after UI source changes).'
+        & $mavenCommand.Source -pl ui-ngx -DskipTests '-Dskip.yarn=true' '-Dskip.installyarn=true' install
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "ThingsBoard native UI build exited with code $LASTEXITCODE"
+    }
+    if (-not (Test-Path -LiteralPath $nativeUiIndex -PathType Leaf)) {
+        throw 'ThingsBoard native UI index.html is missing. Backend startup was stopped to avoid an empty UI.'
+    }
+
     Write-Host 'Building shared data and DAO modules required by the application.'
     & $mavenCommand.Source -pl 'common/data,dao' -DskipTests install
     if ($LASTEXITCODE -ne 0) {
