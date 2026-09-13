@@ -7,7 +7,7 @@
       </div>
     </div>
     <div class="device-type-donut__legend">
-      <div v-for="(item, index) in groups" :key="item.type" class="device-type-donut__legend-item">
+      <div v-for="(item, index) in groups" :key="item.id" class="device-type-donut__legend-item">
         <i :style="{ background: colorFor(index) }"></i>
         <span :title="item.type">{{ item.type }}</span>
         <strong>{{ item.total }}</strong>

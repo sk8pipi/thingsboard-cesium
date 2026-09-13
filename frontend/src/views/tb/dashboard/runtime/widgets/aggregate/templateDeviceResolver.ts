@@ -1,3 +1,4 @@
+import { readDeviceProfile } from '../../../../map/services/deviceProfilePresentation';
 import type { TemplateDeviceSelector } from './aggregateMetricTypes';
 
 export type TemplateRuntimeDevices = Record<string, Record<string, unknown>>;
@@ -10,6 +11,8 @@ export interface TemplatePointLike {
   name?: unknown;
   deviceCategory?: unknown;
   deviceProfile?: unknown;
+  deviceProfileId?: unknown;
+  deviceProfileName?: unknown;
   deviceType?: unknown;
   sensorType?: unknown;
   telemetryKeys?: unknown;
@@ -21,6 +24,7 @@ export interface TemplateDeviceBinding {
   deviceName?: string;
   deviceCategory?: string;
   deviceProfile?: string;
+  deviceProfileId?: string;
   deviceType?: string;
   pointType?: string;
   telemetryKeys: string[];
@@ -65,7 +69,9 @@ function matchesSelector(binding: TemplateDeviceBinding, selector: TemplateDevic
   if (selector.type === 'all-template-devices') return true;
   if (selector.type === 'explicit-devices') return selector.deviceIds.includes(binding.deviceId);
   if (selector.type === 'device-profile') {
-    return normalizeIdentity(binding.deviceProfile) === normalizeIdentity(selector.deviceProfile);
+    return selector.deviceProfileId
+      ? binding.deviceProfileId === selector.deviceProfileId
+      : normalizeIdentity(binding.deviceProfile) === normalizeIdentity(selector.deviceProfile);
   }
 
   const expected = normalizeIdentity(selector.deviceCategory);
@@ -103,8 +109,9 @@ export function resolveTemplateDevices(options: {
         deviceId,
         deviceName: optionalString(runtime.entityName, runtime.deviceName, point?.entityName, point?.name, deviceId),
         deviceCategory: optionalString(runtime.deviceCategory, point?.deviceCategory),
-        deviceProfile: optionalString(runtime.deviceProfile, runtime.deviceProfileName, point?.deviceProfile),
-        deviceType: optionalString(runtime.tbDeviceType, runtime.deviceType, point?.deviceType, point?.sensorType),
+        deviceProfile: readDeviceProfile(runtime, point).deviceProfileName || undefined,
+        deviceProfileId: readDeviceProfile(runtime, point).deviceProfileId || undefined,
+        deviceType: readDeviceProfile(runtime, point).deviceProfileName || undefined,
         pointType: optionalString(point?.type),
         telemetryKeys,
         runtime,

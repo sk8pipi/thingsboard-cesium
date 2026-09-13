@@ -1,3 +1,8 @@
+import {
+  readDeviceProfile,
+  defaultProfileRule,
+  hydrateProfilePoint,
+} from '../src/views/tb/map/services/deviceProfilePresentation';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -40,7 +45,17 @@ function compileFunctions(names: string[], globals: Record<string, any>) {
   return { api: context.result as Record<string, (...args: any[]) => any>, context };
 }
 
-for (const name of ['CesiumMap', 'MapWidgetEditor', 'MapWidgetLayer', 'MapHome', 'components/MapModelAnchorPanel']) {
+for (const name of [
+  'CesiumMap',
+  'MapWidgetEditor',
+  'MapWidgetLayer',
+  'MapHome',
+  'components/MapModelAnchorPanel',
+  'SelectDeviceDialog',
+  'SensorPopupWidgetEditor',
+  'SensorWidgetPopup',
+  'components/CameraMonitorPopup',
+]) {
   const filename = '../src/views/tb/map/' + name + '.vue';
   const { descriptor } = parse(fs.readFileSync(new URL(filename, import.meta.url), 'utf8'));
   const script = compileScript(descriptor, { id: name });
@@ -90,6 +105,14 @@ let canConfirm = true;
 let currentPick = true;
 let authRead: (id: string) => Promise<any> = async (id) => ({ id: { id }, name: '设备' });
 const globals: Record<string, any> = {
+  readDeviceProfile,
+  defaultProfileRule,
+  hydrateProfilePoint,
+  templateRuntimeDevices: ref({}),
+  effectiveProfileRules: ref({}),
+  templateDeviceProfileStyles: ref({}),
+  profileMigrationBackup: ref(undefined),
+  profileMigration: ref({ conflicts: [] }),
   editorMode: ref('editing'),
   isSavingEdit: ref(false),
   removedPointsLoading: ref(false),
@@ -257,14 +280,22 @@ authRead = async (id) => ({ id: { id }, name: '设备' });
 for (const type of ['sensor', 'camera']) {
   editor.startPickingPoint();
   editor.onMapPicked(ground);
-  globals.editorMode.value = type === 'sensor' ? 'configuringSensorPoint' : 'configuringCameraPoint';
-  await editor[type === 'sensor' ? 'onSensorPointConfigured' : 'onCameraPointConfigured']({
+  assert.equal(globals.editorMode.value, 'configuringSensorPoint', '新增直接选设备，不再人工选类别');
+  authRead = async (id) => ({
+    id: { id },
+    name: '设备',
+    deviceProfileId: { id: type + '-profile' },
+    deviceProfileName: type === 'camera' ? 'camera' : 'temperature',
+  });
+  await editor.onSensorPointConfigured({
     deviceId: type + '-new',
     deviceName: type,
     keys: ['temperature'],
     pollMs: 5000,
   });
   const point = globals.draftMapPoints.value.find((item: MapPoint) => item.entityId === type + '-new');
+  assert.equal(point.type, type, '根据真实设备配置自动分类');
+  assert.equal(point.deviceProfileId, type + '-profile');
   assert.equal(point.longitude, ground.longitude, '新增以地图选点为准，不用设备旧坐标');
   assert.equal(point.deviceLocationSynced, false);
 }

@@ -1,3 +1,4 @@
+import { readDeviceProfile } from './deviceProfilePresentation';
 import { getDeviceInfoById, type DeviceInfo } from '/@/api/tb/device';
 import { getVideoCameras, startVideoPlayback } from '/@/api/tb/video';
 import { findRelationInfoListByFrom, findRelationInfoListByTo, type EntityRelationInfo } from '/@/api/tb/relation';
@@ -307,6 +308,7 @@ export async function loadCameraRuntimeInfo(
     (rpcPayloadMode === 'gatewayTopic' && rpcTargetCameraId ? `camera/rpc/${rpcTargetCameraId}` : undefined);
 
   const runtimeInfo: CameraRuntimeInfo = {
+    ...readDeviceProfile(device),
     entityId: canonicalEntityId,
     entityName: toStringValue(device?.name) || normalizedEntityName || canonicalEntityId,
     cameraId: toStringValue(attributeState.cameraId),

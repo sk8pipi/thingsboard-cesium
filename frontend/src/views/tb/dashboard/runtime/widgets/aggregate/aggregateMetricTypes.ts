@@ -2,7 +2,7 @@ export type AggregateFunction = 'SUM' | 'AVG' | 'COUNT' | 'MIN' | 'MAX';
 
 export type TemplateDeviceSelector =
   | { type: 'device-category'; deviceCategory: string }
-  | { type: 'device-profile'; deviceProfile: string }
+  | { type: 'device-profile'; deviceProfile: string; deviceProfileId?: string }
   | { type: 'explicit-devices'; deviceIds: string[] }
   | { type: 'all-template-devices' };
 
@@ -108,7 +108,11 @@ function normalizeSelector(value: unknown): TemplateDeviceSelector {
     };
   }
   if (type === 'device-profile') {
-    return { type, deviceProfile: stringValue(raw.deviceProfile, '') };
+    return {
+      type,
+      deviceProfile: stringValue(raw.deviceProfile, ''),
+      deviceProfileId: stringValue(raw.deviceProfileId, '') || undefined,
+    };
   }
   if (type === 'all-template-devices') return { type };
   return {

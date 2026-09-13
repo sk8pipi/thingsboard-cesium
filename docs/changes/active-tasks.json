@@ -1,27 +1,27 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-09",
+  "updatedAt": "2026-09-12",
   "tasks": [
     {
-      "taskId": "map-model-anchor",
-      "name": "三维模型点位锚定",
+      "taskId": "map-device-profile",
+      "name": "按设备配置统一点位展示",
       "status": "待人工提交",
       "owner": "主 Agent",
-      "taskDirectory": "docs/changes/map-model-anchor",
+      "taskDirectory": "docs/changes/map-device-profile",
       "worktree": ".",
       "fileScopes": [
         "frontend/src/views/tb/map",
+        "frontend/src/views/tb/dashboard/runtime/widgets/aggregate",
         "frontend/tests",
-        "backend/application/src/main/java/org/thingsboard/server/service/map/MapTemplateRuntimeService.java",
-        "backend/application/src/test/java/org/thingsboard/server/service/map/MapTemplateRuntimeServiceTest.java",
-        "docs/ai/architecture-index.md",
-        "docs/ai/map-model-anchor-architecture.md",
-        "docs/changes/map-model-anchor",
-        "docs/changes/map-asset-hierarchy/delivery.md",
+        "backend/application/src/main/java/org/thingsboard/server/service/map",
+        "backend/application/src/test/java/org/thingsboard/server/service/map",
+        "docs/ai",
+        "docs/changes/map-device-profile",
+        "docs/changes/map-model-anchor/delivery.md",
         "docs/changes/active-tasks.json"
       ],
       "sharedResources": [],
-      "lastUpdated": "2026-09-09"
+      "lastUpdated": "2026-09-12"
     }
   ]
 }

@@ -12,6 +12,8 @@
 </template>
 
 <script setup lang="ts">
+  import { resolveProfilePointStyle, type DeviceProfileRules } from './services/deviceProfilePresentation';
+  import { createProfileBillboardCache } from './services/profileBillboardCache';
   import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
   import * as Cesium from 'cesium';
   import type { CameraMapPoint, MapPointLocation, MapPickedLocation, SensorMapPoint } from './types/mapPointTypes';
@@ -51,6 +53,7 @@
       sceneModels?: MapSceneModel[];
       enableSensorTypeStyles?: boolean;
       sensorTypeStylesIgnoreOffline?: boolean;
+      deviceProfileStyles?: DeviceProfileRules;
       sensorDeviceTypeStyles?: Record<string, SensorPointStyleOverride>;
       cameraStylesIgnoreOffline?: boolean;
       resolutionScale?: number;
@@ -69,6 +72,7 @@
       enableSensorTypeStyles: false,
       sensorTypeStylesIgnoreOffline: false,
       sensorDeviceTypeStyles: () => ({}),
+      deviceProfileStyles: () => ({}),
       cameraStylesIgnoreOffline: false,
       resolutionScale: 1,
       screenScale: 1,
@@ -142,28 +146,26 @@
     return resolveSensorDeviceType(point);
   }
 
-  function buildSensorBillboard(point: SensorMapPoint) {
-    if (!props.enableSensorTypeStyles) {
-      return buildCircleBillboard(getSensorColor(point));
-    }
-
-    const deviceType = getSensorDeviceType(point);
-    const deviceTypeOverride = props.sensorDeviceTypeStyles?.[normalizeDeviceTypeStyleKey(deviceType)];
-    const style = resolveSensorPointStyle({
-      deviceType,
-      pointId: point.id,
-      deviceId: point.entityId,
-      override: {
-        ...(deviceTypeOverride || {}),
-        ...(point.sensorStyleOverride || {}),
-      },
+  let profileImageFrame = 0;
+  const profileBillboards = createProfileBillboardCache(() => {
+    if (profileImageFrame) return;
+    profileImageFrame = requestAnimationFrame(() => {
+      profileImageFrame = 0;
+      if (viewer) {
+        void renderSensorPoints(props.sensorPoints);
+        void renderCameraPoints(props.cameraPoints);
+      }
     });
-
-    return buildSensorPointBillboard(style, props.sensorTypeStylesIgnoreOffline || !isOfflinePoint(point));
+  });
+  function buildSensorBillboard(point: SensorMapPoint) {
+    return profileBillboards.get(
+      resolveProfilePointStyle(point, props.deviceProfileStyles),
+      props.sensorTypeStylesIgnoreOffline || !isOfflinePoint(point),
+    );
   }
 
   function getSensorBillboardSize() {
-    return props.enableSensorTypeStyles ? 38 : 20;
+    return 38;
   }
 
   function getPointScreenScale() {
@@ -185,25 +187,9 @@
   }
 
   function buildCameraBillboard(point: CameraMapPoint) {
-    const resolvedColor = getCameraColor(point);
-    return (
-      'data:image/svg+xml;utf8,' +
-      encodeURIComponent(`
-        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-          <defs>
-            <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
-              <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000000" flood-opacity="0.28"/>
-            </filter>
-          </defs>
-          <g filter="url(#shadow)">
-            <circle cx="32" cy="32" r="25" fill="${resolvedColor}"/>
-          </g>
-          <svg x="15" y="15" width="34" height="34" viewBox="0 0 1024 1024">
-            <path d="M907.712 642.592l-2.624-302.592-204.256 145.056 206.88 157.536z m-39.68-354.784a64 64 0 0 1 101.056 51.648l2.624 302.592a64 64 0 0 1-102.752 51.456l-206.912-157.536a64 64 0 0 1 1.728-103.104l204.256-145.056z" fill="#111827"/>
-            <path d="M144 256a32 32 0 0 0-32 32v417.376a32 32 0 0 0 32 32h456.32a32 32 0 0 0 32-32V288a32 32 0 0 0-32-32H144z m0-64h456.32a96 96 0 0 1 96 96v417.376a96 96 0 0 1-96 96H144a96 96 0 0 1-96-96V288a96 96 0 0 1 96-96z" fill="#111827"/>
-          </svg>
-        </svg>
-      `)
+    return profileBillboards.get(
+      resolveProfilePointStyle(point, props.deviceProfileStyles),
+      props.cameraStylesIgnoreOffline || !isOfflinePoint(point),
     );
   }
 
@@ -503,16 +489,41 @@
     );
   }
 
+  const sensorRenderKeys = new Map<string, string>();
   async function renderSensorPoints(points: SensorMapPoint[]) {
     if (!sensorDataSource) return;
 
     const renderVersion = ++sensorRenderVersion;
-    const uniquePoints = uniquePointsById(points);
-    sensorDataSource.entities.removeAll();
+    const allPoints = uniquePointsById(points);
+    const wanted = new Set(allPoints.map((point) => point.id));
+    for (const entity of [...sensorDataSource.entities.values])
+      if (!wanted.has(entity.id)) {
+        sensorDataSource.entities.removeById(entity.id);
+        sensorRenderKeys.delete(entity.id);
+      }
+    const keys = new Map(
+      allPoints.map((point) => [
+        point.id,
+        JSON.stringify([
+          getResolvedPointLocation(point),
+          point.modelAnchor,
+          pointIsVisible(point),
+          point.name,
+          point.online,
+          point.statusText,
+          getPointLabelText(point),
+          buildSensorBillboard(point),
+        ]),
+      ]),
+    );
+    const uniquePoints = allPoints.filter(
+      (point) => sensorRenderKeys.get(point.id) !== keys.get(point.id) || !sensorDataSource?.entities.getById(point.id),
+    );
     const positions = await resolvePositions(uniquePoints.map(getResolvedPointLocation), 2);
     if (renderVersion !== sensorRenderVersion || !sensorDataSource) return;
 
     uniquePoints.forEach((point, index) => {
+      sensorRenderKeys.set(point.id, keys.get(point.id)!);
       sensorDataSource?.entities.removeById(point.id);
       sensorDataSource?.entities.add({
         id: point.id,
@@ -565,18 +576,44 @@
         },
       });
     });
+    viewer?.scene.requestRender();
   }
 
+  const cameraRenderKeys = new Map<string, string>();
   async function renderCameraPoints(points: CameraMapPoint[]) {
     if (!cameraDataSource) return;
 
     const renderVersion = ++cameraRenderVersion;
-    const uniquePoints = uniquePointsById(points);
-    cameraDataSource.entities.removeAll();
+    const allPoints = uniquePointsById(points);
+    const wanted = new Set(allPoints.map((point) => point.id));
+    for (const entity of [...cameraDataSource.entities.values])
+      if (!wanted.has(entity.id)) {
+        cameraDataSource.entities.removeById(entity.id);
+        cameraRenderKeys.delete(entity.id);
+      }
+    const keys = new Map(
+      allPoints.map((point) => [
+        point.id,
+        JSON.stringify([
+          getResolvedPointLocation(point),
+          point.modelAnchor,
+          pointIsVisible(point),
+          point.name,
+          point.online,
+          point.statusText,
+          getPointLabelText(point),
+          buildCameraBillboard(point),
+        ]),
+      ]),
+    );
+    const uniquePoints = allPoints.filter(
+      (point) => cameraRenderKeys.get(point.id) !== keys.get(point.id) || !cameraDataSource?.entities.getById(point.id),
+    );
     const positions = await resolvePositions(uniquePoints.map(getResolvedPointLocation), 3);
     if (renderVersion !== cameraRenderVersion || !cameraDataSource) return;
 
     uniquePoints.forEach((point, index) => {
+      cameraRenderKeys.set(point.id, keys.get(point.id)!);
       cameraDataSource?.entities.removeById(point.id);
       cameraDataSource?.entities.add({
         id: point.id,
@@ -626,6 +663,7 @@
         },
       });
     });
+    viewer?.scene.requestRender();
   }
 
   function flyToPoint(point: AnchoredLocation) {
@@ -1010,11 +1048,12 @@
     () => [
       props.enableSensorTypeStyles,
       props.sensorTypeStylesIgnoreOffline,
-      JSON.stringify(props.sensorDeviceTypeStyles || {}),
+      JSON.stringify(props.deviceProfileStyles || {}),
     ],
     async () => {
       if (!viewer) return;
       await renderSensorPoints(props.sensorPoints || []);
+      await renderCameraPoints(props.cameraPoints || []);
       applyBasePointVisibility();
     },
   );
@@ -1053,6 +1092,8 @@
   watch(() => props.pickModelId, clearPickPreview);
 
   onBeforeUnmount(() => {
+    profileBillboards.dispose();
+    if (profileImageFrame) cancelAnimationFrame(profileImageFrame);
     ++modelLoadVersion;
     ++sensorRenderVersion;
     ++cameraRenderVersion;

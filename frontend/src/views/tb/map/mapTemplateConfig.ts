@@ -1,3 +1,4 @@
+import type { DeviceProfileRules } from './services/deviceProfilePresentation';
 import type { CSSProperties } from 'vue';
 import type { GridItem, WidgetAppearance } from '../dashboard/runtime/types';
 import type { SensorPopupBinding } from './sensorPopupWidgetStorage';
@@ -15,6 +16,8 @@ export function toMapBusinessBinding(point: TemplatePointLike): TemplatePointLik
     type: point.type,
     deviceCategory: point.deviceCategory,
     deviceProfile: point.deviceProfile,
+    deviceProfileId: point.deviceProfileId,
+    deviceProfileName: point.deviceProfileName,
     deviceType: point.deviceType,
     sensorType: point.sensorType,
     telemetryKeys: point.telemetryKeys,
@@ -239,6 +242,8 @@ export type MapTemplateState = {
   excludedDeviceBindings: Record<string, TemplatePointLike>;
   sensorPopupBindings: SensorPopupBinding;
   sensorDeviceTypeStyles: SensorDeviceTypeStyles;
+  deviceProfileStyles: DeviceProfileRules;
+  profileMigrationBackup?: Record<string, any>;
   appearance: MapTemplateAppearance;
   topBar: MapTopBarConfig;
   viewport: MapTemplateViewport;
@@ -260,6 +265,7 @@ export function createDefaultMapTemplateState(): MapTemplateState {
     excludedDeviceBindings: {},
     sensorPopupBindings: {},
     sensorDeviceTypeStyles: {},
+    deviceProfileStyles: {},
     appearance: { ...DEFAULT_MAP_TEMPLATE_APPEARANCE },
     topBar: createDefaultMapTopBarConfig(),
     viewport: { ...DEFAULT_MAP_TEMPLATE_VIEWPORT },
@@ -353,6 +359,9 @@ export function normalizeMapTemplateState(state?: Partial<MapTemplateState> | nu
       ]),
     ),
     sensorDeviceTypeStyles: normalizeSensorDeviceTypeStyles(state?.sensorDeviceTypeStyles),
+    deviceProfileStyles:
+      state?.deviceProfileStyles && typeof state.deviceProfileStyles === 'object' ? state.deviceProfileStyles : {},
+    profileMigrationBackup: state?.profileMigrationBackup,
     appearance: {
       ...fallback.appearance,
       ...(state?.appearance || {}),

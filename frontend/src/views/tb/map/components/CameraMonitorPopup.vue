@@ -50,6 +50,7 @@
       </div>
 
       <div class="camera-monitor-popup__meta">
+        <span>类型（设备配置）: {{ profileLabel(profileSource || runtimeInfo) }}</span>
         <span>播放协议: {{ runtimeInfo?.playbackProtocol || runtimeInfo?.streamType || '-' }}</span>
         <span>直播会话: {{ runtimeInfo?.playbackSessionId ? '已建立' : '未建立' }}</span>
       </div>
@@ -96,6 +97,7 @@
 </template>
 
 <script setup lang="ts">
+  import { profileLabel } from '../services/deviceProfilePresentation';
   import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
   import Hls from 'hls.js';
   import CameraVideoOperations from './CameraVideoOperations.vue';
@@ -108,6 +110,7 @@
   import type { CameraRuntimeInfo } from '../types/mapPointTypes';
 
   const props = defineProps<{
+    profileSource?: Record<string, any> | null;
     visible: boolean;
     runtimeInfo?: CameraRuntimeInfo | null;
     loading?: boolean;

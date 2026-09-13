@@ -19,9 +19,9 @@
       :visible="sensorPointDialogVisible"
       :require-keys="false"
       :device-bindings="pointDeviceBindings"
-      title="配置传感器点位"
+      title="选择点位设备"
       ok-text="保存点位"
-      detail-hint="传感器点位只绑定 ThingsBoard Device，不需要选择 key。保存点位后可点击点位继续配置弹窗数据 key。"
+      detail-hint="根据设备配置自动选择图标与详情方式。确认后进入草稿，页面保存后才同步位置。"
       @cancel="cancelPointConfig"
       @ok="onSensorPointConfigured"
     />
@@ -121,7 +121,7 @@
         :globe-only="templateGlobeOnly"
         :scene-models="templateScene.models"
         :enable-sensor-type-styles="true"
-        :sensor-device-type-styles="templateSensorDeviceTypeStyles"
+        :device-profile-styles="effectiveProfileRules"
         :sensor-type-styles-ignore-offline="true"
         :camera-styles-ignore-offline="true"
         :resolution-scale="mapScreen.metrics.value.cesiumResolutionScale"
@@ -135,7 +135,7 @@
 
       <div v-if="selectedEditPoint && editorMode === 'editing'" class="mw-point-panel">
         <strong>{{ selectedEditPoint.name }}</strong>
-        <div>{{ selectedEditPoint.type === 'camera' ? '监控点位' : '传感器点位' }}</div>
+        <div>{{ profileLabel(templateRuntimeDevices[selectedEditPoint.entityId], selectedEditPoint) }}</div>
         <div>{{ locationDescription(selectedEditPoint) }}</div>
         <div
           >经度 {{ formatCoordinate(editPointLocation?.longitude) }}，纬度
@@ -238,7 +238,7 @@
         <div class="mw-sensor-style-header">
           <div>
             <strong>点位样式</strong>
-            <span>单点自定义优先于客户端属性 deviceType 的自动样式</span>
+            <span>单点自定义优先于当前大屏的设备配置样式，未设置字段继续继承</span>
           </div>
           <button class="mw-panel-close" type="button" @click="sensorStylePanelVisible = false">关闭</button>
         </div>
@@ -268,18 +268,29 @@
               ensureSelectedSensorDeviceType();
             "
           >
-            按 deviceType 配置
+            按设备配置
           </button>
         </div>
 
+        <div v-for="conflict in profileMigration.conflicts" :key="conflict.profileId" class="mw-sensor-style-error">
+          {{ conflict.profileName }} 对应多个旧样式，请选择要保留的样式：
+          <button
+            v-for="key in conflict.legacyKeys"
+            :key="key"
+            type="button"
+            @click="resolveMigrationConflict(conflict.profileId, key)"
+            >{{ key }}</button
+          >
+          <button type="button" @click="resolveMigrationConflict(conflict.profileId, '')">使用默认样式</button>
+        </div>
         <div v-if="sensorStyleError" class="mw-sensor-style-error">{{ sensorStyleError }}</div>
-        <div v-if="sensorStyleLoading" class="mw-sensor-style-state">正在读取传感器 deviceType...</div>
+        <div v-if="sensorStyleLoading" class="mw-sensor-style-state">正在读取设备配置...</div>
 
         <div v-else-if="sensorStyleTab === 'type' && !sensorDeviceTypeOptions.length" class="mw-sensor-style-state">
-          当前模板还没有传感器点位。
+          当前模板还没有设备点位。
         </div>
         <div v-else-if="sensorStyleTab === 'point' && !sensorPointOptions.length" class="mw-sensor-style-state">
-          当前模板还没有传感器点位。
+          当前模板还没有设备点位。
         </div>
 
         <div v-else class="mw-sensor-style-content" :class="{ 'is-point-tab': sensorStyleTab === 'point' }">
@@ -299,7 +310,7 @@
 
           <div v-else class="mw-sensor-type-list">
             <label class="mw-sensor-point-search">
-              <input v-model.trim="sensorPointSearch" type="search" placeholder="搜索传感器名称" />
+              <input v-model.trim="sensorPointSearch" type="search" placeholder="搜索设备名称或设备配置" />
             </label>
             <button
               v-for="point in filteredSensorPointOptions"
@@ -317,11 +328,39 @@
 
           <div class="mw-sensor-style-form">
             <div class="mw-sensor-style-selected">
-              <span>{{ sensorStyleTab === 'point' ? '当前点位' : '当前类型' }}</span>
+              <span>{{ sensorStyleTab === 'point' ? '当前点位' : '当前设备配置' }}</span>
               <strong>{{ selectedSensorStyleTargetLabel || '未选择' }}</strong>
               <small>{{ selectedSensorStylePriority }}</small>
             </div>
 
+            <label v-if="sensorStyleTab === 'type'" class="mw-sensor-style-field">
+              <span>详情展示方式（每个配置设置一次）</span>
+              <select v-model="selectedProfileKind" :disabled="!hasSelectedSensorStyleTarget"
+                ><option value="sensor">设备数据详情</option
+                ><option value="camera">监控视频详情</option></select
+              >
+              <small>视频播放仍需要有效的视频绑定与访问权限。</small>
+            </label>
+            <label v-if="sensorStyleTab === 'type'" class="mw-sensor-style-field">
+              <span>内置备用图标</span>
+              <select v-model="selectedProfilePreset" :disabled="!hasSelectedSensorStyleTarget"
+                ><option
+                  v-for="preset in [
+                    'temperature',
+                    'humidity',
+                    'electricity_consumption',
+                    'noise',
+                    'illuminance',
+                    'water_consumption',
+                    'camera',
+                    'default',
+                  ]"
+                  :key="preset"
+                  :value="preset"
+                  >{{ profilePresetLabels[preset] }}</option
+                ></select
+              >
+            </label>
             <label class="mw-sensor-style-field">
               <span>在线颜色</span>
               <input v-model="selectedSensorStyleColor" type="color" :disabled="!hasSelectedSensorStyleTarget" />
@@ -369,13 +408,16 @@
             </div>
 
             <div class="mw-sensor-style-actions">
+              <button v-if="profileMigrationBackup" class="mw-btn" type="button" @click="downloadProfileMigrationBackup"
+                >下载迁移前模板</button
+              >
               <button
                 class="mw-btn"
                 type="button"
                 :disabled="!hasSelectedSensorStyleTarget"
                 @click="resetSelectedSensorStyle"
               >
-                {{ sensorStyleTab === 'point' ? '恢复自动样式' : '重置该类型' }}
+                {{ sensorStyleTab === 'point' ? '恢复自动样式' : '重置该配置样式' }}
               </button>
               <button class="mw-btn primary" type="button" @click="confirmSensorStylePanel">确认</button>
             </div>
@@ -457,9 +499,7 @@
 
       <div v-if="pointTypeDialogVisible" class="mw-dialog-mask" @click.self="cancelPointTypeSelection">
         <div class="mw-dialog-card">
-          <div class="mw-dialog-title">{{
-            relocatingPointId || restoringPoint ? '确认新的点位位置' : '选择点位类型'
-          }}</div>
+          <div class="mw-dialog-title">确认新的点位位置</div>
           <div class="mw-dialog-sub">{{ pendingPointLocation ? locationDescription(pendingPointLocation) : '' }}</div>
           <div class="mw-dialog-sub">
             经度 {{ formatCoordinate(pendingPointLocation?.longitude) }}，纬度
@@ -474,10 +514,6 @@
               @click="confirmPointLocation"
               >确认位置</button
             >
-            <template v-else>
-              <button class="mw-btn primary" type="button" @click="choosePointType('sensor')">传感器点位</button>
-              <button class="mw-btn primary" type="button" @click="choosePointType('camera')">监控点位</button>
-            </template>
             <button class="mw-btn" type="button" @click="retryPickingPoint">重新选点</button>
             <button class="mw-btn" type="button" @click="cancelPointTypeSelection">取消</button>
           </div>
@@ -487,7 +523,15 @@
       <SensorPopupWidgetEditor
         :runtime="datasourceRuntime"
         :visible="sensorConfigVisible"
-        :sensor="selectedSensor"
+        :sensor="
+          selectedSensor
+            ? hydrateProfilePoint(
+                selectedSensor,
+                templateRuntimeDevices[selectedSensor.entityId],
+                effectiveProfileRules,
+              )
+            : null
+        "
         :widgets="selectedSensor ? getSensorPopupWidgetsForEditor(selectedSensor.id) : []"
         @changed="handleSensorPopupChanged"
         @close="sensorConfigVisible = false"
@@ -497,7 +541,15 @@
       <SensorWidgetPopup
         :runtime="datasourceRuntime"
         :visible="sensorPreviewVisible"
-        :sensor="selectedSensor"
+        :sensor="
+          selectedSensor
+            ? hydrateProfilePoint(
+                selectedSensor,
+                templateRuntimeDevices[selectedSensor.entityId],
+                effectiveProfileRules,
+              )
+            : null
+        "
         :widgets="selectedSensor ? getSensorPopupWidgetsForView(selectedSensor.id) : []"
         :runtime-devices="templateRuntimeDevices"
         @close="sensorPreviewVisible = false"
@@ -506,6 +558,7 @@
       <CameraMonitorPopup
         :visible="cameraPopupVisible"
         :runtime-info="selectedCameraRuntime"
+        :profile-source="templateRuntimeDevices[selectedCameraRuntime?.entityId || ''] || selectedCameraPoint"
         :loading="cameraRuntimeLoading"
         :error="cameraRuntimeError"
         @close="closeCameraPopup"
@@ -618,6 +671,20 @@
 </template>
 
 <script setup lang="ts">
+  import { createProfileBillboardCache } from './services/profileBillboardCache';
+  import { subscribeAssignedMapTemplateRuntimeEvents } from './services/mapTemplateRuntimeService';
+  import {
+    readDeviceProfile,
+    profileKey,
+    profileLabel,
+    hydrateProfilePoint,
+    resolveProfilePointStyle,
+    defaultProfileRule,
+    migrateProfileRules,
+    UNKNOWN_PROFILE,
+    type DeviceProfileRules,
+    type DeviceProfileRule,
+  } from './services/deviceProfilePresentation';
   import { computed, createApp, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
   import { getAttributesByScope, getTimeseriesKeys } from '/@/api/tb/telemetry';
   import { getTenantAssetInfoList } from '/@/api/tb/asset';
@@ -743,7 +810,7 @@
     layout: GridItem[];
     widgets: Record<string, WidgetData>;
     appearance: WidgetAppearance;
-    sensorDeviceTypeStyles: SensorDeviceTypeStyles;
+    deviceProfileStyles: DeviceProfileRules;
     topBar: MapTopBarConfig;
     viewport: MapTemplateViewport;
   };
@@ -874,7 +941,18 @@
   const dashboardTemplate = ref<Dashboard | null>(null);
   const templateScene = ref<MapTemplateScene>(createDefaultMapTemplateState().scene);
   const templateAppearance = ref<MapTemplateAppearance>({ ...createDefaultMapTemplateState().appearance });
-  const templateSensorDeviceTypeStyles = ref<SensorDeviceTypeStyles>({});
+  const templateDeviceProfileStyles = ref<DeviceProfileRules>({});
+  const legacyTypeStyles = ref<SensorDeviceTypeStyles>({});
+  const profileMigrationBackup = ref<Record<string, any>>();
+  const profileMigration = computed(() =>
+    migrateProfileRules(
+      draftMapPoints.value,
+      templateRuntimeDevices.value,
+      templateDeviceProfileStyles.value,
+      legacyTypeStyles.value,
+    ),
+  );
+  const effectiveProfileRules = computed(() => profileMigration.value.rules);
   const templateTopBar = ref<MapTopBarConfig>(createDefaultMapTopBarConfig());
   const templateViewport = ref<MapTemplateViewport>({ ...DEFAULT_MAP_TEMPLATE_VIEWPORT });
   const appearancePanelVisible = ref(false);
@@ -965,7 +1043,12 @@
       editorMode.value === 'view' ? originalExcludedDeviceIds.value : draftExcludedDeviceIds.value,
     ),
   );
-  const selectedEditPoint = computed(() => draftMapPoints.value.find((point) => point.id === editPointId.value));
+  const selectedEditPoint = computed(() => {
+    const point = draftMapPoints.value.find((item) => item.id === editPointId.value);
+    return point
+      ? hydrateProfilePoint(point, templateRuntimeDevices.value[point.entityId], effectiveProfileRules.value)
+      : undefined;
+  });
   const editPointLocation = computed(() =>
     selectedEditPoint.value
       ? cesiumMapRef.value?.getResolvedPointLocation(selectedEditPoint.value) || selectedEditPoint.value
@@ -976,303 +1059,218 @@
       .map(toDevicePointBinding)
       .filter((binding): binding is DevicePointBindingInfo => Boolean(binding)),
   );
+  const presentationPoints = computed(() =>
+    activeMapPoints.value.map((point) =>
+      hydrateProfilePoint(point, templateRuntimeDevices.value[point.entityId], effectiveProfileRules.value),
+    ),
+  );
   const sensorPoints = computed(() =>
-    activeMapPoints.value
-      .filter((point): point is SensorMapPoint => point.type === 'sensor')
-      .map((point) => {
-        const deviceType = getSensorPointDeviceType(point);
-        return deviceType === resolveSensorDeviceType(point) ? point : { ...point, deviceType };
-      }),
+    presentationPoints.value.filter((point): point is SensorMapPoint => point.type === 'sensor'),
   );
   const cameraPoints = computed(() =>
-    activeMapPoints.value.filter((point): point is CameraMapPoint => point.type === 'camera'),
+    presentationPoints.value.filter((point): point is CameraMapPoint => point.type === 'camera'),
   );
-  function getSensorPointDeviceType(point: SensorMapPoint) {
-    const runtimeDevice = templateRuntimeDevices.value[point.entityId];
-    const clientDeviceType = extractAttributeValue(runtimeDevice?.deviceType);
-    return clientDeviceType || resolveSensorDeviceType(point);
+  function getSensorPointDeviceType(point: MapPoint) {
+    return profileKey(readDeviceProfile(templateRuntimeDevices.value[point.entityId], point));
   }
-
-  function getSensorDeviceTypeLabel(key: string, sampleLabel?: string) {
-    return key === UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY ? '未知 / 未设置 deviceType' : sampleLabel || key;
-  }
-
   const sensorDeviceTypeOptions = computed<SensorDeviceTypeOption[]>(() => {
-    const optionMap = new Map<string, SensorDeviceTypeOption>();
-
-    draftMapPoints.value
-      .filter((point): point is SensorMapPoint => point.type === 'sensor')
-      .forEach((point) => {
-        const rawType = getSensorPointDeviceType(point);
-        const key = normalizeDeviceTypeStyleKey(rawType);
-        const current = optionMap.get(key);
-        if (current) {
-          current.count += 1;
-          return;
-        }
-        optionMap.set(key, {
-          key,
-          label: getSensorDeviceTypeLabel(key, rawType),
-          count: 1,
-        });
-      });
-
-    Object.keys(templateSensorDeviceTypeStyles.value || {}).forEach((key) => {
-      const normalizedKey = normalizeDeviceTypeStyleKey(key);
-      if (!optionMap.has(normalizedKey)) {
-        optionMap.set(normalizedKey, {
-          key: normalizedKey,
-          label: getSensorDeviceTypeLabel(normalizedKey, key),
-          count: 0,
-        });
-      }
-    });
-
-    return Array.from(optionMap.values()).sort((left, right) => {
-      if (left.key === UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY) return 1;
-      if (right.key === UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY) return -1;
-      if (right.count !== left.count) return right.count - left.count;
-      return left.label.localeCompare(right.label);
-    });
+    const options = new Map<string, SensorDeviceTypeOption>();
+    for (const point of draftMapPoints.value) {
+      const profile = readDeviceProfile(templateRuntimeDevices.value[point.entityId], point);
+      const key = profileKey(profile);
+      const current = options.get(key);
+      if (current) current.count++;
+      else options.set(key, { key, label: profileLabel(profile), count: 1 });
+    }
+    for (const [key, rule] of Object.entries(templateDeviceProfileStyles.value))
+      if (!options.has(key)) options.set(key, { key, label: rule.profileName || '暂未使用的设备配置', count: 0 });
+    return [...options.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
   });
-
   const sensorPointOptions = computed<SensorPointStyleOption[]>(() =>
-    draftMapPoints.value
-      .filter((point): point is SensorMapPoint => point.type === 'sensor')
-      .map((point) => ({
-        id: point.id,
-        name: point.name || point.entityName || point.entityId,
-        deviceTypeLabel: getSensorDeviceTypeLabel(
-          normalizeDeviceTypeStyleKey(getSensorPointDeviceType(point)),
-          getSensorPointDeviceType(point),
-        ),
-        customized: Boolean(point.sensorStyleOverride && Object.keys(point.sensorStyleOverride).length),
-      }))
-      .sort((left, right) => left.name.localeCompare(right.name)),
+    draftMapPoints.value.map((point) => ({
+      id: point.id,
+      name: point.name || point.entityName,
+      deviceTypeLabel: profileLabel(templateRuntimeDevices.value[point.entityId], point),
+      customized: Boolean(Object.keys(point.pointStyleOverride || point.sensorStyleOverride || {}).length),
+    })),
   );
-
-  const filteredSensorPointOptions = computed(() => {
-    const keyword = sensorPointSearch.value.trim().toLowerCase();
-    if (!keyword) return sensorPointOptions.value;
-    return sensorPointOptions.value.filter((point) => {
-      return `${point.name} ${point.deviceTypeLabel}`.toLowerCase().includes(keyword);
-    });
-  });
-
+  const filteredSensorPointOptions = computed(() =>
+    sensorPointOptions.value.filter((point) =>
+      `${point.name} ${point.deviceTypeLabel}`.toLowerCase().includes(sensorPointSearch.value.trim().toLowerCase()),
+    ),
+  );
   const selectedSensorDeviceTypeOption = computed(() =>
     sensorDeviceTypeOptions.value.find((item) => item.key === selectedSensorDeviceTypeKey.value),
   );
   const selectedSensorPoint = computed(() =>
-    draftMapPoints.value.find(
-      (point): point is SensorMapPoint => point.type === 'sensor' && point.id === selectedSensorPointId.value,
-    ),
+    draftMapPoints.value.find((point) => point.id === selectedSensorPointId.value),
   );
-  const selectedSensorDeviceTypeStyle = computed<SensorPointStyleOverride>(() =>
-    selectedSensorDeviceTypeKey.value
-      ? templateSensorDeviceTypeStyles.value[selectedSensorDeviceTypeKey.value] || {}
-      : {},
+  const selectedSensorDeviceTypeStyle = computed<DeviceProfileRule>(
+    () => effectiveProfileRules.value[selectedSensorDeviceTypeKey.value] || {},
   );
   const selectedSensorPointStyle = computed<SensorPointStyleOverride>(
-    () => selectedSensorPoint.value?.sensorStyleOverride || {},
+    () => selectedSensorPoint.value?.pointStyleOverride || selectedSensorPoint.value?.sensorStyleOverride || {},
   );
-  const selectedSensorStyle = computed<SensorPointStyleOverride>(() =>
+  const selectedSensorStyle = computed(() =>
     sensorStyleTab.value === 'point' ? selectedSensorPointStyle.value : selectedSensorDeviceTypeStyle.value,
   );
   const hasSelectedSensorStyleTarget = computed(() =>
-    sensorStyleTab.value === 'point' ? Boolean(selectedSensorPoint.value) : Boolean(selectedSensorDeviceTypeKey.value),
+    sensorStyleTab.value === 'point'
+      ? Boolean(selectedSensorPoint.value)
+      : Boolean(selectedSensorDeviceTypeKey.value && selectedSensorDeviceTypeKey.value !== UNKNOWN_PROFILE),
   );
   const selectedSensorStyleTargetLabel = computed(() =>
     sensorStyleTab.value === 'point'
-      ? selectedSensorPoint.value?.name || selectedSensorPoint.value?.entityName || ''
+      ? selectedSensorPoint.value?.name || ''
       : selectedSensorDeviceTypeOption.value?.label || '',
   );
-  const selectedSensorStylePriority = computed(() => {
-    if (sensorStyleTab.value === 'point') {
-      return Object.keys(selectedSensorPointStyle.value).length ? '单点手动样式' : '按 deviceType 自动样式';
-    }
-    if (Object.keys(selectedSensorDeviceTypeStyle.value).length) return 'deviceType 分类自定义';
-    return selectedSensorDeviceTypeKey.value === UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY ? '系统默认样式' : '内置自动样式';
-  });
-  const selectedSensorStyleScopeNames = computed(() => {
-    if (sensorStyleTab.value === 'point') {
-      return selectedSensorStyleTargetLabel.value ? [selectedSensorStyleTargetLabel.value] : [];
-    }
-    const key = selectedSensorDeviceTypeKey.value;
-    return sensorPointOptions.value
-      .filter((point) => {
-        const sourcePoint = draftMapPoints.value.find((item) => item.id === point.id) as SensorMapPoint | undefined;
-        return sourcePoint && normalizeDeviceTypeStyleKey(getSensorPointDeviceType(sourcePoint)) === key;
-      })
-      .map((point) => point.name);
-  });
-
+  const selectedSensorStylePriority = computed(() =>
+    sensorStyleTab.value === 'point' && Object.keys(selectedSensorPointStyle.value).length
+      ? '单点自定义（其余字段继承设备配置）'
+      : '按设备配置继承样式',
+  );
+  const selectedSensorStyleScopeNames = computed(() =>
+    sensorStyleTab.value === 'point'
+      ? [selectedSensorStyleTargetLabel.value]
+      : draftMapPoints.value
+          .filter((point) => getSensorPointDeviceType(point) === selectedSensorDeviceTypeKey.value)
+          .map((point) => point.name + (point.pointStyleOverride || point.sensorStyleOverride ? '（有单点覆盖）' : '')),
+  );
   const selectedSensorStyleColor = computed({
-    get: () => selectedSensorStyle.value.color || '#38bdf8',
-    set: (value: string) => {
-      updateSelectedSensorStyle({ color: value });
-    },
+    get: () =>
+      selectedSensorStyle.value.color ||
+      resolveProfilePointStyle(selectedStylePoint(), effectiveProfileRules.value).color,
+    set: (color: string) => updateSelectedSensorStyle({ color }),
   });
-
+  const selectedProfileKind = computed({
+    get: () => selectedSensorDeviceTypeStyle.value.pointKind || 'sensor',
+    set: (pointKind: 'sensor' | 'camera') => updateSelectedSensorStyle({ pointKind }),
+  });
+  const profilePresetLabels: Record<string, string> = {
+    temperature: '温度传感器',
+    humidity: '湿度传感器',
+    electricity_consumption: '电表',
+    noise: '噪声传感器',
+    illuminance: '光照传感器',
+    water_consumption: '水表',
+    camera: '监控设备',
+    default: '通用设备',
+  };
+  const selectedProfilePreset = computed({
+    get: () => selectedSensorDeviceTypeStyle.value.preset || 'default',
+    set: (preset: DeviceProfileRule['preset']) => updateSelectedSensorStyle({ preset }),
+  });
+  function selectedStylePoint(): any {
+    const point =
+      sensorStyleTab.value === 'point'
+        ? selectedSensorPoint.value
+        : draftMapPoints.value.find((point) => getSensorPointDeviceType(point) === selectedSensorDeviceTypeKey.value);
+    return point
+      ? hydrateProfilePoint(
+          sensorStyleTab.value === 'type'
+            ? { ...point, pointStyleOverride: undefined, sensorStyleOverride: undefined }
+            : point,
+          templateRuntimeDevices.value[point.entityId],
+          effectiveProfileRules.value,
+        )
+      : {
+          deviceProfileId: selectedSensorDeviceTypeKey.value,
+          deviceProfileName: selectedSensorDeviceTypeOption.value?.label,
+        };
+  }
   const selectedSensorStyleOnlinePreview = computed(() => buildSensorStylePreview(true));
   const selectedSensorStyleOfflinePreview = computed(() => buildSensorStylePreview(false));
-
-  function ensureSelectedSensorDeviceType() {
-    const options = sensorDeviceTypeOptions.value;
-    if (!options.length) {
-      selectedSensorDeviceTypeKey.value = '';
-      return;
-    }
-    if (!options.some((item) => item.key === selectedSensorDeviceTypeKey.value)) {
-      selectedSensorDeviceTypeKey.value = options[0].key;
-    }
-  }
-
-  function ensureSelectedSensorPoint() {
-    const options = sensorPointOptions.value;
-    if (!options.length) {
-      selectedSensorPointId.value = '';
-      return;
-    }
-    if (!options.some((item) => item.id === selectedSensorPointId.value)) {
-      selectedSensorPointId.value = options[0].id;
-    }
-  }
-
+  const profileImageVersion = ref(0);
+  const previewBillboards = createProfileBillboardCache(() => profileImageVersion.value++);
   function buildSensorStylePreview(online: boolean) {
-    const point = sensorStyleTab.value === 'point' ? selectedSensorPoint.value : undefined;
-    const typeKey = point
-      ? normalizeDeviceTypeStyleKey(getSensorPointDeviceType(point))
-      : selectedSensorDeviceTypeKey.value || sensorDeviceTypeOptions.value[0]?.key || '';
-    if (!typeKey) return '';
-
-    const deviceType = point
-      ? getSensorPointDeviceType(point)
-      : typeKey === UNSET_SENSOR_DEVICE_TYPE_STYLE_KEY
-        ? ''
-        : typeKey;
-    const style = resolveSensorPointStyle({
-      deviceType,
-      override: {
-        ...(templateSensorDeviceTypeStyles.value[typeKey] || {}),
-        ...(point?.sensorStyleOverride || {}),
-      },
-    });
-    return buildSensorPointBillboard(style, online);
+    void profileImageVersion.value;
+    return previewBillboards.get(resolveProfilePointStyle(selectedStylePoint(), effectiveProfileRules.value), online);
   }
-
-  function updateSelectedSensorStyle(patch: SensorPointStyleOverride) {
+  function ensureSelectedSensorDeviceType() {
+    if (!sensorDeviceTypeOptions.value.some((item) => item.key === selectedSensorDeviceTypeKey.value))
+      selectedSensorDeviceTypeKey.value = sensorDeviceTypeOptions.value[0]?.key || '';
+  }
+  function ensureSelectedSensorPoint() {
+    if (!sensorPointOptions.value.some((item) => item.id === selectedSensorPointId.value))
+      selectedSensorPointId.value = sensorPointOptions.value[0]?.id || '';
+  }
+  function updateSelectedSensorStyle(patch: DeviceProfileRule) {
     if (sensorStyleTab.value === 'point') {
-      const pointId = selectedSensorPointId.value;
-      if (!pointId) return;
-      draftMapPoints.value = draftMapPoints.value.map((point) => {
-        if (point.type !== 'sensor' || point.id !== pointId) return point;
-        return {
-          ...point,
-          sensorStyleOverride: {
-            ...(point.sensorStyleOverride || {}),
-            ...patch,
-          },
-        };
-      });
-      return;
+      draftMapPoints.value = draftMapPoints.value.map((point) =>
+        point.id !== selectedSensorPointId.value
+          ? point
+          : {
+              ...point,
+              pointStyleOverride: {
+                ...(point.sensorStyleOverride || {}),
+                ...(point.pointStyleOverride || {}),
+                ...patch,
+              },
+            },
+      );
+    } else {
+      const key = selectedSensorDeviceTypeKey.value;
+      if (!key || key === UNKNOWN_PROFILE) return;
+      templateDeviceProfileStyles.value = {
+        ...effectiveProfileRules.value,
+        [key]: { ...selectedSensorDeviceTypeStyle.value, ...patch },
+      };
     }
-
-    const key = selectedSensorDeviceTypeKey.value || sensorDeviceTypeOptions.value[0]?.key || '';
-    if (!key) return;
-    selectedSensorDeviceTypeKey.value = key;
-    templateSensorDeviceTypeStyles.value = {
-      ...templateSensorDeviceTypeStyles.value,
-      [key]: {
-        ...(templateSensorDeviceTypeStyles.value[key] || {}),
-        ...patch,
-      },
+  }
+  function resolveMigrationConflict(profileId: string, legacyKey: string) {
+    const point = draftMapPoints.value.find((point) => getSensorPointDeviceType(point) === profileId);
+    if (!point) return;
+    const profile = readDeviceProfile(templateRuntimeDevices.value[point.entityId], point);
+    templateDeviceProfileStyles.value = {
+      ...templateDeviceProfileStyles.value,
+      [profileId]: { ...defaultProfileRule(profile), ...(legacyTypeStyles.value[legacyKey] || {}) },
     };
   }
-  function extractAttributeValue(value: unknown): string {
-    if (value === undefined || value === null) return '';
-    if (typeof value === 'object') {
-      const record = value as Record<string, unknown>;
-      return extractAttributeValue(record.value ?? record.data ?? record.rawValue ?? record.name ?? '');
-    }
-    return String(value).trim();
-  }
-
   async function syncSensorDeviceTypesFromClientAttributes() {
-    const sensorPointsForSync = Array.from(
-      new Map(
-        draftMapPoints.value
-          .filter((point): point is SensorMapPoint => point.type === 'sensor' && point.entityType === 'DEVICE')
-          .map((point) => [point.entityId, point]),
-      ).values(),
-    );
-
-    if (!sensorPointsForSync.length) {
+    sensorStyleLoading.value = true;
+    try {
+      await refreshTemplateRuntime();
+      const missing = draftMapPoints.value.filter(
+        (point) => !readDeviceProfile(templateRuntimeDevices.value[point.entityId], point).deviceProfileId,
+      );
+      // New, unsaved points are not in the server template yet. Reuse device-info requests only for those points.
+      for (const point of missing) {
+        try {
+          const info = await getDeviceInfoById(point.entityId);
+          templateRuntimeDevices.value = {
+            ...templateRuntimeDevices.value,
+            [point.entityId]: {
+              ...(templateRuntimeDevices.value[point.entityId] || {}),
+              entityMetadata: readDeviceProfile(info),
+            },
+          };
+        } catch {
+          /* Keep explicit unavailable state. */
+        }
+      }
+      sensorStyleError.value = profileMigration.value.missing.length
+        ? `${profileMigration.value.missing.length} 个点位的设备配置暂不可用，可重试刷新。`
+        : '';
+    } finally {
       sensorStyleLoading.value = false;
       ensureSelectedSensorDeviceType();
-      return;
+      ensureSelectedSensorPoint();
     }
-
-    sensorStyleLoading.value = true;
-    const results = await Promise.allSettled(
-      sensorPointsForSync.map(async (point) => {
-        const attributes = await getAttributesByScope(
-          { entityType: 'DEVICE', id: point.entityId } as any,
-          Scope.CLIENT_SCOPE,
-          { keys: 'deviceType' },
-        );
-        const deviceType = extractAttributeValue((attributes || []).find((item) => item.key === 'deviceType')?.value);
-        return { entityId: point.entityId, deviceType };
-      }),
-    );
-
-    const deviceTypeMap = new Map<string, string>();
-    let failedCount = 0;
-    results.forEach((result) => {
-      if (result.status === 'fulfilled') {
-        deviceTypeMap.set(result.value.entityId, result.value.deviceType);
-      } else {
-        failedCount += 1;
-      }
-    });
-
-    if (deviceTypeMap.size) {
-      draftMapPoints.value = draftMapPoints.value.map((point) => {
-        if (point.type !== 'sensor') return point;
-        return {
-          ...point,
-          deviceType: deviceTypeMap.get(point.entityId) || undefined,
-        };
-      });
-    }
-
-    sensorStyleError.value = failedCount ? `${failedCount} 个设备的 deviceType 读取失败，已显示可读取到的类型。` : '';
-    sensorStyleLoading.value = false;
-    ensureSelectedSensorDeviceType();
-    ensureSelectedSensorPoint();
   }
-
   function openSensorStylePanel() {
     if (editorMode.value === 'view') return;
     if (editorMode.value !== 'editing') editorMode.value = 'editing';
     addPanelVisible.value = false;
     appearancePanelVisible.value = false;
     pageSettingsVisible.value = false;
-    sensorStyleError.value = '';
-    sensorStyleLoading.value = false;
     sensorStylePanelVisible.value = true;
     ensureSelectedSensorDeviceType();
     ensureSelectedSensorPoint();
-    setTimeout(() => {
-      void syncSensorDeviceTypesFromClientAttributes();
-    }, 0);
+    void syncSensorDeviceTypesFromClientAttributes();
   }
-
   function toggleSensorStylePanel() {
-    if (sensorStylePanelVisible.value) {
-      sensorStylePanelVisible.value = false;
-      return;
-    }
-    openSensorStylePanel();
+    if (sensorStylePanelVisible.value) sensorStylePanelVisible.value = false;
+    else openSensorStylePanel();
   }
 
   function parseSvgIcon(text: string): SensorPointIconShape {
@@ -1308,8 +1306,8 @@
       const pointId = selectedSensorPointId.value;
       if (!pointId) return;
       draftMapPoints.value = draftMapPoints.value.map((point) => {
-        if (point.type !== 'sensor' || point.id !== pointId) return point;
-        const { sensorStyleOverride: _sensorStyleOverride, ...rest } = point;
+        if (point.id !== pointId) return point;
+        const { sensorStyleOverride: _sensorStyleOverride, pointStyleOverride: _pointStyleOverride, ...rest } = point;
         return rest as SensorMapPoint;
       });
       return;
@@ -1317,11 +1315,23 @@
 
     const key = selectedSensorDeviceTypeKey.value;
     if (!key) return;
-    const next = { ...templateSensorDeviceTypeStyles.value };
-    delete next[key];
-    templateSensorDeviceTypeStyles.value = next;
+    const next = { ...templateDeviceProfileStyles.value };
+    const current = effectiveProfileRules.value[key];
+    next[key] = { profileName: current?.profileName, preset: current?.preset, pointKind: current?.pointKind };
+    templateDeviceProfileStyles.value = next;
   }
 
+  function downloadProfileMigrationBackup() {
+    if (!profileMigrationBackup.value) return;
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(profileMigrationBackup.value, null, 2)], { type: 'application/json' }),
+    );
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'map-template-before-profile-migration.json';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
   function confirmSensorStylePanel() {
     sensorStylePanelVisible.value = false;
   }
@@ -1532,7 +1542,9 @@
     const normalized = normalizeMapTemplateState(state);
     templateScene.value = cloneJson(normalized.scene);
     templateAppearance.value = cloneJson(normalized.appearance);
-    templateSensorDeviceTypeStyles.value = cloneJson(normalized.sensorDeviceTypeStyles);
+    templateDeviceProfileStyles.value = cloneJson(normalized.deviceProfileStyles);
+    legacyTypeStyles.value = cloneJson(normalized.sensorDeviceTypeStyles);
+    profileMigrationBackup.value = normalized.profileMigrationBackup;
     templateTopBar.value = cloneJson(normalized.topBar);
     templateViewport.value = cloneJson(normalized.viewport);
     layout.value = normalized.layout;
@@ -1553,9 +1565,12 @@
   function getEditorState(): MapWidgetEditorState {
     return {
       ...createDefaultMapTemplateState(),
+      version: 8,
+      sensorDeviceTypeStyles: cloneJson(legacyTypeStyles.value),
+      profileMigrationBackup: profileMigrationBackup.value,
       scene: cloneJson(templateScene.value),
       appearance: cloneJson(templateAppearance.value),
-      sensorDeviceTypeStyles: cloneJson(templateSensorDeviceTypeStyles.value),
+      deviceProfileStyles: cloneJson(effectiveProfileRules.value),
       topBar: cloneJson(templateTopBar.value),
       viewport: cloneJson(templateViewport.value),
       layout: cloneJson(layout.value),
@@ -1564,18 +1579,26 @@
       excludedPointTypes: { ...draftExcludedPointTypes.value },
       excludedDeviceBindings: cloneJson(draftExcludedDeviceBindings.value),
       mapPoints: cloneJson(
-        filterExcludedMapPoints(draftMapPoints.value, draftExcludedDeviceIds.value).map((point) => {
-          if (!isValidModelAnchor(point.modelAnchor)) return point;
-          if (cesiumMapRef.value?.getPointAnchorStatus(point) !== 'attached') return point;
-          const location = cesiumMapRef.value?.getResolvedPointLocation(point) || point;
-          const fallback = { longitude: location.longitude, latitude: location.latitude, height: location.height ?? 0 };
-          return {
-            ...point,
-            ...fallback,
-            heightMode: 'absolute',
-            modelAnchor: { ...point.modelAnchor, fallbackWorldPosition: fallback },
-          };
-        }),
+        filterExcludedMapPoints(draftMapPoints.value, draftExcludedDeviceIds.value)
+          .map((rawPoint) =>
+            hydrateProfilePoint(rawPoint, templateRuntimeDevices.value[rawPoint.entityId], effectiveProfileRules.value),
+          )
+          .map((point) => {
+            if (!isValidModelAnchor(point.modelAnchor)) return point;
+            if (cesiumMapRef.value?.getPointAnchorStatus(point) !== 'attached') return point;
+            const location = cesiumMapRef.value?.getResolvedPointLocation(point) || point;
+            const fallback = {
+              longitude: location.longitude,
+              latitude: location.latitude,
+              height: location.height ?? 0,
+            };
+            return {
+              ...point,
+              ...fallback,
+              heightMode: 'absolute',
+              modelAnchor: { ...point.modelAnchor, fallbackWorldPosition: fallback },
+            };
+          }),
       ),
       sensorPopupBindings: cloneJson(draftSensorPopupBindings.value),
     };
@@ -1633,6 +1656,8 @@
     }
   }
 
+  let stopProfileRuntime: (() => void) | undefined;
+  let profileRuntimeDashboard = '';
   async function refreshTemplateRuntime() {
     if (!isDashboardTemplateMode.value || !dashboardId.value) {
       applyTemplateRuntimeDevices({});
@@ -1640,8 +1665,17 @@
     }
 
     try {
-      const runtime = await getAssignedMapTemplateRuntime(dashboardId.value);
+      const target = dashboardId.value;
+      const runtime = await getAssignedMapTemplateRuntime(target);
+      if (editorDisposed || target !== dashboardId.value) return;
       applyTemplateRuntimeDevices(runtime.devices);
+      if (profileRuntimeDashboard !== target) {
+        stopProfileRuntime?.();
+        profileRuntimeDashboard = target;
+        stopProfileRuntime = subscribeAssignedMapTemplateRuntimeEvents(target, (event) => {
+          if (!editorDisposed && dashboardId.value === target) applyTemplateRuntimeDevices(event.devices);
+        });
+      }
     } catch (error) {
       applyTemplateRuntimeDevices({});
       console.warn('[MapWidgetEditor] Failed to load template runtime data:', error);
@@ -2243,7 +2277,7 @@
       layout: cloneJson(layout.value),
       widgets: cloneJson(widgets.value),
       appearance: cloneJson(templateAppearance.value),
-      sensorDeviceTypeStyles: cloneJson(templateSensorDeviceTypeStyles.value),
+      deviceProfileStyles: cloneJson(effectiveProfileRules.value),
       topBar: cloneJson(templateTopBar.value),
       viewport: cloneJson(templateViewport.value),
       scene: cloneJson(templateScene.value),
@@ -2379,7 +2413,11 @@
   function onMapPicked(location: MapPickedLocation) {
     if (editorMode.value !== 'pickingPoint' || isSavingEdit.value) return;
     pendingPointLocation.value = location;
-    editorMode.value = 'selectingPointType';
+    if (relocatingPointId.value || restoringPoint.value) editorMode.value = 'selectingPointType';
+    else {
+      editorMode.value = 'configuringSensorPoint';
+      sensorPointDialogVisible.value = true;
+    }
   }
 
   function retryPickingPoint() {
@@ -2486,7 +2524,11 @@
             const type = draftExcludedPointTypes.value[deviceId];
             try {
               const device = await getDeviceInfoById(deviceId);
-              return { deviceId, name: device.label || device.name || deviceId, type, available: !!type };
+              const profile = readDeviceProfile(device);
+              const kind = profile.deviceProfileId
+                ? (effectiveProfileRules.value[profile.deviceProfileId] || defaultProfileRule(profile)).pointKind
+                : type;
+              return { deviceId, name: device.label || device.name || deviceId, type: kind, available: !!kind };
             } catch {
               return { deviceId, name: deviceId, type, available: false };
             }
@@ -2519,8 +2561,14 @@
       if (!repick && !location) throw new Error('设备没有可用坐标，请使用“重新选点恢复”');
       const point = {
         ...toMapBusinessBinding(draftExcludedDeviceBindings.value[entry.deviceId] || {}),
+        ...readDeviceProfile(device),
         id: entry.type + '_' + entry.deviceId,
-        type: entry.type,
+        type: readDeviceProfile(device).deviceProfileId
+          ? (
+              effectiveProfileRules.value[readDeviceProfile(device).deviceProfileId] ||
+              defaultProfileRule(readDeviceProfile(device))
+            ).pointKind
+          : entry.type,
         name: device.label || device.name || entry.deviceId,
         entityType: 'DEVICE',
         entityId: entry.deviceId,
@@ -2559,24 +2607,6 @@
     }
   }
 
-  function choosePointType(type: MapPointType) {
-    if (isSavingEdit.value || editorMode.value !== 'selectingPointType') return;
-    if (pendingPointLocation.value && !validatePickedLocation(pendingPointLocation.value)) return;
-    if (!pendingPointLocation.value) {
-      editorMode.value = 'editing';
-      return;
-    }
-
-    if (type === 'sensor') {
-      editorMode.value = 'configuringSensorPoint';
-      sensorPointDialogVisible.value = true;
-      return;
-    }
-
-    editorMode.value = 'configuringCameraPoint';
-    cameraPointDialogVisible.value = true;
-  }
-
   function cancelPointConfig() {
     cancelPickingPoint();
   }
@@ -2609,8 +2639,9 @@
     if (isSavingEdit.value || editorMode.value !== mode || !ensureDeviceAvailableForNewPoint(deviceId)) return false;
     const pending = pendingPointLocation.value;
     const request = ++pointActionRequest;
+    let device;
     try {
-      await getDeviceInfoById(deviceId);
+      device = await getDeviceInfoById(deviceId);
     } catch {
       if (request === pointActionRequest) errorMsg.value = '无法读取设备或已无访问权限，请重试';
       return false;
@@ -2621,7 +2652,8 @@
       pending === pendingPointLocation.value &&
       editorMode.value === mode &&
       validatePickedLocation(pending) &&
-      ensureDeviceAvailableForNewPoint(deviceId)
+      ensureDeviceAvailableForNewPoint(deviceId) &&
+      device
     );
   }
 
@@ -2641,9 +2673,26 @@
     keys: string[];
     pollMs: number;
   }) {
-    if (!(await verifyNewPointDevice(payload.deviceId, 'configuringSensorPoint'))) return;
+    const device = await verifyNewPointDevice(payload.deviceId, 'configuringSensorPoint');
+    if (!device) return;
+    const metadata = readDeviceProfile(device);
+    templateRuntimeDevices.value[payload.deviceId] = {
+      ...(templateRuntimeDevices.value[payload.deviceId] || {}),
+      entityMetadata: metadata,
+    };
+    const rule = effectiveProfileRules.value[metadata.deviceProfileId] || defaultProfileRule(metadata);
+    if (metadata.deviceProfileId) templateDeviceProfileStyles.value[metadata.deviceProfileId] = rule;
+    if (rule.pointKind === 'camera') {
+      finishNewPoint({
+        ...createPointBase('camera', payload.deviceId, device.name || payload.deviceName),
+        ...metadata,
+        type: 'camera',
+      });
+      return;
+    }
     const point: SensorMapPoint = {
       ...createPointBase('sensor', payload.deviceId, payload.deviceName),
+      ...metadata,
       type: 'sensor',
       online: false,
       statusText: '离线',
@@ -2700,7 +2749,7 @@
     layout.value = cloneJson(widgetSnapshot.layout);
     widgets.value = cloneJson(widgetSnapshot.widgets);
     templateAppearance.value = cloneJson(widgetSnapshot.appearance);
-    templateSensorDeviceTypeStyles.value = cloneJson(widgetSnapshot.sensorDeviceTypeStyles);
+    templateDeviceProfileStyles.value = cloneJson(widgetSnapshot.deviceProfileStyles);
     templateTopBar.value = cloneJson(widgetSnapshot.topBar);
     templateViewport.value = cloneJson(widgetSnapshot.viewport);
     templateScene.value = cloneJson(widgetSnapshot.scene);
@@ -2733,6 +2782,8 @@
   }
 
   function adoptSavedState(state: MapTemplateState) {
+    templateDeviceProfileStyles.value = cloneJson(state.deviceProfileStyles);
+    profileMigrationBackup.value = state.profileMigrationBackup;
     originalMapPoints.value = cloneJson(state.mapPoints);
     draftMapPoints.value = cloneJson(state.mapPoints);
     originalSensorPopupBindings.value = cloneJson(state.sensorPopupBindings);
@@ -2748,7 +2799,7 @@
       layout: cloneJson(state.layout),
       widgets: cloneJson(state.widgets),
       appearance: cloneJson(state.appearance),
-      sensorDeviceTypeStyles: cloneJson(state.sensorDeviceTypeStyles),
+      deviceProfileStyles: cloneJson(state.deviceProfileStyles),
       topBar: cloneJson(state.topBar),
       viewport: cloneJson(state.viewport),
       scene: cloneJson(state.scene),
@@ -2763,6 +2814,11 @@
     }
     if (findDuplicateDeviceBindings(draftMapPoints.value).length) {
       errorMsg.value = '同一设备在当前模板中存在重复点位，请先移除重复点位';
+      return;
+    }
+    if (profileMigration.value.conflicts.length) {
+      errorMsg.value = '请在点位样式面板解决旧分类样式冲突后保存';
+      sensorStylePanelVisible.value = true;
       return;
     }
     errorMsg.value = '';
@@ -2815,6 +2871,13 @@
         getEffectiveSceneModels(state.scene.models, state.scene.globeOnly),
         state.mapPoints,
       );
+      if (
+        !state.profileMigrationBackup &&
+        (Object.keys(previous.sensorDeviceTypeStyles).length || previous.version < 8)
+      ) {
+        const { profileMigrationBackup: _backup, ...snapshot } = previous;
+        state.profileMigrationBackup = cloneJson(snapshot);
+      }
       const pendingIds = new Set(candidates.map((point) => point.entityId));
       state.mapPoints = state.mapPoints.map((point) =>
         pendingIds.has(point.entityId) ? { ...point, deviceLocationSynced: false } : point,
@@ -3142,6 +3205,8 @@
 
   onBeforeUnmount(() => {
     editorDisposed = true;
+    stopProfileRuntime?.();
+    previewBillboards.dispose();
     cameraRuntimeRequestId += 1;
     clearDragHint();
     clearPointPicking();

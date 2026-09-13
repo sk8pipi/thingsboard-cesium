@@ -45,7 +45,7 @@
       :globe-only="mapGlobeOnly"
       :scene-models="sceneModels"
       :enable-sensor-type-styles="enableMapSensorTypeStyles"
-      :sensor-device-type-styles="assignedTemplateState?.sensorDeviceTypeStyles || {}"
+      :device-profile-styles="assignedTemplateState?.deviceProfileStyles || {}"
       :resolution-scale="mapScreen.metrics.value.cesiumResolutionScale"
       :screen-scale="mapScreen.metrics.value.uiScale"
       @sensor-click="onSensorClick"
@@ -85,6 +85,7 @@
       v-if="!showDefaultGlobeOnly"
       :visible="cameraPopupVisible"
       :runtime-info="selectedCameraRuntime"
+      :profile-source="assignedTemplateRuntimeDevices[selectedCameraRuntime?.entityId || ''] || selectedCameraRuntime"
       :loading="cameraRuntimeLoading"
       :error="cameraRuntimeError"
       @close="closeCameraPopup"
@@ -93,6 +94,7 @@
 </template>
 
 <script setup lang="ts">
+  import { hydrateProfilePoint, migrateProfileRules, readDeviceProfile } from './services/deviceProfilePresentation';
   import {
     filterExcludedMapPoints,
     mergeDeviceMapPoint,
@@ -124,6 +126,7 @@
   import { releaseCameraVideoSession } from './services/cameraVideoSessionService';
   import {
     getAssignedMapTemplateRuntime,
+    subscribeAssignedMapTemplateRuntimeEvents,
     type MapTemplateRuntimeDevices,
     type MapTemplateRuntimeEvent,
     type MapTemplateRuntimeResponse,
@@ -410,7 +413,11 @@
     return online ? '\u5728\u7ebf' : '\u79bb\u7ebf';
   }
 
-  function mergeRuntimeIntoPoint(point: MapPoint, runtime?: Record<string, unknown>): MapPoint {
+  function mergeRuntimeIntoPoint(
+    point: MapPoint,
+    runtime?: Record<string, unknown>,
+    rules = assignedTemplateState.value?.deviceProfileStyles || {},
+  ): MapPoint {
     if (!runtime) return point;
 
     const online = toRuntimeBoolean(runtime.online ?? runtime.status ?? runtime.active);
@@ -421,7 +428,7 @@
       online === undefined ? (point as any).color : online ? (point.type === 'camera' ? 'green' : 'blue') : 'gray';
 
     return {
-      ...mergePointRuntimeFields(point, runtime),
+      ...hydrateProfilePoint(mergePointRuntimeFields(point, runtime), runtime, rules),
       online: online ?? point.online,
       streamOnline: streamOnline ?? (point as any).streamOnline,
       streamAlive: online === false ? false : ((runtime as any).streamAlive ?? (point as any).streamAlive),
@@ -436,9 +443,16 @@
     devices?: MapTemplateRuntimeDevices,
   ): MapTemplateState {
     const runtimeDevices = devices || {};
+    const rules = migrateProfileRules(
+      state.mapPoints,
+      runtimeDevices,
+      state.deviceProfileStyles,
+      state.sensorDeviceTypeStyles,
+    ).rules;
     return {
       ...state,
-      mapPoints: state.mapPoints.map((point) => mergeRuntimeIntoPoint(point, runtimeDevices[point.entityId])),
+      deviceProfileStyles: rules,
+      mapPoints: state.mapPoints.map((point) => mergeRuntimeIntoPoint(point, runtimeDevices[point.entityId], rules)),
     };
   }
 
@@ -795,9 +809,9 @@
     stopMapTemplateUpdateSubscription();
     if (!isCustomerUserMap.value || !dashboardId) return;
 
-    unsubscribeMapTemplateUpdates = subscribeAssignedMapTemplateUpdates(dashboardId, (event) => {
+    unsubscribeMapTemplateUpdates = subscribeAssignedMapTemplateRuntimeEvents(dashboardId, (event) => {
       if (event.dashboardId !== currentAssignedTemplateDashboardId.value) return;
-      void refreshAssignedDashboardTemplate(dashboardId);
+      applyAssignedTemplateRuntimeEvent(event);
     });
   }
 
@@ -962,7 +976,11 @@
             (sameEntityName.length === 1 ? sameEntityName[0] : undefined) ||
             (sameName.length === 1 ? sameName[0] : undefined);
           if (refreshedCamera) {
-            targetCamera = refreshedCamera;
+            targetCamera = hydrateProfilePoint(
+              refreshedCamera,
+              assignedTemplateRuntimeDeviceMap.value[refreshedCamera.entityId],
+              assignedTemplateState.value?.deviceProfileStyles,
+            );
           }
         } catch (error) {
           console.warn('[MapHome] Failed to refresh camera point before playback:', {
@@ -994,12 +1012,14 @@
       if (requestId !== cameraRuntimeRequestId) return;
       console.error('[MapHome] Failed to load camera runtime info:', {
         pointId: targetCamera.id,
+        ...readDeviceProfile(targetCamera),
         entityId: targetCamera.entityId,
         entityName: targetCamera.entityName,
         error,
       });
       cameraRuntimeError.value = '\u8bfb\u53d6\u6444\u50cf\u5934\u8bbe\u5907\u4fe1\u606f\u5931\u8d25';
       selectedCameraRuntime.value = {
+        ...readDeviceProfile(targetCamera),
         entityId: targetCamera.entityId,
         entityName: targetCamera.entityName || targetCamera.name,
         cameraName: targetCamera.name,
@@ -1038,6 +1058,7 @@
   function createCameraRuntimeFromTemplatePoint(camera: CameraMapPoint): CameraRuntimeInfo {
     const point = camera as CameraMapPoint & Partial<CameraRuntimeInfo> & Record<string, any>;
     return {
+      ...readDeviceProfile(camera),
       entityId: camera.entityId,
       entityName: camera.entityName || camera.name,
       cameraId: point.cameraId,

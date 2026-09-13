@@ -26,10 +26,12 @@ import org.thingsboard.common.util.JacksonUtil;
 import org.thingsboard.server.common.data.AttributeScope;
 import org.thingsboard.server.common.data.Dashboard;
 import org.thingsboard.server.common.data.DeviceInfo;
+import org.thingsboard.server.common.data.DeviceProfile;
 import org.thingsboard.server.common.data.ShortCustomerInfo;
 import org.thingsboard.server.common.data.id.CustomerId;
 import org.thingsboard.server.common.data.id.DashboardId;
 import org.thingsboard.server.common.data.id.DeviceId;
+import org.thingsboard.server.common.data.id.DeviceProfileId;
 import org.thingsboard.server.common.data.id.TenantId;
 import org.thingsboard.server.common.data.kv.AttributeKvEntry;
 import org.thingsboard.server.common.data.kv.KvEntry;
@@ -37,6 +39,7 @@ import org.thingsboard.server.common.data.kv.TsKvEntry;
 import org.thingsboard.server.dao.attributes.AttributesService;
 import org.thingsboard.server.dao.dashboard.DashboardService;
 import org.thingsboard.server.dao.device.DeviceService;
+import org.thingsboard.server.dao.device.DeviceProfileService;
 import org.thingsboard.server.dao.timeseries.TimeseriesService;
 import org.thingsboard.server.queue.util.TbCoreComponent;
 import org.thingsboard.server.service.security.model.SecurityUser;
@@ -84,6 +87,7 @@ public class MapTemplateRuntimeService {
     private final DeviceService deviceService;
     private final AttributesService attributesService;
     private final TimeseriesService tsService;
+    private final DeviceProfileService deviceProfileService;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, runnable -> {
         Thread thread = new Thread(runnable, "map-template-runtime-poll");
         thread.setDaemon(true);
@@ -94,9 +98,11 @@ public class MapTemplateRuntimeService {
         JsonNode template = getTemplateNode(dashboard);
         Map<String, DeviceRuntimeRequest> requests = collectDeviceRuntimeRequests(template);
         Map<String, Map<String, Object>> devices = new LinkedHashMap<>();
+        // Cache successes and failures only for this snapshot, so later polls see profile changes.
+        Map<DeviceProfileId, Optional<DeviceProfile>> profiles = new LinkedHashMap<>();
 
         for (DeviceRuntimeRequest request : requests.values()) {
-            devices.put(request.getDeviceId(), loadDeviceRuntime(dashboard.getTenantId(), request));
+            devices.put(request.getDeviceId(), loadDeviceRuntime(dashboard.getTenantId(), request, profiles));
         }
 
         long updatedTime = template.path("updatedTime").asLong(dashboard.getCreatedTime());
@@ -269,19 +275,47 @@ public class MapTemplateRuntimeService {
         }
     }
 
-    private Map<String, Object> loadDeviceRuntime(TenantId tenantId, DeviceRuntimeRequest request) {
+    private Map<String, Object> loadDeviceRuntime(TenantId tenantId, DeviceRuntimeRequest request,
+                                                Map<DeviceProfileId, Optional<DeviceProfile>> profiles) {
         Map<String, Object> values = new LinkedHashMap<>();
         DeviceId deviceId = new DeviceId(UUID.fromString(request.getDeviceId()));
 
-        JsonNode deviceAdditionalInfo = putDeviceInfo(values, tenantId, deviceId);
+        DeviceInfo deviceInfo = putDeviceInfo(values, tenantId, deviceId);
         putAttributes(values, tenantId, deviceId, request.getAttributeKeys());
-        putDeviceLocation(values, deviceAdditionalInfo);
+        putDeviceLocation(values, deviceInfo != null ? deviceInfo.getAdditionalInfo() : null);
         putTimeseries(values, tenantId, deviceId, request.getTelemetryKeys());
         applyDerivedStatus(values);
+        // Reserved metadata must be written last: device attributes/telemetry are not authoritative.
+        values.put("entityMetadata", buildEntityMetadata(tenantId, deviceInfo, profiles));
         return values;
     }
 
-    private JsonNode putDeviceInfo(Map<String, Object> values, TenantId tenantId, DeviceId deviceId) {
+    private Map<String, String> buildEntityMetadata(TenantId tenantId, DeviceInfo deviceInfo,
+                                                   Map<DeviceProfileId, Optional<DeviceProfile>> profiles) {
+        Map<String, String> metadata = new LinkedHashMap<>();
+        if (deviceInfo == null || deviceInfo.getDeviceProfileId() == null) {
+            return metadata;
+        }
+        DeviceProfileId profileId = deviceInfo.getDeviceProfileId();
+        metadata.put("deviceProfileId", profileId.getId().toString());
+        metadata.put("deviceProfileName", Objects.requireNonNullElse(deviceInfo.getDeviceProfileName(), ""));
+        profiles.computeIfAbsent(profileId, id -> {
+            try {
+                return Optional.ofNullable(deviceProfileService.findDeviceProfileById(tenantId, id));
+            } catch (Exception e) {
+                log.debug("[{}] Failed to load map template runtime device profile", id, e);
+                return Optional.empty();
+            }
+        }).ifPresent(profile -> {
+            metadata.put("deviceProfileName", Objects.requireNonNullElse(profile.getName(), ""));
+            if (profile.getImage() != null && !profile.getImage().isBlank()) {
+                metadata.put("deviceProfileImage", profile.getImage());
+            }
+        });
+        return metadata;
+    }
+
+    private DeviceInfo putDeviceInfo(Map<String, Object> values, TenantId tenantId, DeviceId deviceId) {
         try {
             DeviceInfo deviceInfo = deviceService.findDeviceInfoById(tenantId, deviceId);
             if (deviceInfo != null) {
@@ -294,7 +328,7 @@ public class MapTemplateRuntimeService {
                 if (deviceInfo.getDeviceProfileName() != null) {
                     values.put("deviceProfileName", deviceInfo.getDeviceProfileName());
                 }
-                return deviceInfo.getAdditionalInfo();
+                return deviceInfo;
             }
         } catch (Exception e) {
             log.debug("[{}] Failed to load map template runtime device info", deviceId, e);

@@ -125,6 +125,7 @@
 </template>
 
 <script setup lang="ts">
+  import { profileLabel } from './services/deviceProfilePresentation';
   import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
   import { getTimeseriesKeys } from '/@/api/tb/telemetry';
   import { createDatasourceRuntime, type DatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
@@ -221,7 +222,7 @@
         label: '状态',
         value: current?.statusText || (current?.online === true ? '在线' : current?.online === false ? '离线' : '-'),
       },
-      { label: '类型', value: current?.description || current?.entityType || '-' },
+      { label: '类型（设备配置）', value: profileLabel(current) },
       { label: '经度', value: formatCoordinate(current?.longitude) },
       { label: '纬度', value: formatCoordinate(current?.latitude) },
     ];

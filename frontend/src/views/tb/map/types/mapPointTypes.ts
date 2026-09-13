@@ -1,4 +1,6 @@
-﻿export type MapPointType = 'sensor' | 'camera';
+import type { DeviceProfileMetadata } from '../services/deviceProfilePresentation';
+import type { SensorPointStyleOverride } from '../services/sensorPointStyleService';
+export type MapPointType = 'sensor' | 'camera';
 
 export type MapPointEntityType = 'DEVICE' | 'ASSET';
 
@@ -17,7 +19,9 @@ export interface MapPointLocation {
   heightMode?: 'absolute' | 'relativeToGround';
 }
 
-export interface BaseMapPoint extends MapPointLocation {
+export interface BaseMapPoint extends MapPointLocation, Partial<DeviceProfileMetadata> {
+  pointStyleOverride?: SensorPointStyleOverride;
+  sensorStyleOverride?: SensorPointStyleOverride;
   /** 模板定位优先；仅管理员确认保存时同步 ThingsBoard，读取页面不写回。 */
   positionSource?: 'template';
   /** 当前模板位置已经成功同步设备；不是历史坐标备份。 */
@@ -104,7 +108,7 @@ export interface DevicePointBindingInfo {
   pointType: MapPointType;
 }
 
-export interface CameraRuntimeInfo {
+export interface CameraRuntimeInfo extends Partial<DeviceProfileMetadata> {
   entityId: string;
   entityName: string;
   cameraId?: string;

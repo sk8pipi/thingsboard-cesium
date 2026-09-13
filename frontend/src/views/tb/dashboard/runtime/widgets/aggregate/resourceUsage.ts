@@ -1,3 +1,4 @@
+import { profileLabel, profileKey, readDeviceProfile } from '../../../../map/services/deviceProfilePresentation';
 import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue';
 import { EntityType } from '/@/enums/entityTypeEnum';
 import { getLatestTimeseries, getTimeseries } from '/@/api/tb/telemetry';
@@ -97,12 +98,7 @@ export function getRuntimeDeviceName(deviceId: string, device: Record<string, un
 }
 
 export function getRuntimeDeviceType(device: Record<string, unknown>) {
-  const explicit = String(
-    device.deviceType || device.tbDeviceType || device.deviceProfileName || device.type || '',
-  ).trim();
-  if (explicit) return explicit;
-  if (device.cameraId || device.cameraCode || device.cameraName) return 'camera';
-  return 'unknown';
+  return profileLabel(device);
 }
 
 export function listRuntimeDevices(devices?: TemplateRuntimeDevices | null): RuntimeDeviceItem[] {
@@ -128,13 +124,14 @@ export function summarizeDevicesByPlatformState(devices?: TemplateRuntimeDevices
 }
 
 export function groupDevicesByType(devices?: TemplateRuntimeDevices | null) {
-  const groups = new Map<string, { type: string; total: number; online: number; offline: number }>();
+  const groups = new Map<string, { id: string; type: string; total: number; online: number; offline: number }>();
   listRuntimeDevices(devices).forEach((device) => {
-    const group = groups.get(device.type) || { type: device.type, total: 0, online: 0, offline: 0 };
+    const key = profileKey(readDeviceProfile(device.raw));
+    const group = groups.get(key) || { id: key, type: device.type, total: 0, online: 0, offline: 0 };
     group.total += 1;
     if (device.active) group.online += 1;
     else group.offline += 1;
-    groups.set(device.type, group);
+    groups.set(key, group);
   });
   return Array.from(groups.values()).sort(
     (left, right) => right.total - left.total || left.type.localeCompare(right.type),

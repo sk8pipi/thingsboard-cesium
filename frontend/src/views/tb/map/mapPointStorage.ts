@@ -38,6 +38,18 @@ export function normalizeMapPoint(point: unknown): MapPoint | null {
     entityType: (isCameraPoint ? 'DEVICE' : String(rawPoint.entityType || 'DEVICE')) as MapPointEntityType,
     entityId: normalizedEntityId,
     entityName: String(rawPoint.entityName || rawPoint.name || ''),
+    deviceProfileId: typeof rawPoint.deviceProfileId === 'string' ? rawPoint.deviceProfileId : undefined,
+    deviceProfileName: typeof rawPoint.deviceProfileName === 'string' ? rawPoint.deviceProfileName : undefined,
+    deviceProfileImage: typeof rawPoint.deviceProfileImage === 'string' ? rawPoint.deviceProfileImage : undefined,
+    pointStyleOverride:
+      rawPoint.pointStyleOverride && typeof rawPoint.pointStyleOverride === 'object'
+        ? (rawPoint.pointStyleOverride as SensorMapPoint['sensorStyleOverride'])
+        : undefined,
+    sensorStyleOverride:
+      rawPoint.sensorStyleOverride && typeof rawPoint.sensorStyleOverride === 'object'
+        ? (rawPoint.sensorStyleOverride as SensorMapPoint['sensorStyleOverride'])
+        : undefined,
+    deviceType: typeof rawPoint.deviceType === 'string' ? rawPoint.deviceType : undefined,
     deviceCategory: rawPoint.deviceCategory ? String(rawPoint.deviceCategory) : undefined,
     deviceProfile: rawPoint.deviceProfile ? String(rawPoint.deviceProfile) : undefined,
     telemetryKeys: Array.isArray(rawPoint.telemetryKeys)

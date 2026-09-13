@@ -30,7 +30,7 @@
             >
               <div class="sd-item-name">{{ device.name }}</div>
               <div class="sd-item-meta">
-                <span class="sd-item-sub">{{ device.type || '-' }}</span>
+                <span class="sd-item-sub">{{ device.deviceProfileName || '-' }}</span>
                 <span v-if="isDeviceBound(device.id?.id)" class="sd-item-badge">
                   已绑定 {{ deviceBindingsFor(device.id?.id).length }} 个点位
                 </span>

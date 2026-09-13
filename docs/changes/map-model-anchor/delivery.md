@@ -1,7 +1,7 @@
 # 三维模型点位锚定
 
 - 任务编号：map-model-anchor
-- 当前状态：待人工提交
+- 当前状态：已归档（用户已提交）
 - 当前主 Agent：主 Agent
 - 最后更新：2026-09-09
 
@@ -23,6 +23,7 @@
 范围：frontend/src/views/tb/map、frontend/tests、MapTemplateRuntimeService 与专项 JUnit、架构文档与任务记录。后端修改仅保证排除设备继续参与原有业务运行时采集，不改变公开 API、数据库、部署或既有 dashboard/租户授权边界；没有启停共享服务或写用户真实设备。
 
 ## 当前进度
+2026-09-12：开始设备配置点位任务前检查工作树干净，HEAD 为用户提交 `bcceead 三维模型固定点位`。关闭旧活动登记；历史未执行的 WebGL 验收记录保持原样，不改写为通过。
 2026-09-09 重新选点热修复：用户报告 attachPoint 的 structuredClone 无法复制 Vue Proxy。已用真实 Vue ref 重现相同调用链异常，将锚点及两层坐标记录复制为普通对象；补 reactive、readonly、嵌套 Proxy 和传感器/摄像头回归验证。未触碰用户另有的 .gitignore、启动脚本及 Angular UI 修改。
 统一选点编辑页、排除/恢复、阶段化保存与持久化重试已完成。模型矩阵与拾取服务、用户页排除、业务设备引用和后端运行时采集已集成。八项前端测试脚本、后端专项测试、ESLint、治理校验和 diff 检查通过；定向类型检查无本次文件诊断，但关联链存在既有错误。真实 WebGL 手动验收仍未执行，详见 verification.md。
 

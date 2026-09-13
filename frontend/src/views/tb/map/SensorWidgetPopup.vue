@@ -42,6 +42,7 @@
 </template>
 
 <script setup lang="ts">
+  import { profileLabel } from './services/deviceProfilePresentation';
   import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
   import { createDatasourceRuntime, type DatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
   import type { DashboardWidget, LocalWidgetKey, TbWidgetConfig } from '../dashboard/runtime/types';
@@ -97,13 +98,7 @@
 
   function getDisplayDeviceType(sensor: Record<string, any>) {
     const runtimeDevice = getRuntimeDevice(sensor) as Record<string, unknown>;
-    return (
-      toDisplayText(sensor.deviceType) ||
-      toDisplayText(sensor.sensorType) ||
-      toDisplayText(runtimeDevice.deviceType) ||
-      toDisplayText(runtimeDevice.sensorType) ||
-      '未知'
-    );
+    return profileLabel(runtimeDevice, sensor);
   }
 
   const infoRows = computed(() => {
@@ -114,7 +109,7 @@
         label: '状态',
         value: sensor.statusText || (sensor.online === true ? '在线' : sensor.online === false ? '离线' : '-'),
       },
-      { label: '类型', value: getDisplayDeviceType(sensor) },
+      { label: '类型（设备配置）', value: getDisplayDeviceType(sensor) },
       { label: '经度', value: formatCoordinate(sensor.longitude) },
       { label: '纬度', value: formatCoordinate(sensor.latitude) },
       { label: '高度', value: formatHeight(sensor.height) },

@@ -1,3 +1,4 @@
+import { readDeviceProfile, defaultProfileRule } from './deviceProfilePresentation';
 import {
   getAttributes,
   getAttributesByScope,
@@ -123,25 +124,8 @@ function toBoolean(value: unknown): boolean | undefined {
   return undefined;
 }
 
-function hasKeyword(value: unknown, keywords: string[]) {
-  const normalized = String(value || '').toLowerCase();
-  return keywords.some((keyword) => normalized.includes(keyword));
-}
-
-function resolveNodeKind(device: DeviceInfo, state: DeviceTelemetryState): DeviceNodeKind {
-  const candidates = [
-    readFirstValue(state, NODE_KIND_KEYS),
-    device.type,
-    device.label,
-    device.deviceProfileName,
-    device.name,
-  ];
-
-  if (candidates.some((value) => hasKeyword(value, ['camera', 'monitor', 'video', '摄像', '监控', '视频']))) {
-    return 'camera';
-  }
-
-  return 'sensor';
+function resolveNodeKind(device: DeviceInfo, _state: DeviceTelemetryState): DeviceNodeKind {
+  return defaultProfileRule(readDeviceProfile(device)).pointKind || 'sensor';
 }
 
 function resolveDeviceStatus(device: DeviceInfo, state: DeviceTelemetryState) {
@@ -183,6 +167,7 @@ function toMapPoint(device: DeviceInfo, state: LoadedDeviceState): MapPoint | nu
   const nodeKind = resolveNodeKind(device, state.values);
   const status = resolveDeviceStatus(device, state.values);
   const base = {
+    ...readDeviceProfile(device),
     id: `device-${device.id.id}`,
     name: device.label || device.name || device.id.id,
     longitude: location.longitude,

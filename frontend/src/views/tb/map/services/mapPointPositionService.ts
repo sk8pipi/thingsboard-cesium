@@ -1,3 +1,4 @@
+import { readDeviceProfile } from './deviceProfilePresentation';
 import type { MapPoint, MapPointLocation } from '../types/mapPointTypes';
 
 export function usesTemplatePosition(point: Pick<MapPoint, 'modelAnchor' | 'positionSource'>): boolean {
@@ -14,6 +15,7 @@ export function mergeDeviceMapPoint(dynamicPoint: MapPoint, templatePoint: MapPo
     height: useDeviceLocation ? dynamicPoint.height : templatePoint.height,
     heightMode: useDeviceLocation ? dynamicPoint.heightMode : templatePoint.heightMode,
     locationSource: useDeviceLocation ? 'deviceInfo' : 'manual',
+    ...readDeviceProfile(dynamicPoint, templatePoint),
     online: dynamicPoint.online,
     statusText: dynamicPoint.statusText,
     color: dynamicPoint.color,
@@ -25,6 +27,9 @@ export function mergePointRuntimeFields(point: MapPoint, runtime: Record<string,
   return {
     ...point,
     ...runtime,
+    ...readDeviceProfile(runtime, point),
+    pointStyleOverride: point.pointStyleOverride,
+    sensorStyleOverride: point.sensorStyleOverride,
     id: point.id,
     type: point.type,
     name: point.name,

@@ -1,4 +1,5 @@
 ﻿export type BuiltInSensorType =
+  | 'camera'
   | 'temperature'
   | 'humidity'
   | 'electricity_consumption'
@@ -42,6 +43,7 @@ export interface ResolvedSensorPointStyle extends SensorPointStyle {
 }
 
 const ICONS: Record<BuiltInSensorType, SensorPointIconShape> = {
+  camera: { viewBox: '0 0 64 64', paths: ['M8 16h32v32H8z M44 26l14-9v30l-14-9z'] },
   temperature: {
     viewBox: '0 0 1024 1024',
     paths: [
@@ -97,6 +99,7 @@ const ICONS: Record<BuiltInSensorType, SensorPointIconShape> = {
 };
 
 export const SENSOR_POINT_STYLE_REGISTRY: Record<BuiltInSensorType, SensorPointStyle> = {
+  camera: { type: 'camera', label: '监控设备', color: '#2EF527', icon: ICONS.camera },
   temperature: { type: 'temperature', label: '\u6e29\u5ea6', color: '#FFE4E1', icon: ICONS.temperature },
   humidity: { type: 'humidity', label: '\u6e7f\u5ea6', color: '#00CED1', icon: ICONS.humidity },
   electricity_consumption: {
