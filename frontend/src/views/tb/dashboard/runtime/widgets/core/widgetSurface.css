@@ -39,4 +39,7 @@
 .tb-widget-surface--nested {
   --tb-widget-surface-opacity: 0.025;
   --tb-widget-surface-shadow-strength: 0.08;
+  /* 点位弹窗外层已完成玻璃模糊，内层仅保留高光和边框。 */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }

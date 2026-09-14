@@ -19,9 +19,10 @@ export function saveWidgetsBundle(data?: WidgetsBundle | any) {
   });
 }
 
-export function getWidgetsBundleById(widgetsBundleId: string) {
+export function getWidgetsBundleById(widgetsBundleId: string, inlineImages = false) {
   return defHttp.get<WidgetsBundle>({
     url: `/api/widgetsBundle/${widgetsBundleId}`,
+    params: { inlineImages },
   });
 }
 

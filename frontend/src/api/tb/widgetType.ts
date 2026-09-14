@@ -15,10 +15,10 @@ export interface WidgetType extends BasicModel<EntityType.WIDGET_TYPE> {
   externalId?: EntityId<EntityType.WIDGET_TYPE>;
 }
 
-export function getWidgetTypeById(widgetTypeId: string, inlineImages?: boolean) {
+export function getWidgetTypeById(widgetTypeId: string, includeResources = false) {
   return defHttp.get<WidgetType>({
     url: `/api/widgetType/${widgetTypeId}`,
-    params: { inlineImages: inlineImages },
+    params: { includeResources },
   });
 }
 
@@ -70,10 +70,10 @@ export function getBundleWidgetTypes(widgetsBundleId: string) {
   });
 }
 
-export function getBundleWidgetTypesDetails(widgetsBundleId: string, inlineImages?: boolean) {
+export function getBundleWidgetTypesDetails(widgetsBundleId: string, includeResources = false) {
   return defHttp.get<Array<WidgetType>>({
     url: '/api/widgetTypesDetails',
-    params: { widgetsBundleId: widgetsBundleId, inlineImages: inlineImages },
+    params: { widgetsBundleId, includeResources },
   });
 }
 export function getBundleWidgetTypeFqns(widgetsBundleId: string) {

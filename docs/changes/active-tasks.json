@@ -1,27 +1,26 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-12",
+  "updatedAt": "2026-09-14",
   "tasks": [
     {
-      "taskId": "map-device-profile",
-      "name": "按设备配置统一点位展示",
+      "taskId": "vue-widget-library",
+      "name": "Vue 原生部件库与液态玻璃配置流程",
       "status": "待人工提交",
       "owner": "主 Agent",
-      "taskDirectory": "docs/changes/map-device-profile",
+      "taskDirectory": "docs/changes/vue-widget-library",
       "worktree": ".",
       "fileScopes": [
-        "frontend/src/views/tb/map",
-        "frontend/src/views/tb/dashboard/runtime/widgets/aggregate",
+        "frontend/src/views/tb",
+        "frontend/src/api/tb",
         "frontend/tests",
-        "backend/application/src/main/java/org/thingsboard/server/service/map",
-        "backend/application/src/test/java/org/thingsboard/server/service/map",
+        "frontend/scripts",
         "docs/ai",
-        "docs/changes/map-device-profile",
-        "docs/changes/map-model-anchor/delivery.md",
+        "docs/changes/vue-widget-library",
+        "docs/changes/map-device-profile/delivery.md",
         "docs/changes/active-tasks.json"
       ],
       "sharedResources": [],
-      "lastUpdated": "2026-09-12"
+      "lastUpdated": "2026-09-14"
     }
   ]
 }

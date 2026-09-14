@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "noEmit": true, "skipLibCheck": true },
+  "include": ["../types/**/*.d.ts", "../src/views/tb/dashboard/editor.vue", "../src/views/tb/map/MapWidgetEditor.vue", "../src/views/tb/map/SensorPopupWidgetEditor.vue", "../src/views/tb/widgetType/list.vue", "../src/views/tb/widgetsBundle/list.vue"]
+}

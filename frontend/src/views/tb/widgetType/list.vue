@@ -6,8 +6,8 @@
       </template> -->
       <template #tableTitle>
         <div class="space-x-2">
-          <a-button type="primary" @click="handleForm({})">
-            <Icon icon="i-fluent:add-12-filled" /> {{ t('tb.widgetType.action.add') }}
+          <a-button type="primary" @click="importVisible = true">
+            <Icon icon="i-fluent:add-12-filled" /> 导入 JSON 预览
           </a-button>
           <a-input
             v-model:value="searchParam.textSearch"
@@ -28,17 +28,29 @@
         </a>
       </template>
       <template #isSystem="{ record }">
-        <Checkbox :checked="isEqual(SYS_TENANT_ID, record.tenantId)" />
+        <Checkbox disabled :checked="isEqual(SYS_TENANT_ID, record.tenantId)" />
       </template>
       <template #deprecated="{ record }">
-        <Checkbox :checked="record.deprecate" />
+        <Checkbox disabled :checked="record.deprecated" />
       </template>
       <template #bundles="{ record }">
         <Tag class="!mr-2 !border-rounded-md" v-for="bundle in record.bundles" :key="bundle.id.id">
           {{ bundle.name }}
         </Tag>
       </template>
+      <template #support="{ record }">
+        <Tag
+          :color="getNativeWidgetSupport(record).supported ? 'green' : 'orange'"
+          :title="getNativeWidgetSupport(record).reason"
+          >{{
+            getNativeWidgetSupport(record).supported ? '目录有适配 · 详情核验' : getNativeWidgetSupport(record).label
+          }}</Tag
+        >
+      </template>
     </BasicTable>
+    <WidgetDetail :visible="detailVisible" :widget-id="selectedId" @close="detailVisible = false" />
+    <ResourceExportModal :visible="exportVisible" kind="widget" :record="exportRecord" @close="exportVisible = false" />
+    <ResourceImportModal :visible="importVisible" @close="importVisible = false" />
   </div>
 </template>
 <script lang="ts">
@@ -47,12 +59,11 @@
   });
 </script>
 <script lang="ts" setup>
-  import { defineComponent, reactive } from 'vue';
+  import { defineComponent, reactive, ref } from 'vue';
   import { useI18n } from '/@/hooks/web/useI18n';
   import { BasicTable, BasicColumn, useTable } from '/@/components/Table';
   import { useMessage } from '/@/hooks/web/useMessage';
   import { Icon } from '/@/components/Icon';
-  import { router } from '/@/router';
   import { getWidgetTypeList, deleteWidgetType } from '/@/api/tb/widgetType';
   import { Checkbox, Tag } from 'ant-design-vue';
   import { isEqual } from 'lodash-es';
@@ -61,18 +72,26 @@
   import { Authority } from '/@/enums/authorityEnum';
   import { usePermission } from '/@/hooks/web/usePermission';
 
+  import WidgetDetail from './detail.vue';
+  import ResourceExportModal from '../widgetsLibrary/ResourceExportModal.vue';
+  import ResourceImportModal from '../widgetsLibrary/ResourceImportModal.vue';
+  import { getNativeWidgetSupport } from '../dashboard/runtime/native/nativeWidgetCatalog';
+
   const { t } = useI18n('tb');
   const { createConfirm, showMessage } = useMessage();
   const { hasPermission } = usePermission();
 
-  const getTitle = {
-    value: router.currentRoute.value.meta.title || t('tb.widgetType.title'),
-  };
+  const detailVisible = ref(false);
+  const selectedId = ref('');
+  const exportVisible = ref(false);
+  const exportRecord = ref<Recordable>({});
+  const importVisible = ref(false);
 
   const searchParam = reactive({
     textSearch: '',
   });
   const tableColumns: BasicColumn[] = [
+    { title: 'Vue 运行支持', dataIndex: 'support', width: 160, slot: 'support' },
     {
       title: t('tb.widgetType.table.title'),
       dataIndex: 'name',
@@ -159,10 +178,6 @@
     return { ...fetchParam, textSearch: searchParam.textSearch };
   }
 
-  function handleForm(record: Recordable) {
-    // openModal(true, record);
-  }
-
   async function handleDelete(record: Recordable) {
     createConfirm({
       iconType: 'error',
@@ -188,7 +203,8 @@
   }
 
   function handleDownload(record: Recordable) {
-    console.log(record);
+    exportRecord.value = record;
+    exportVisible.value = true;
   }
 
   function handleSuccess() {
@@ -196,7 +212,8 @@
   }
 
   function handleDetail(record: Recordable) {
-    // openDrawer(true, record);
+    selectedId.value = record.id.id;
+    detailVisible.value = true;
   }
 </script>
 <style lang="less">

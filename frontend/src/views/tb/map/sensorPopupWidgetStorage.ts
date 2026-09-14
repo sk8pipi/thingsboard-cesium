@@ -6,6 +6,7 @@ export type PopupWidgetConfig = {
   type: string;
   widgetKey?: string;
   definitionVersion?: number;
+  typeFullFqn?: string;
   title: string;
   config: Record<string, any>;
   appearance?: WidgetAppearance;

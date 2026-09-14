@@ -162,12 +162,14 @@ export function normalizeWidgetInstance(raw: any, fallbackId?: string): Dashboar
   const definition = getWidgetDefinition(key);
   if (!definition) return null;
 
-  return createWidgetInstance(key, {
+  const instance = createWidgetInstance(key, {
     id: String(raw.id || fallbackId || `widget_${key}_${Date.now()}`),
     title: raw.title || definition.title,
     config: raw.config || {},
     appearance: raw.appearance || {},
   });
+  if (instance && raw.config?.native && raw.typeFullFqn) instance.typeFullFqn = raw.typeFullFqn;
+  return instance;
 }
 
 export function normalizeWidgetRecord(rawWidgets: unknown): Record<string, DashboardWidget> {

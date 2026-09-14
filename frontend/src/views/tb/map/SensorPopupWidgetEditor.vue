@@ -106,6 +106,8 @@
         :widgets="normalizedWidgets"
         :runtime="datasourceRuntime"
         removable
+        editable
+        @edit="editNativeWidget"
         @remove="removeWidget"
       />
       <div v-else class="spwe-empty">当前传感器点位还没有绑定弹窗部件</div>
@@ -113,6 +115,9 @@
       <div class="spwe-section-title">添加部件</div>
 
       <div class="spwe-actions">
+        <button class="spwe-btn" type="button" :disabled="!currentDeviceId" @click="nativePickerVisible = true"
+          >原生部件库 · Vue</button
+        >
         <button class="spwe-add-btn" type="button" aria-label="添加部件" @click="openWidgetLibrary">+</button>
       </div>
 
@@ -122,9 +127,26 @@
       </div>
     </div>
   </div>
+  <NativeWidgetPicker
+    v-if="visible && currentDeviceId"
+    :visible="nativePickerVisible"
+    :locked-entity="{ entityId: currentDeviceId, name: currentDeviceName }"
+    @close="nativePickerVisible = false"
+    @confirm="applyNativeWidget"
+  />
+  <NativeWidgetComposer
+    v-if="visible && nativeEditSource && currentDeviceId"
+    :visible="true"
+    :source="nativeEditSource"
+    :locked-entity="{ entityId: currentDeviceId, name: currentDeviceName }"
+    @close="nativeEditSource = null"
+    @confirm="applyNativeWidget"
+  />
 </template>
 
 <script setup lang="ts">
+  import NativeWidgetPicker from '../dashboard/runtime/native/NativeWidgetPicker.vue';
+  import NativeWidgetComposer from '../dashboard/runtime/native/NativeWidgetComposer.vue';
   import { profileLabel } from './services/deviceProfilePresentation';
   import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
   import { getTimeseriesKeys } from '/@/api/tb/telemetry';
@@ -182,6 +204,18 @@
   }>();
 
   const localWidgets = ref<PopupWidgetConfig[]>([]);
+  const nativePickerVisible = ref(false);
+  const nativeEditSource = ref<Record<string, any> | null>(null);
+  function editNativeWidget(index: number) {
+    nativeEditSource.value = normalizedWidgets.value[index];
+  }
+  function applyNativeWidget(widget: DashboardWidget) {
+    const index = localWidgets.value.findIndex((item) => item.id === widget.id);
+    if (index < 0) localWidgets.value.push(toPopupWidgetConfig(widget));
+    else localWidgets.value[index] = toPopupWidgetConfig(widget);
+    nativePickerVisible.value = false;
+    nativeEditSource.value = null;
+  }
   const widgetLibraryVisible = ref(false);
   const keyDialogVisible = ref(false);
   const selectedWidgetKey = ref<LocalWidgetKey | ''>('');
@@ -197,7 +231,7 @@
   const popupWidgetLibrary = computed(
     () =>
       listWidgetDefinitions('point-detail')
-        .filter((def) => def.key !== 'cesium3d')
+        .filter((def) => def.key !== 'cesium3d' && !def.key.startsWith('native_'))
         .map((def) => {
           return {
             key: def.key,
@@ -261,6 +295,7 @@
       type: widget.widgetKey,
       widgetKey: widget.widgetKey,
       definitionVersion: widget.definitionVersion,
+      typeFullFqn: widget.typeFullFqn,
       title: widget.title,
       config: widget.config,
       appearance: widget.appearance,
@@ -397,6 +432,8 @@
   watch(
     () => [props.visible, props.sensor?.id, props.widgets],
     () => {
+      nativePickerVisible.value = false;
+      nativeEditSource.value = null;
       if (!props.visible || !props.sensor?.id) {
         localWidgets.value = [];
         return;

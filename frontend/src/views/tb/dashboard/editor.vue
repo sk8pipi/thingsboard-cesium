@@ -23,6 +23,22 @@
 
       <!-- ✅ 右侧抽屉：部件库 -->
       <WidgetDrawerTb v-if="canEditDashboard" v-model="drawerVisible" @add="addWidgetFromTb" />
+      <button v-if="canEditDashboard && editMode" class="native-library-button" @click="nativePickerVisible = true"
+        >原生部件库 · Vue 配置</button
+      >
+      <NativeWidgetPicker
+        v-if="editMode && canEditDashboard"
+        :visible="nativePickerVisible"
+        @close="nativePickerVisible = false"
+        @confirm="applyNativeWidget"
+      />
+      <NativeWidgetComposer
+        v-if="editMode && nativeEditSource && canEditDashboard"
+        :visible="true"
+        :source="nativeEditSource"
+        @close="nativeEditSource = null"
+        @confirm="applyNativeWidget"
+      />
     </div>
   </div>
 </template>
@@ -41,8 +57,19 @@
 
   import DashboardToolbar from './runtime/DashboardToolbar.vue';
   import WidgetDrawerTb from './runtime/WidgetDrawerTb.vue';
+  import NativeWidgetPicker from './runtime/native/NativeWidgetPicker.vue';
+  import NativeWidgetComposer from './runtime/native/NativeWidgetComposer.vue';
+  import { getNativeWidgetSupport, nativeWidgetCatalog } from './runtime/native/nativeWidgetCatalog';
+  import WidgetHost from './runtime/widgets/WidgetHost.vue';
+  import { createDatasourceRuntime } from './runtime/datasourceRuntime';
+  import {
+    createWidgetInstance,
+    normalizeWidgetInstance,
+    widgetAppearanceStyleText,
+  } from './runtime/widgets/core/widgetInstance';
+  import './runtime/widgets/core/widgetSurface.css';
 
-  import type { GridItem, DashboardWidget, WidgetType } from './runtime/types';
+  import type { GridItem, DashboardWidget } from './runtime/types';
   import { widgetRegistry, type LocalWidgetKey } from './runtime/widgets/registry/widgetRegistry';
 
   defineOptions({ name: 'DashboardEditor' });
@@ -79,13 +106,16 @@
   // 编辑模式 & 抽屉
   const editMode = ref(false);
   const drawerVisible = ref(false);
+  const nativePickerVisible = ref(false);
+  const nativeEditSource = ref<Record<string, any> | null>(null);
+  const datasourceRuntime = createDatasourceRuntime();
 
   // 全屏
   const isFullscreen = ref(false);
   const fullscreenEl = ref<HTMLElement | null>(null);
 
   const editorContainer = ref<HTMLDivElement | null>(null);
-  let grid: GridStack | null = null;
+  let grid: any = null;
 
   // 你自己的布局/部件数据（存到 dashboard.configuration.__vueLayout/__vueWidgets）
   const vueLayout = ref<GridItem[]>([]);
@@ -150,7 +180,12 @@
     if (!Comp) return;
 
     const app = createApp({
-      render: () => h(Comp),
+      render: () =>
+        h(WidgetHost, {
+          widget: vueWidgets.value[id],
+          runtime: datasourceRuntime,
+          context: { host: 'dashboard', readonly: !editMode.value },
+        }),
     });
 
     app.mount(mountEl);
@@ -165,6 +200,14 @@
 
     const target = e.target as HTMLElement | null;
     if (!target) return;
+
+    const editButton = target.closest?.('.tb-widget-config') as HTMLElement | null;
+    if (editButton) {
+      e.preventDefault();
+      e.stopPropagation();
+      nativeEditSource.value = vueWidgets.value[editButton.getAttribute('data-id') || ''] || null;
+      return;
+    }
 
     const btn = target.closest?.('.tb-widget-del') as HTMLElement | null;
     if (!btn) return;
@@ -206,7 +249,7 @@
     vueLayout.value = vueLayout.value.filter((it) => it.i !== id);
 
     // 4) 用 grid 当前 nodes 重新生成 layout（更稳）
-    vueLayout.value = grid.engine.nodes.map((n) => ({
+    vueLayout.value = grid.engine.nodes.map((n: any) => ({
       i: String(n.id),
       x: n.x ?? 0,
       y: n.y ?? 0,
@@ -231,6 +274,7 @@
    *  初始化
    *  ========================= */
   onMounted(async () => {
+    datasourceRuntime.connect();
     window.addEventListener('resize', resize);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
 
@@ -264,8 +308,8 @@
         const id = String(it?.id ?? '');
         if (!id) continue;
 
-        const type = (vueWidgets.value?.[id]?.type || '') as any;
-        if (type === 'cesium3d' || type === 'chart') {
+        const type = vueWidgets.value?.[id]?.widgetKey || vueWidgets.value?.[id]?.type || '';
+        if (widgetRegistry[type]) {
           // 不管之前 mount 失败与否，这里一定会再试一次
           mountWidget(id, type);
         }
@@ -276,7 +320,7 @@
       if (!grid) return;
       if (!editMode.value) return;
 
-      vueLayout.value = grid.engine.nodes.map((n) => ({
+      vueLayout.value = grid.engine.nodes.map((n: any) => ({
         i: String(n.id),
         x: n.x ?? 0,
         y: n.y ?? 0,
@@ -308,6 +352,7 @@
     grid = null;
 
     unmountAllWidgets();
+    datasourceRuntime.close();
   });
 
   /** =========================
@@ -328,10 +373,18 @@
 
       const cfg = res.configuration || {};
       vueLayout.value = cfg.__vueLayout || [];
-      vueWidgets.value = cfg.__vueWidgets || {};
+      // Preserve unknown records for forward compatibility; only known components are mounted.
+      vueWidgets.value = Object.fromEntries(
+        Object.entries(cfg.__vueWidgets || {}).map(([key, raw]: [string, any]) => {
+          const compatible = raw.type === 'chart' ? { ...raw, widgetKey: 'timeseriesLine' } : raw;
+          return [key, normalizeWidgetInstance(compatible, key) || raw];
+        }),
+      );
 
       // 退出编辑（切换 dashboard 时状态清空）
       editMode.value = false;
+      nativePickerVisible.value = false;
+      nativeEditSource.value = null;
       drawerVisible.value = false;
       grid.setStatic(true);
       editorContainer.value?.classList.remove('tb-editing');
@@ -349,14 +402,22 @@
    *  渲染 GridStack
    *  ========================= */
   function widgetHtml(id: string, title: string) {
+    const escapeHtml = (value: string) =>
+      value.replace(
+        /[&<>"']/g,
+        (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!,
+      );
+    const widget = vueWidgets.value[id];
+    const style = widgetAppearanceStyleText(widget?.widgetKey || '', widget?.appearance);
     // ✅ 删除按钮：始终存在，但你可以用 CSS 做 hover 才显示
     // 逻辑上只有 editMode 才能点（onEditorClick 里限制了）
     return `
-      <div class="tb-widget">
-        <button class="tb-widget-del" data-id="${id}" title="删除">×</button>
-        <div class="tb-widget-title">${title}</div>
+      <div class="tb-widget tb-widget-surface" style="${style}">
+        <button class="tb-widget-del" data-id="${escapeHtml(id)}" title="删除">×</button>
+        ${widget?.config?.native ? `<button class="tb-widget-config" data-id="${escapeHtml(id)}">配置</button>` : ''}
+        <div class="tb-widget-title">${escapeHtml(title)}</div>
         <div class="tb-widget-body">
-          <div id="tb-mount-${id}" class="tb-widget-mount"></div>
+          <div id="tb-mount-${escapeHtml(id)}" class="tb-widget-mount"></div>
         </div>
       </div>
     `;
@@ -375,7 +436,7 @@
     vueLayout.value.forEach((it) => {
       const w = vueWidgets.value[it.i];
       const title = w?.title || it.i;
-      const type = (w?.type || 'unknown') as any;
+      const type = w?.widgetKey || w?.type || 'unknown';
 
       grid!.addWidget({
         id: it.i,
@@ -387,7 +448,7 @@
       } as any);
 
       // ✅ 仅挂载我们本地的两种
-      if (type === 'cesium3d' || type === 'chart') {
+      if (widgetRegistry[type]) {
         mountWidget(it.i, type);
       }
     });
@@ -429,6 +490,8 @@
     }
 
     editMode.value = false;
+    nativePickerVisible.value = false;
+    nativeEditSource.value = null;
     drawerVisible.value = false;
     grid.setStatic(true);
 
@@ -445,7 +508,7 @@
     try {
       const latest = await getDashboardById(dashboardId.value);
 
-      const layout: GridItem[] = grid.engine.nodes.map((n) => ({
+      const layout: GridItem[] = grid.engine.nodes.map((n: any) => ({
         i: String(n.id),
         x: n.x ?? 0,
         y: n.y ?? 0,
@@ -510,69 +573,41 @@
   /** =========================
    *  抽屉添加部件：从 TB 列表里选（只接你本地两个）
    *  ========================= */
-  function addWidgetFromTb(w: any) {
-    if (!grid) return;
-    if (!canEditDashboard.value) return;
-    if (!editMode.value) return;
-
-    const widgetKey = (w?.alias || '') as LocalWidgetKey;
-    if (widgetKey !== 'cesium3d' && widgetKey !== 'chart') return;
-
-    const id = `w_${Date.now()}`;
-
-    vueWidgets.value[id] = {
-      id,
-      type: widgetKey,
-      title: w?.name || widgetKey,
-      config: {},
-    };
-
-    grid.addWidget({
-      id,
-      w: 6,
-      h: 4,
-      content: widgetHtml(id, w?.name || widgetKey),
-    } as any);
-
-    mountWidget(id, widgetKey);
-
-    vueLayout.value = grid.engine.nodes.map((n) => ({
-      i: String(n.id),
-      x: n.x ?? 0,
-      y: n.y ?? 0,
-      w: n.w ?? 1,
-      h: n.h ?? 1,
-    }));
-
-    syncCanvasHeight();
+  function addWidgetFromTb(source: any) {
+    if (!grid || !canEditDashboard.value || !editMode.value) return;
+    if (source.alias === 'cesium3d') {
+      const widget = createWidgetInstance('cesium3d');
+      if (widget) applyNativeWidget(widget);
+      return;
+    }
+    const candidate = source.alias === 'chart' ? nativeWidgetCatalog.find((item) => item.fqn === 'line_chart') : source;
+    const support = getNativeWidgetSupport(candidate);
+    if (!support.supported) {
+      errorMsg.value = support.reason;
+      return;
+    }
+    nativeEditSource.value = candidate;
+    drawerVisible.value = false;
   }
-
-  /** 你旧的 addWidget(type: WidgetType) 如果还在用，也保留不影响 */
-  function addWidget(type: WidgetType) {
-    if (!grid) return;
-    if (!canEditDashboard.value) return;
-    if (!editMode.value) return;
-
-    const id = `w_${Date.now()}`;
-    const title = type === 'timeseries' ? '折线图' : type === 'singleValue' ? '单值卡片' : '部件';
-
-    vueWidgets.value[id] = { id, type, title, config: {} };
-
-    grid.addWidget({
-      id,
-      w: 6,
-      h: 4,
-      content: widgetHtml(id, title),
-    } as any);
-
-    vueLayout.value = grid.engine.nodes.map((n) => ({
-      i: String(n.id),
-      x: n.x ?? 0,
-      y: n.y ?? 0,
-      w: n.w ?? 1,
-      h: n.h ?? 1,
-    }));
-
+  function applyNativeWidget(widget: DashboardWidget) {
+    if (!grid || !canEditDashboard.value || !editMode.value) return;
+    const existing = vueWidgets.value[widget.id];
+    vueWidgets.value[widget.id] = widget;
+    if (existing) renderGrid();
+    else {
+      grid.addWidget({ id: widget.id, w: 6, h: 7, content: widgetHtml(widget.id, widget.title) } as any);
+      void mountWidget(widget.id, widget.widgetKey);
+      vueLayout.value = grid.engine.nodes.map((n: any) => ({
+        i: String(n.id),
+        x: n.x ?? 0,
+        y: n.y ?? 0,
+        w: n.w ?? 1,
+        h: n.h ?? 1,
+      }));
+    }
+    nativePickerVisible.value = false;
+    nativeEditSource.value = null;
+    drawerVisible.value = false;
     syncCanvasHeight();
   }
   function hardClearGridDom() {
@@ -585,6 +620,35 @@
 </script>
 
 <style scoped>
+  .native-library-button {
+    position: absolute;
+    right: 32px;
+    top: 50px;
+    z-index: 10;
+    padding: 8px;
+    background: #194657;
+    color: #e6faff;
+    border: 1px solid #6ce9ff66;
+    border-radius: 6px;
+  }
+  :deep(.tb-widget-config) {
+    position: absolute;
+    right: 40px;
+    top: 5px;
+    z-index: 4;
+    color: #b6f4ff;
+    background: #163347;
+    border: 1px solid #ffffff40;
+    border-radius: 5px;
+    display: none;
+  }
+  .is-edit :deep(.tb-widget-config) {
+    display: block;
+  }
+  :deep(.tb-widget.tb-widget-surface) {
+    color: #e6faff;
+  }
+
   .dashboard-container {
     height: 100%;
     padding: 24px;
@@ -596,7 +660,7 @@
   .dashboard-editor {
     width: 100%;
     min-height: 100%;
-    background: #f5f5f5;
+    background: linear-gradient(120deg, #142d40, #123e3c);
     border: 1px dashed #ccc;
     overflow: auto;
   }
@@ -609,9 +673,7 @@
   /* widget 样式 */
   :deep(.tb-widget) {
     height: 100%;
-    background: #fff;
-    border: 1px solid #ddd;
-    border-radius: 10px;
+    border-radius: var(--tb-widget-surface-radius);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -627,11 +689,11 @@
   :deep(.tb-widget-body) {
     padding: 10px;
     font-size: 12px;
-    opacity: 0.7;
+    min-height: 0;
     flex: 1;
   }
   :deep(.tb-widget-body) {
-    height: calc(100% - 0px);
+    height: 0;
   }
 
   :deep(.tb-widget-mount) {

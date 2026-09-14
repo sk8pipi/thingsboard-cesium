@@ -169,7 +169,7 @@
   const segOptions = [
     { label: '系统', value: 'system' },
     { label: '自定义', value: 'tenant' },
-  ] as const;
+  ];
   const drawerSize = computed(() => {
     return 'clamp(620px, 48vw, 960px)';
   });
@@ -192,11 +192,11 @@
   const filteredBundles = computed(() => {
     const kw = bundleSearch.value.trim().toLowerCase();
     const list = bundles.value.filter((b) => {
-      const isSys = !b.tenantId;
+      const isSys = !b.tenantId?.id || b.tenantId.id === '13814000-1dd2-11b2-8080-808080808080';
       if (!isSys) return false; // 只展示系统 bundle
 
       if (!kw) return true;
-      return ((b.title || '').toLowerCase().includes(kw) || b.alias || '').toLowerCase().includes(kw);
+      return (b.title || '').toLowerCase().includes(kw) || (b.alias || '').toLowerCase().includes(kw);
     });
 
     // 排序：title

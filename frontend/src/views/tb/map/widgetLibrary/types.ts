@@ -1,7 +1,7 @@
 export type WidgetSource = 'local' | 'thingsboard' | 'thingsboard-import';
 
 /** 你库里支持的 widget 类型（与 import adapter / registry 对齐） */
-export type LibraryWidgetKind = 'chart' | 'pie' | 'bar' | 'static' | 'cesium3d' | 'unknown';
+export type LibraryWidgetKind = 'chart' | 'pie' | 'bar' | 'static' | 'cesium3d' | 'native' | 'unknown';
 
 export type CustomWidgetDefinition = {
   id: string;

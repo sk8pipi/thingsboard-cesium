@@ -579,6 +579,7 @@
         <div class="mw-add-title">选择要添加的部件</div>
 
         <div class="mw-add-list">
+          <button class="mw-btn" type="button" @click="nativePickerVisible = true">原生部件库 · Vue 配置</button>
           <input
             ref="fileInputEl"
             type="file"
@@ -667,10 +668,26 @@
       </div>
     </div>
     <div v-if="isSavingEdit" class="mw-saving-mask" role="status">正在保存，请勿关闭页面……</div>
+    <NativeWidgetPicker
+      v-if="editorMode === 'editing' && !isSavingEdit"
+      :visible="nativePickerVisible"
+      @close="nativePickerVisible = false"
+      @confirm="applyNativeWidget"
+    />
+    <NativeWidgetComposer
+      v-if="nativeEditSource && editorMode === 'editing' && !isSavingEdit"
+      :visible="true"
+      :source="nativeEditSource"
+      @close="nativeEditSource = null"
+      @confirm="applyNativeWidget"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
+  import NativeWidgetPicker from '../dashboard/runtime/native/NativeWidgetPicker.vue';
+  import NativeWidgetComposer from '../dashboard/runtime/native/NativeWidgetComposer.vue';
+  import { getNativeWidgetSupport } from '../dashboard/runtime/native/nativeWidgetCatalog';
   import { createProfileBillboardCache } from './services/profileBillboardCache';
   import { subscribeAssignedMapTemplateRuntimeEvents } from './services/mapTemplateRuntimeService';
   import {
@@ -1030,8 +1047,39 @@
   let renderPatched = false;
 
   const builtInWidgetDefs = computed(() =>
-    listWidgetDefinitions('dashboard').filter((item) => item.key !== 'cesium3d'),
+    listWidgetDefinitions('dashboard').filter((item) => item.key !== 'cesium3d' && !item.key.startsWith('native_')),
   );
+  const nativePickerVisible = ref(false);
+  const nativeEditSource = ref<Record<string, any> | null>(null);
+  watch(
+    () => editorMode.value,
+    (mode) => {
+      if (mode !== 'editing') {
+        nativePickerVisible.value = false;
+        nativeEditSource.value = null;
+      }
+    },
+  );
+  function applyNativeWidget(widget: DashboardWidget) {
+    if (!grid || editorMode.value !== 'editing' || isSavingEdit.value) return;
+    const existing = widgets.value[widget.id];
+    widgets.value[widget.id] = { ...widget, type: widget.widgetKey } as WidgetData;
+    if (existing) renderGrid();
+    else {
+      const def = widgetRegistry[widget.widgetKey];
+      grid.addWidget({
+        id: widget.id,
+        w: def.dashboardPlacement.width,
+        h: def.dashboardPlacement.height,
+        content: widgetHtml(widget.id),
+      } as any);
+      void mountWidget(widget.id, widget.widgetKey);
+      syncLayoutFromGrid();
+    }
+    nativePickerVisible.value = false;
+    nativeEditSource.value = null;
+    addPanelVisible.value = false;
+  }
   const currentWidget = computed(() => {
     if (!selectedWidgetId.value) return null;
     return widgets.value[selectedWidgetId.value] || null;
@@ -1404,7 +1452,8 @@
       bar: 'Bar',
       static: 'Static',
       cesium3d: '3D Map',
-      unknown: 'Imported Widget',
+      native: 'Vue 基础适配',
+      unknown: '待适配（保留原始定义）',
     };
     return map[String(kind || 'unknown')] || String(kind || 'Imported Widget');
   }
@@ -1793,13 +1842,15 @@
   }
 
   function widgetHtml(id: string) {
+    const safeId = escapeSvgText(id);
     const widget = widgets.value[id];
     const surfaceStyle = widgetAppearanceStyleText(widget?.widgetKey || widget?.type || '', widget?.appearance);
     return `
-      <div class="mw-widget tb-widget-surface" data-widget-id="${id}" style="${surfaceStyle}">
-        <button class="mw-del" data-id="${id}" title="删除">脳</button>
+      <div class="mw-widget tb-widget-surface" data-widget-id="${safeId}" style="${surfaceStyle}">
+        ${widget?.config?.native ? `<button class="mw-native-edit" data-id="${safeId}" title="配置部件" style="position:absolute;right:42px;top:8px;z-index:5;color:#dff8ff;background:#14313ddd;border:1px solid #ffffff40;border-radius:5px;cursor:pointer">配置</button>` : ''}
+        <button class="mw-del" data-id="${safeId}" title="删除">脳</button>
         <div class="mw-body">
-          <div id="mw-mount-${id}" class="mw-mount"></div>
+          <div id="mw-mount-${safeId}" class="mw-mount"></div>
         </div>
       </div>
     `;
@@ -1870,6 +1921,15 @@
 
     const target = event.target as HTMLElement | null;
     if (!target) return;
+
+    const editButton = target.closest?.('.mw-native-edit') as HTMLElement | null;
+    if (editButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = editButton.getAttribute('data-id') || '';
+      nativeEditSource.value = widgets.value[id] || null;
+      return;
+    }
 
     const deleteButton = target.closest?.('.mw-del') as HTMLElement | null;
     if (deleteButton) {
@@ -2129,6 +2189,7 @@
     if (!file) return;
 
     try {
+      if (file.size > 20 * 1024 * 1024) throw new Error('文件超过 20 MB，请拆分后导入');
       const text = await file.text();
       const json = JSON.parse(text);
       const defs = importThingsboardJson(json);
@@ -2139,12 +2200,14 @@
       }
 
       for (const def of defs) {
-        if (def.kind !== 'chart' && def.kind !== 'pie' && def.kind !== 'bar') continue;
         upsertWidget(def);
       }
 
       reloadLibrary();
-      errorMsg.value = '';
+      const unavailable = defs.filter((def) => def.kind === 'unknown').length;
+      errorMsg.value = unavailable
+        ? `已保留 ${defs.length} 个原始定义，其中 ${unavailable} 个尚未适配；点击条目可查看原因。`
+        : '';
     } catch (error: any) {
       errorMsg.value = error?.message || String(error);
     } finally {
@@ -2167,6 +2230,17 @@
 
   function addFromLibrary(def: CustomWidgetDefinition) {
     if (!grid || editorMode.value !== 'editing') return;
+
+    if (def.raw && (def.raw.descriptor || def.defaultConfig?.native || def.kind === 'unknown')) {
+      const source = def.raw;
+      const support = getNativeWidgetSupport(source);
+      if (!support.supported) {
+        errorMsg.value = support.reason;
+        return;
+      }
+      nativeEditSource.value = source.config?.native ? { ...source, id: `native-${Date.now()}` } : source;
+      return;
+    }
 
     const localKey = mapImportedKindToLocalKey(def);
     if (!localKey) {

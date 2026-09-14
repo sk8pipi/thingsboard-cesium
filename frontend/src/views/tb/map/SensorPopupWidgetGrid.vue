@@ -9,6 +9,13 @@
       :style="itemStyle(widget)"
     >
       <button
+        v-if="editable && widget.config?.native"
+        class="sensor-popup-widget-grid__edit"
+        type="button"
+        @click="emit('edit', index)"
+        >配置</button
+      >
+      <button
         v-if="removable"
         class="sensor-popup-widget-grid__remove"
         type="button"
@@ -42,6 +49,7 @@
       widgets: DashboardWidget[];
       runtime: WidgetRuntime;
       removable?: boolean;
+      editable?: boolean;
       context?: {
         host: WidgetHostKind;
         readonly?: boolean;
@@ -56,6 +64,7 @@
 
   const emit = defineEmits<{
     (e: 'remove', index: number): void;
+    (e: 'edit', index: number): void;
   }>();
 
   function widgetKey(widget: DashboardWidget) {
@@ -88,6 +97,17 @@
 </script>
 
 <style scoped>
+  .sensor-popup-widget-grid__edit {
+    position: absolute;
+    right: 64px;
+    top: 8px;
+    z-index: 3;
+    background: #14313ddd;
+    color: #dff8ff;
+    border: 1px solid #ffffff40;
+    border-radius: 5px;
+    cursor: pointer;
+  }
   .sensor-popup-widget-grid {
     container-type: inline-size;
     display: grid;

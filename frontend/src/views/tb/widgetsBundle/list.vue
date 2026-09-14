@@ -9,6 +9,7 @@
           <a-button type="primary" @click="handleForm({})">
             <Icon icon="i-fluent:add-12-filled" /> {{ t('tb.widgetsBundle.action.add') }}
           </a-button>
+          <a-button @click="importVisible = true">导入 JSON 预览</a-button>
           <a-input
             v-model:value="searchParam.textSearch"
             :placeholder="t('common.search.searchText')"
@@ -28,10 +29,12 @@
         </a>
       </template>
       <template #isSystem="{ record }">
-        <Checkbox :checked="isEqual(SYS_TENANT_ID, record.tenantId)" />
+        <Checkbox disabled :checked="isEqual(SYS_TENANT_ID, record.tenantId)" />
       </template>
     </BasicTable>
-    <WidgetTypeInfoList @register="registerWidgetType" @success="handleSuccess" />
+    <WidgetTypeInfoList @register="registerWidgetType" />
+    <ResourceExportModal :visible="exportVisible" kind="bundle" :record="exportRecord" @close="exportVisible = false" />
+    <ResourceImportModal :visible="importVisible" @close="importVisible = false" />
     <InputForm @register="registerModal" @success="handleSuccess" />
     <DetailDrawer
       @register="registerDrawer"
@@ -48,14 +51,13 @@
   });
 </script>
 <script lang="ts" setup>
-  import { defineComponent } from 'vue';
+  import { defineComponent, ref } from 'vue';
   import { useI18n } from '/@/hooks/web/useI18n';
   import { useModal } from '/@/components/Modal';
   import { useDrawer } from '/@/components/Drawer';
   import { BasicTable, BasicColumn, useTable } from '/@/components/Table';
   import { useMessage } from '/@/hooks/web/useMessage';
   import { Icon } from '/@/components/Icon';
-  import { router } from '/@/router';
   import { widgetsBundleList, deleteWidgetsBundle } from '/@/api/tb/widgetsBundle';
   import { reactive } from 'vue';
   import InputForm from './form.vue';
@@ -67,13 +69,16 @@
   import { Authority } from '/@/enums/authorityEnum';
   import { usePermission } from '/@/hooks/web/usePermission';
 
+  import ResourceExportModal from '../widgetsLibrary/ResourceExportModal.vue';
+  import ResourceImportModal from '../widgetsLibrary/ResourceImportModal.vue';
+
   const { t } = useI18n('tb');
   const { createConfirm, showMessage } = useMessage();
   const { hasPermission } = usePermission();
 
-  const getTitle = {
-    value: router.currentRoute.value.meta.title || t('tb.widgetsBundle.title'),
-  };
+  const exportVisible = ref(false);
+  const exportRecord = ref<Recordable>({});
+  const importVisible = ref(false);
 
   const searchParam = reactive({
     textSearch: '',
@@ -162,7 +167,7 @@
   }
 
   async function handleDelete(record: Recordable) {
-    const modalFunc = createConfirm({
+    createConfirm({
       iconType: 'error',
       title: t('tb.widgetsBundle.action.deleteConfirm', { name: record.title }),
       content: t('tb.widgetsBundle.action.deleteConfirmContent'),
@@ -190,7 +195,8 @@
   }
 
   function handleDownload(record: Recordable) {
-    console.log(record);
+    exportRecord.value = record;
+    exportVisible.value = true;
   }
 
   function handleSuccess() {
