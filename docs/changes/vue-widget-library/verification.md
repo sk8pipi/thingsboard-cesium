@@ -1,5 +1,13 @@
 # 验证记录
 
+## 2026-09-15 滚动窗口修复验证
+
+- `pnpm exec esno tests/nativeWidgetRolling.test.ts` 通过：编译实际 Renderer 的完整 setup，使用 Vue 响应式、模拟时钟与图表 API 验证完整 5 分钟横轴、无新数据时每秒推进、只更新横轴、空数据范围、固定历史边界、模式切换和卸载释放计时器。这是隔离行为测试，不是真实浏览器绘制或设备联调。
+- `nativeWidgetData.test.ts` 与 `nativeWidgetIntegration.test.ts` 通过；新增连续轮询请求边界推进和停止取消调度断言，原目录、数据、固定历史及 SFC 集成检查继续通过。
+- Renderer 和上述两个修改/新增测试文件 ESLint 通过；`git diff --check` 通过。
+- `pnpm run type:check` 最终退出 2，诊断位于未修改文件（包括租户配置可空字段及 camera-adapter 缺少 mqtt 类型）；本轮 Renderer 和测试文件无诊断。不能宣称全仓库类型检查通过。
+- 未执行真实设备页面联调或生产构建：未修改构建、路由、环境变量或依赖。未启动共享服务、读取本地密钥、修改设备或保存用户模板；AI 未执行暂存、提交、推送或 GitHub 操作。
+
 ## 基线与环境
 
 2026-09-13 基线工作树干净，HEAD 274777f。2026-09-14 恢复实现。未读取本地密钥文件，未启动 ThingsBoard、视频或数据库服务，未修改任何设备或用户模板。

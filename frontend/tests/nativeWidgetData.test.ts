@@ -231,6 +231,36 @@ async function main() {
   await tick();
   assert.equal(scheduled, 0);
   fixed.stop();
+  let rollingNow = 10000;
+  let nextPoll: (() => void) | undefined;
+  const rollingConfig = {
+    ...config,
+    native: { ...config.native, pollMs: 5000, window: { ...config.native.window, realtime: true } },
+  };
+  const rolling = createNativePoller(
+    (target) => client.load(target, rollingNow),
+    () => {},
+    (callback, ms) => {
+      assert.equal(ms, 5000);
+      nextPoll = callback;
+      return 1;
+    },
+    () => {
+      nextPoll = undefined;
+    },
+  );
+  rolling.update(rollingConfig);
+  await tick();
+  assert.equal(queries.at(-1).startTs, 6000);
+  assert.equal(queries.at(-1).endTs, 10000);
+  assert.ok(nextPoll);
+  rollingNow += 5000;
+  nextPoll();
+  await tick();
+  assert.equal(queries.at(-1).startTs, 11000);
+  assert.equal(queries.at(-1).endTs, 15000, '轮询时重新计算滚动查询边界');
+  rolling.stop();
+  assert.equal(nextPoll, undefined);
   console.log('Native catalog/import/data/lifecycle tests passed (521 definitions, 292 base adapters)');
 }
 void main().catch((error) => {

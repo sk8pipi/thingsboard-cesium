@@ -80,6 +80,7 @@
     nativeNumber,
     nativeTableRows,
     nativeThresholdColor,
+    nativeWindow,
     type NativeDataConfig,
     type NativeSeries,
   } from './nativeWidgetDataCore';
@@ -98,6 +99,28 @@
   const table = computed(() => nativeTableRows(data.value.series, page.value));
   const fontSize = computed(() => Math.max(10, Math.min(96, Number(options.value?.fontSize) || 24)));
   const historical = computed(() => ['timeseries', 'valueChart'].includes(options.value?.family || ''));
+  const now = ref(Date.now());
+  const chartWindow = computed(() => {
+    if (!historical.value || !options.value) return null;
+    try {
+      return nativeWindow(options.value, now.value);
+    } catch {
+      return null;
+    }
+  });
+  watch(
+    () => historical.value && options.value?.window.realtime,
+    (rolling, _previous, onCleanup) => {
+      if (!rolling) return;
+      now.value = Date.now();
+      // Advance the visible window even when telemetry has not changed; polling stays independent.
+      const timer = setInterval(() => {
+        now.value = Date.now();
+      }, 1000);
+      onCleanup(() => clearInterval(timer));
+    },
+    { immediate: true },
+  );
   const usesChart = computed(() =>
     ['valueChart', 'gauge', 'timeseries', 'pie', 'bar'].includes(options.value?.family || ''),
   );
@@ -168,7 +191,12 @@
         ...base,
         tooltip: { trigger: 'axis', renderMode: 'richText', confine: true },
         grid: { left: 48, right: 16, top: native.showLegend ? 38 : 15, bottom: 32, containLabel: true },
-        xAxis: { type: 'time', axisLabel: { color: '#bcd0df' } },
+        xAxis: {
+          type: 'time',
+          min: chartWindow.value?.startTs,
+          max: chartWindow.value?.endTs,
+          axisLabel: { color: '#bcd0df' },
+        },
         yAxis: {
           type: 'value',
           scale: true,
@@ -309,6 +337,11 @@
   );
   watch(dataConfig, () => {
     page.value = 1;
+  });
+  watch(chartWindow, (window) => {
+    if (window && chart && !unmounted) {
+      chart.setOption({ xAxis: { min: window.startTs, max: window.endTs } });
+    }
   });
   onBeforeUnmount(() => {
     unmounted = true;

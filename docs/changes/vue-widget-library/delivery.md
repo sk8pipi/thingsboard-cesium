@@ -62,3 +62,7 @@ AI 不执行暂存、提交、推送、PR 或生产部署。
 本轮完成：MapWidgetEditor 编辑状态显示配置按钮与常显缩放手柄，查看状态隐藏；主动缩放时记录当前画布行数为 viewport.mode=fixed，修复缩短末行部件后被自动拉满的行为；模板标准化、编辑页和客户 MapWidgetLayer 共用同一保存尺度。旧模板没有主动缩放时保持 fill。取消编辑可由既有快照恢复 viewport。
 
 原始生成反馈已由用户确认可以显示；本轮缩放及查看态问题已用真实 SFC 函数、实际 CSS、GridStack 和 WidgetHost 隔离验证。真实后端模板写入没有执行。建议独立修复提交：`fix(widgets): retain resized dimensions and hide editing controls in view mode`。AI 未暂存、提交、推送或执行 GitHub 操作。
+
+## 2026-09-15 滚动窗口修复
+
+用户反馈选择实时滚动后时间窗口没有推进。检查时工作树干净；定位到数据查询已按当前时间轮询，但 NativeWidgetRenderer 未设置横轴起止值，图表由数据点自动决定范围。现将横轴绑定完整配置范围，滚动图表每秒独立推进，固定历史保持指定边界；不增加数据请求频率，无新依赖和配置迁移。回退本次 Renderer 修改可恢复原行为。验证见 verification.md；真实设备页面尚未联调。建议独立提交 `fix(widgets): advance native chart rolling time windows`，所有 Git 写操作由用户执行。
