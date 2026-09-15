@@ -997,7 +997,10 @@
     if (grid.getColumn() !== metrics.columns) {
       grid.column(metrics.columns, 'move');
     }
-    const renderedRows = Math.max(1, Number(grid.getRow?.()) || metrics.rows);
+    const renderedRows =
+      templateViewport.value.mode === 'fixed'
+        ? Math.max(metrics.rows, Number(grid.getRow?.()) || 0)
+        : Math.max(1, Number(grid.getRow?.()) || metrics.rows);
     const cellHeight = calculateGridStackCellHeight(metrics.canvasHeight, renderedRows);
     grid.cellHeight(Math.round(cellHeight * 100) / 100);
     grid.margin(Math.round(metrics.margin * 100) / 100);
@@ -1893,6 +1896,16 @@
       w: node.w ?? 1,
       h: node.h ?? 1,
     }));
+  }
+
+  function beginWidgetResize() {
+    if (!grid || editorMode.value !== 'editing' || isSavingEdit.value) return;
+    // 保留当前画布尺度，避免缩小末行部件时自动铺满抵消高度变化。
+    templateViewport.value = {
+      ...templateViewport.value,
+      mode: 'fixed',
+      rows: Math.max(mapScreen.metrics.value.rows, Number(grid.getRow()) || 1),
+    };
   }
 
   function deleteWidgetById(id: string, buttonEl?: HTMLElement) {
@@ -3257,6 +3270,7 @@
           cancel: 'button, input, textarea, select, option, canvas, video, iframe',
         },
         disableResize: false,
+        alwaysShowResizeHandle: true,
         resizable: { handles: 'all' },
         disableDrag: false,
       },
@@ -3264,6 +3278,7 @@
     );
 
     gridEl.value.addEventListener('click', onGridClick, true);
+    grid.on('resizestart', beginWidgetResize);
     grid.on('change', () => {
       if (!grid || editorMode.value === 'view' || applyingScreenMetrics) return;
       syncLayoutFromGrid();
@@ -4197,6 +4212,16 @@
 
   :deep(.ui-resizable-handle) {
     pointer-events: auto;
+    /* 玻璃内容会建立层叠上下文，拖拽手柄须位于内容之上。 */
+    z-index: 10;
+  }
+
+  :deep(.mw-native-edit) {
+    display: none;
+  }
+
+  .mw-grid--editing :deep(.mw-native-edit) {
+    display: inline-flex;
   }
 
   :deep(.mw-widget) {

@@ -72,7 +72,7 @@ export type MapTemplateViewport = {
   designHeight: number;
   columns: number;
   rows: number;
-  mode: 'fill';
+  mode: 'fill' | 'fixed';
 };
 
 export type SensorDeviceTypeStyles = Record<string, SensorPointStyleOverride>;
@@ -283,7 +283,7 @@ function normalizeMapTemplateViewport(
     designHeight: clamp(value?.designHeight, DEFAULT_MAP_TEMPLATE_VIEWPORT.designHeight, 576, 4320),
     columns: Math.round(clamp(value?.columns, DEFAULT_MAP_TEMPLATE_VIEWPORT.columns, 1, 24)),
     rows: Math.max(maximumLayoutRow, Math.round(clamp(value?.rows, DEFAULT_MAP_TEMPLATE_VIEWPORT.rows, 1, 200))),
-    mode: 'fill',
+    mode: value?.mode === 'fixed' ? 'fixed' : 'fill',
   };
 }
 
@@ -297,9 +297,9 @@ export function getMapTemplateLayoutRows(layout?: GridItem[] | null): number {
 }
 
 /**
- * Runtime and editor screens must stretch the occupied grid rows across the
- * available canvas. The persisted row count remains a compatibility fallback
- * for empty templates and does not create an unused band below real widgets.
+ * Legacy fill layouts stretch occupied rows across the canvas. Once the user
+ * resizes a widget, fixed mode retains the canvas row count so shrinking the
+ * last widget is not undone by stretching. Empty layouts use configured rows.
  */
 export function resolveMapTemplateViewportForLayout(
   viewport: Partial<MapTemplateViewport> | null | undefined,
@@ -311,7 +311,7 @@ export function resolveMapTemplateViewportForLayout(
   const occupiedRows = getMapTemplateLayoutRows(renderableLayout);
   return {
     ...normalized,
-    rows: occupiedRows || normalized.rows,
+    rows: normalized.mode === 'fixed' ? Math.max(occupiedRows, normalized.rows) : occupiedRows || normalized.rows,
   };
 }
 

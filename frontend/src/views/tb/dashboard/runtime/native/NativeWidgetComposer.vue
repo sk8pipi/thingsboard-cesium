@@ -207,7 +207,6 @@
               <label>圆角<input v-model.number="draft.appearance!.radiusPx" type="range" min="0" max="40" /></label>
               <label>强调色<input v-model="draft.appearance!.accentColor" type="color" /></label>
             </template>
-            <p v-if="message" role="alert" class="nw-error">{{ message }}</p>
           </div>
           <aside
             ><div class="nw-row"><strong>实际数据预览</strong><button @click="updatePreview">更新预览</button></div
@@ -224,6 +223,7 @@
         </div>
         <p v-else class="nw-error">{{ message || support.reason }}</p>
         <footer
+          ><p v-if="draft && message" role="alert" class="nw-error nw-submit-error">{{ message }}</p
           ><button @click="emit('close')">取消</button
           ><button v-if="!previewOnly && draft" class="nw-primary" @click="confirm">{{
             source?.config?.native ? '应用配置' : '添加部件'
@@ -517,6 +517,17 @@
   footer {
     justify-content: flex-end;
     border-top: 1px solid #ffffff20;
+    flex-shrink: 0;
+  }
+  footer button {
+    flex-shrink: 0;
+  }
+  .nw-submit-error {
+    flex: 1;
+    min-width: 0;
+    max-height: 80px;
+    overflow: auto;
+    margin: 0;
   }
   .nw-columns {
     display: grid;

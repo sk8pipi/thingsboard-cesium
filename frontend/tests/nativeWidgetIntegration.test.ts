@@ -5,11 +5,18 @@ import ts from 'typescript';
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc';
 import { createNativeWidget } from '../src/views/tb/dashboard/runtime/native/nativeWidgetCatalog';
 import { resolveNativeOverlayTarget } from '../src/views/tb/dashboard/runtime/native/useNativeOverlayTarget';
+import {
+  DEFAULT_MAP_TEMPLATE_VIEWPORT,
+  normalizeMapTemplateState,
+  resolveMapTemplateViewportForLayout,
+} from '../src/views/tb/map/mapTemplateConfig';
+import { calculateGridStackCellHeight } from '../src/views/tb/map/mapScreenResponsive';
 
 const root = '../src/views/tb/';
 for (const file of [
   'dashboard/editor.vue',
   'map/MapWidgetEditor.vue',
+  'map/MapWidgetLayer.vue',
   'map/SensorPopupWidgetEditor.vue',
   'map/SensorPopupWidgetGrid.vue',
   'dashboard/runtime/native/NativeWidgetComposer.vue',
@@ -142,4 +149,48 @@ assert.equal(ds.dataKeys.length, 0, '拒绝过期范围字段');
 keys.addKey(ds, 'model');
 assert.equal(ds.dataKeys.length, 1);
 assert.equal(ds.dataKeys[0].scope, 'SERVER_SCOPE');
+const resizeGlobals: any = {
+  grid: { getRow: () => 8 },
+  editorMode: ref('editing'),
+  isSavingEdit: ref(false),
+  templateViewport: ref({ ...DEFAULT_MAP_TEMPLATE_VIEWPORT }),
+  mapScreen: { metrics: ref({ rows: 8 }) },
+};
+const resize = functions('map/MapWidgetEditor.vue', ['beginWidgetResize'], resizeGlobals);
+resize.beginWidgetResize();
+assert.equal(resizeGlobals.templateViewport.value.mode, 'fixed');
+assert.equal(resizeGlobals.templateViewport.value.rows, 8);
+const saved = normalizeMapTemplateState(
+  JSON.parse(
+    JSON.stringify({
+      viewport: resizeGlobals.templateViewport.value,
+      layout: [{ i: widget.id, x: 0, y: 0, w: 5, h: 4 }],
+      widgets: { [widget.id]: widget },
+    }),
+  ),
+);
+const viewportAfterReload = resolveMapTemplateViewportForLayout(saved.viewport, saved.layout, saved.widgets);
+assert.equal(viewportAfterReload.rows, 8, '保存后缩短的部件不应重新拉伸铺满画布');
+assert.equal(calculateGridStackCellHeight(600, viewportAfterReload.rows) * saved.layout[0].h, 300);
+let renderedCellHeight = 0;
+const layer = functions('map/MapWidgetLayer.vue', ['applyScreenMetrics'], {
+  grid: {
+    getColumn: () => 12,
+    getRow: () => 4,
+    cellHeight: (height: number) => {
+      renderedCellHeight = height;
+    },
+    margin: () => {},
+  },
+  props: { screenMetrics: { columns: 12, rows: viewportAfterReload.rows, canvasHeight: 600, margin: 10 } },
+  calculateGridStackCellHeight,
+});
+layer.applyScreenMetrics();
+assert.equal(renderedCellHeight, 75, '客户大屏也应保留保存的画布尺度');
+const legacy = resolveMapTemplateViewportForLayout(DEFAULT_MAP_TEMPLATE_VIEWPORT, saved.layout, saved.widgets);
+assert.equal(legacy.rows, 4, '没有主动缩放的旧模板仍按原规则铺满');
+resizeGlobals.editorMode.value = 'view';
+resizeGlobals.templateViewport.value = { ...DEFAULT_MAP_TEMPLATE_VIEWPORT };
+resize.beginWidgetResize();
+assert.equal(resizeGlobals.templateViewport.value.mode, 'fill', '查看时不修改模板');
 console.log('Native SFC / dashboard draft / point editing / glass integration passed');

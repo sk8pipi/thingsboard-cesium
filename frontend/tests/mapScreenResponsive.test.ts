@@ -138,7 +138,7 @@ function testLegacyTemplateMigration() {
     layout: [{ i: 'legacy', x: 0, y: 23, w: 4, h: 5 }],
   });
 
-  assert.equal(normalized.version, 6);
+  assert.equal(normalized.version, 7);
   assert.equal(normalized.viewport.designWidth, 1920);
   assert.equal(normalized.viewport.designHeight, 1080);
   assert.equal(normalized.viewport.columns, 12);

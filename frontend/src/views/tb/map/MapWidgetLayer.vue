@@ -96,7 +96,7 @@
     if (grid.getColumn() !== props.screenMetrics.columns) {
       grid.column(props.screenMetrics.columns, 'move');
     }
-    const renderedRows = Math.max(1, Number(grid.getRow?.()) || props.screenMetrics.rows);
+    const renderedRows = Math.max(1, props.screenMetrics.rows, Number(grid.getRow?.()) || 0);
     const cellHeight = calculateGridStackCellHeight(props.screenMetrics.canvasHeight, renderedRows);
     grid.cellHeight(Math.round(cellHeight * 100) / 100);
     grid.margin(Math.round(props.screenMetrics.margin * 100) / 100);
