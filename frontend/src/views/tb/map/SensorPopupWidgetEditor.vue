@@ -206,8 +206,8 @@
   const localWidgets = ref<PopupWidgetConfig[]>([]);
   const nativePickerVisible = ref(false);
   const nativeEditSource = ref<Record<string, any> | null>(null);
-  function editNativeWidget(index: number) {
-    nativeEditSource.value = normalizedWidgets.value[index];
+  function editNativeWidget(id: string) {
+    nativeEditSource.value = normalizedWidgets.value.find((widget) => widget.id === id) || null;
   }
   function applyNativeWidget(widget: DashboardWidget) {
     const index = localWidgets.value.findIndex((item) => item.id === widget.id);
@@ -415,13 +415,9 @@
     closeKeyDialog();
   }
 
-  function emitChanged() {
-    emit('changed', JSON.parse(JSON.stringify(localWidgets.value)));
-  }
-
-  function removeWidget(index: number) {
-    localWidgets.value.splice(index, 1);
-    emitChanged();
+  function removeWidget(id: string) {
+    const index = localWidgets.value.findIndex((widget) => widget.id === id);
+    if (index >= 0) localWidgets.value.splice(index, 1);
   }
 
   function save() {

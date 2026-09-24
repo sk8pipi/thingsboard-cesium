@@ -576,10 +576,16 @@
       </div>
 
       <div v-if="canEditTemplate && editorMode === 'editing' && addPanelVisible" class="mw-add-panel">
-        <div class="mw-add-title">选择要添加的部件</div>
+        <div class="mw-add-title">
+          <strong>添加部件</strong>
+          <div class="mw-add-actions">
+            <button class="mw-btn" type="button" @click="fileInputEl?.click()">↑ 导入部件</button>
+            <button class="mw-btn" type="button" @click="showImportedWidgets = !showImportedWidgets">已导入</button>
+            <button class="mw-btn" type="button" aria-label="关闭部件库" @click="addPanelVisible = false">×</button>
+          </div>
+        </div>
 
         <div class="mw-add-list">
-          <button class="mw-btn" type="button" @click="nativePickerVisible = true">原生部件库 · Vue 配置</button>
           <input
             ref="fileInputEl"
             type="file"
@@ -588,61 +594,68 @@
             @change="onImportFileChange"
           />
 
-          <button class="mw-widget-card mw-widget-card--import" type="button" @click="fileInputEl?.click()">
-            <div class="mw-widget-preview mw-widget-preview--import">
-              <span>JSON</span>
-            </div>
-            <div class="mw-widget-info">
-              <div class="mw-widget-name">导入 ThingsBoard 部件 JSON</div>
-              <div class="mw-widget-desc">从导出的 JSON 生成可复用部件</div>
-            </div>
-          </button>
+          <template v-if="!showImportedWidgets">
+            <div class="mw-lib-title">原生部件</div>
+            <NativeWidgetBrowser
+              class="mw-native-browser"
+              :active="!nativeEditSource"
+              @select="nativeEditSource = $event"
+            />
 
-          <div class="mw-lib-title">内置部件</div>
+            <div class="mw-lib-title">内置部件</div>
 
-          <div class="mw-widget-grid">
-            <button
-              v-for="def in builtInWidgetDefs"
-              :key="def.key"
-              class="mw-widget-card"
-              type="button"
-              @click="addWidgetByKey(def.key)"
-            >
-              <div class="mw-widget-preview">
-                <img class="mw-widget-preview-img" :src="getBuiltInPreview(def.key)" :alt="def.title" loading="lazy" />
-              </div>
-              <div class="mw-widget-info">
-                <div class="mw-widget-name" :title="def.title">{{ def.title }}</div>
-                <div class="mw-widget-meta">{{ getBuiltInKindLabel(def.key) }}</div>
-              </div>
-            </button>
-          </div>
-
-          <div v-if="libraryDefs.length" class="mw-lib-title">已导入部件</div>
-
-          <div v-if="libraryDefs.length" class="mw-widget-grid">
-            <div v-for="def in libraryDefs" :key="def.id" class="mw-widget-card-wrap">
-              <button class="mw-widget-card" type="button" @click="addFromLibrary(def)">
+            <div class="mw-widget-grid">
+              <button
+                v-for="def in builtInWidgetDefs"
+                :key="def.key"
+                class="mw-widget-card"
+                type="button"
+                @click="addWidgetByKey(def.key)"
+              >
                 <div class="mw-widget-preview">
                   <img
-                    v-if="getLibraryPreview(def)"
                     class="mw-widget-preview-img"
-                    :src="getLibraryPreview(def)"
-                    :alt="def.name"
+                    :src="getBuiltInPreview(def.key)"
+                    :alt="def.title"
                     loading="lazy"
                   />
-                  <div v-else class="mw-widget-preview-placeholder">{{ getLibraryKindLabel(def.kind) }}</div>
                 </div>
                 <div class="mw-widget-info">
-                  <div class="mw-widget-name" :title="def.name">{{ def.name }}</div>
-                  <div class="mw-widget-meta">{{ getLibraryKindLabel(def.kind) }}</div>
+                  <div class="mw-widget-name" :title="def.title">{{ def.title }}</div>
+                  <div class="mw-widget-meta">{{ getBuiltInKindLabel(def.key) }}</div>
                 </div>
               </button>
-              <button class="mw-lib-del" type="button" title="删除" @click="deleteFromLibrary(def.id)">删除</button>
             </div>
-          </div>
+          </template>
+          <template v-else>
+            <div class="mw-lib-title"
+              >已导入部件 <button class="mw-btn" @click="showImportedWidgets = false">返回部件库</button></div
+            >
 
-          <div v-if="!libraryDefs.length" class="mw-empty-hint">暂无已导入部件</div>
+            <div v-if="libraryDefs.length" class="mw-widget-grid">
+              <div v-for="def in libraryDefs" :key="def.id" class="mw-widget-card-wrap">
+                <button class="mw-widget-card" type="button" @click="addFromLibrary(def)">
+                  <div class="mw-widget-preview">
+                    <img
+                      v-if="getLibraryPreview(def)"
+                      class="mw-widget-preview-img"
+                      :src="getLibraryPreview(def)"
+                      :alt="def.name"
+                      loading="lazy"
+                    />
+                    <div v-else class="mw-widget-preview-placeholder">{{ getLibraryKindLabel(def.kind) }}</div>
+                  </div>
+                  <div class="mw-widget-info">
+                    <div class="mw-widget-name" :title="def.name">{{ def.name }}</div>
+                    <div class="mw-widget-meta">{{ getLibraryKindLabel(def.kind) }}</div>
+                  </div>
+                </button>
+                <button class="mw-lib-del" type="button" title="删除" @click="deleteFromLibrary(def.id)">删除</button>
+              </div>
+            </div>
+
+            <div v-if="!libraryDefs.length" class="mw-empty-hint">暂无已导入部件</div>
+          </template>
         </div>
 
         <div class="mw-add-footer">
@@ -668,12 +681,6 @@
       </div>
     </div>
     <div v-if="isSavingEdit" class="mw-saving-mask" role="status">正在保存，请勿关闭页面……</div>
-    <NativeWidgetPicker
-      v-if="editorMode === 'editing' && !isSavingEdit"
-      :visible="nativePickerVisible"
-      @close="nativePickerVisible = false"
-      @confirm="applyNativeWidget"
-    />
     <NativeWidgetComposer
       v-if="nativeEditSource && editorMode === 'editing' && !isSavingEdit"
       :visible="true"
@@ -685,7 +692,7 @@
 </template>
 
 <script setup lang="ts">
-  import NativeWidgetPicker from '../dashboard/runtime/native/NativeWidgetPicker.vue';
+  import NativeWidgetBrowser from '../dashboard/runtime/native/NativeWidgetBrowser.vue';
   import NativeWidgetComposer from '../dashboard/runtime/native/NativeWidgetComposer.vue';
   import { getNativeWidgetSupport } from '../dashboard/runtime/native/nativeWidgetCatalog';
   import { createProfileBillboardCache } from './services/profileBillboardCache';
@@ -1052,13 +1059,13 @@
   const builtInWidgetDefs = computed(() =>
     listWidgetDefinitions('dashboard').filter((item) => item.key !== 'cesium3d' && !item.key.startsWith('native_')),
   );
-  const nativePickerVisible = ref(false);
+  const showImportedWidgets = ref(false);
   const nativeEditSource = ref<Record<string, any> | null>(null);
   watch(
     () => editorMode.value,
     (mode) => {
       if (mode !== 'editing') {
-        nativePickerVisible.value = false;
+        showImportedWidgets.value = false;
         nativeEditSource.value = null;
       }
     },
@@ -1079,7 +1086,6 @@
       void mountWidget(widget.id, widget.widgetKey);
       syncLayoutFromGrid();
     }
-    nativePickerVisible.value = false;
     nativeEditSource.value = null;
     addPanelVisible.value = false;
   }
@@ -1587,7 +1593,12 @@
   }
 
   function normalizeWidgetState(rawWidgets: unknown): Record<string, WidgetData> {
-    return normalizeWidgetRecord(rawWidgets) as Record<string, WidgetData>;
+    if (!rawWidgets || typeof rawWidgets !== 'object' || Array.isArray(rawWidgets)) return {};
+    // Preserve definitions that this frontend cannot render when saving the surrounding template.
+    const records = Object.fromEntries(
+      Object.entries(rawWidgets).filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value)),
+    );
+    return { ...cloneJson(records), ...normalizeWidgetRecord(records) } as Record<string, WidgetData>;
   }
 
   function applyEditorState(state?: Partial<MapWidgetEditorState> | null) {
@@ -1817,6 +1828,11 @@
 
     const widget = widgets.value[id];
     if (!widget) return;
+
+    if (!widgetRegistry[key]) {
+      mountEl.textContent = '此部件暂未适配，原始配置已保留';
+      return;
+    }
 
     const app = createApp({
       render: () =>
@@ -2217,6 +2233,7 @@
       }
 
       reloadLibrary();
+      showImportedWidgets.value = true;
       const unavailable = defs.filter((def) => def.kind === 'unknown').length;
       errorMsg.value = unavailable
         ? `已保留 ${defs.length} 个原始定义，其中 ${unavailable} 个尚未适配；点击条目可查看原因。`
@@ -4002,10 +4019,35 @@
     overflow: hidden;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(25, 30, 40, 0.94);
+    background: #d4dfe4;
+    color: #253746;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .mw-add-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 14px;
+    background: #30577f;
     color: #fff;
-    padding: 12px;
-    backdrop-filter: blur(10px);
+    flex: 0 0 auto;
+  }
+
+  .mw-add-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .mw-add-panel .mw-add-title {
+    margin: 0;
+  }
+  .mw-add-panel .mw-add-footer {
+    padding: 8px 14px;
+    flex: 0 0 auto;
   }
 
   .mw-add-title,
@@ -4016,11 +4058,24 @@
   }
 
   .mw-add-list {
-    display: grid;
+    display: flex;
+    flex-direction: column;
     max-height: calc(100vh - 170px);
     gap: 10px;
     overflow-y: auto;
-    padding-right: 2px;
+    padding: 12px;
+    min-height: 0;
+  }
+
+  .mw-add-list > * {
+    flex: 0 0 auto;
+  }
+
+  .mw-native-browser {
+    height: clamp(320px, 55vh, 620px);
+    min-height: 320px;
+    overflow: hidden;
+    border-radius: 6px;
   }
 
   .mw-widget-grid {
@@ -4037,8 +4092,8 @@
   .mw-widget-card {
     width: 100%;
     border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(255, 255, 255, 0.09);
-    color: #fff;
+    background: #fff;
+    color: #253746;
     border-radius: 8px;
     padding: 8px;
     cursor: pointer;

@@ -6,6 +6,9 @@ import * as vue from 'vue';
 import { parse, compileScript } from '@vue/compiler-sfc';
 import { createNativeWidget } from '../src/views/tb/dashboard/runtime/native/nativeWidgetCatalog';
 import * as core from '../src/views/tb/dashboard/runtime/native/nativeWidgetDataCore';
+import * as stateCore from '../src/views/tb/dashboard/runtime/native/nativeStateCore';
+import * as settings from '../src/views/tb/dashboard/runtime/native/nativeWidgetSettings';
+import * as chartOptions from '../src/views/tb/dashboard/runtime/native/nativeWidgetChartOptions';
 
 const source = fs.readFileSync(
   new URL('../src/views/tb/dashboard/runtime/native/NativeWidgetRenderer.vue', import.meta.url),
@@ -21,10 +24,17 @@ const timers = new Map<number, () => void>();
 let nextTimer = 0;
 const unmount: (() => void)[] = [];
 const updates: any[] = [];
-const element = {};
+const element = vue.markRaw({});
 let disposed = false;
 const chart = {
   getDom: () => element,
+  getOption: () => ({
+    legend: [{ selected: { Temperature: false } }],
+    dataZoom: [
+      { start: 25, end: 75 },
+      { start: 25, end: 75 },
+    ],
+  }),
   setOption: (option: any) => updates.push(option),
   resize: () => {},
   dispose: () => (disposed = true),
@@ -52,9 +62,13 @@ const context = vm.createContext({
   exports: {},
   require: (name: string) => {
     if (name === 'vue') return { ...vue, onBeforeUnmount: (fn: () => void) => unmount.push(fn) };
+    if (name === './NativeLiquidView') return {};
     if (name === 'echarts') return { init: () => chart };
     if (name === './nativeWidgetData') return { useNativeWidgetData: () => snapshot };
     if (name === './nativeWidgetDataCore') return core;
+    if (name === './nativeStateCore') return stateCore;
+    if (name === './nativeWidgetSettings') return settings;
+    if (name === './nativeWidgetChartOptions') return chartOptions;
     throw new Error(`Unexpected import: ${name}`);
   },
   Date: class extends Date {
@@ -97,6 +111,7 @@ assert.equal(updates.at(-1).series, undefined, '时钟更新只修改横轴，�
 
 snapshot.value = { ...initialSnapshot, series: [{ ...initialSnapshot.series[0], points: [], latest: null }] };
 await flush();
+assert.equal(updates.at(-1).legend.selected.Temperature, false, '轮询不能覆盖用户图例选择');
 assert.equal(updates.at(-1).xAxis.max, now, '空数据也保留完整时间范围');
 props.config.native.window.realtime = false;
 props.config.native.window.startTs = now - 600_000;
@@ -105,9 +120,39 @@ await flush();
 assert.equal(timers.size, 0, '切换到固定历史应释放时钟');
 assert.equal(updates.at(-1).xAxis.min, now - 600_000);
 assert.equal(updates.at(-1).xAxis.max, now - 300_000);
+props.config.native.window.calendar = 'month';
+now = Date.UTC(2026, 8, 30, 23, 59, 59);
+await flush();
+assert.equal(timers.size, 1, '日历窗口需要独立时钟');
+assert.equal(updates.at(-1).xAxis.min, Date.UTC(2026, 8, 1));
+now = Date.UTC(2026, 9, 1, 0, 0, 1);
+timers.forEach((fn) => fn());
+await flush();
+assert.equal(updates.at(-1).xAxis.min, Date.UTC(2026, 9, 1), '跨月自动移动起点');
+assert.equal(updates.at(-1).xAxis.max, now);
+delete props.config.native.window.calendar;
+await flush();
+assert.equal(timers.size, 0);
 props.config.native.window.realtime = true;
 await flush();
 assert.equal(timers.size, 1);
+const stateWidget = createNativeWidget({ fqn: 'state_chart' });
+stateWidget.config.native.window.durationMs = 60000;
+props.config = stateWidget.config;
+snapshot.value = {
+  ...initialSnapshot,
+  series: [{ ...initialSnapshot.series[0], points: [], latest: null, previous: { ts: now - 100000, value: false } }],
+};
+await flush();
+assert.equal(state.hasChartData.value, true, '仅有窗口前布尔状态仍应显示');
+assert.equal(updates.at(-1).series[0].data.at(-1).value[0], now);
+now += 1000;
+timers.forEach((fn) => fn());
+await flush();
+assert.equal(updates.at(-1).series[0].data.at(-1).value[0], now, '无新遥测时状态线延续至新窗口末尾');
+assert.equal(updates.at(-1).series[0].data[0].value[0], now - 60000);
+assert.equal(updates.at(-1).legend.selected.Temperature, false);
+assert.equal(updates.at(-1).dataZoom[0].start, 25);
 unmount.forEach((fn) => fn());
 scope.stop();
 assert.equal(timers.size, 0, '卸载应释放时钟');

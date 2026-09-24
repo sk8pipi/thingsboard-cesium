@@ -59,11 +59,55 @@ export function parseResourceImport(text: string): {
 
 export function safePreviewSource(value: unknown): string {
   if (typeof value !== 'string') return '';
-  const source = value.trim().replace(/^tb-image;/, '');
+  const source = value.trim().replace(/^tb-image(?:\:[^;]*)?;/, '');
   if (/^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/i.test(source)) return source;
   // 仅把明确的图片 API 地址交给携带认证信息的请求客户端。
-  if (/^\/api\/images\/(system|tenant|public)\/[a-zA-Z0-9_.%-]+$/.test(source)) return source;
+  const match = source.match(/^\/api\/images\/(system|tenant|public)\/([^/?#]+)$/);
+  if (match) {
+    try {
+      const key = decodeURIComponent(match[2]);
+      // 检查解码后的单段文件名，拒绝编码斜线、控制符和二次编码路径。
+      if (!key || key === '.' || key === '..' || /[\\/\x00-\x1f\x7f%?#]/.test(key)) return '';
+      return `/api/images/${match[1]}/${encodeURIComponent(key)}`;
+    } catch {
+      return '';
+    }
+  }
   return '';
+}
+
+// 只在正在显示的组件之间复用，最后一个引用卸载即释放，避免跨会话长驻缓存。
+export function createPreviewImageCache(load: (source: string) => Promise<Blob>) {
+  const entries = new Map<string, { references: number; promise: Promise<Blob> }>();
+  return {
+    acquire(source: string) {
+      let entry = entries.get(source);
+      if (!entry) {
+        const promise = Promise.resolve()
+          .then(() => load(source))
+          .then((blob) => {
+            if (!(blob instanceof Blob) || !blob.type.startsWith('image/')) throw new Error('Invalid image response');
+            return blob;
+          })
+          .catch((error) => {
+            if (entries.get(source) === entry) entries.delete(source);
+            throw error;
+          });
+        entry = { references: 0, promise };
+        entries.set(source, entry);
+      }
+      entry.references++;
+      let released = false;
+      return {
+        promise: entry.promise,
+        release: () => {
+          if (released) return;
+          released = true;
+          if (--entry!.references === 0 && entries.get(source) === entry) entries.delete(source);
+        },
+      };
+    },
+  };
 }
 
 export function resourceFilename(title: unknown): string {

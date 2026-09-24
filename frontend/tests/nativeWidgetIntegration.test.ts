@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc';
-import { createNativeWidget } from '../src/views/tb/dashboard/runtime/native/nativeWidgetCatalog';
+import { nativeWidgetCatalog, createNativeWidget } from '../src/views/tb/dashboard/runtime/native/nativeWidgetCatalog';
+import { nativeSeriesSettings } from '../src/views/tb/dashboard/runtime/native/nativeWidgetSettings';
 import { resolveNativeOverlayTarget } from '../src/views/tb/dashboard/runtime/native/useNativeOverlayTarget';
 import {
   DEFAULT_MAP_TEMPLATE_VIEWPORT,
@@ -22,6 +23,11 @@ for (const file of [
   'dashboard/runtime/native/NativeWidgetComposer.vue',
   'dashboard/runtime/native/NativeWidgetPicker.vue',
   'dashboard/runtime/native/NativeWidgetRenderer.vue',
+  'dashboard/runtime/native/NativeWidgetBrowser.vue',
+  'dashboard/runtime/native/NativeWidgetSettingsEditor.vue',
+  'dashboard/runtime/native/NativeAggregateSettingsEditor.vue',
+  'dashboard/runtime/native/NativeLiquidSettingsEditor.vue',
+  'dashboard/runtime/native/NativeStateSettingsEditor.vue',
 ]) {
   const { descriptor, errors } = parse(fs.readFileSync(new URL(root + file, import.meta.url), 'utf8'));
   assert.deepEqual(errors, []);
@@ -82,7 +88,7 @@ const map = functions('map/MapWidgetEditor.vue', ['applyNativeWidget'], mapGloba
 map.applyNativeWidget(widget);
 assert.equal(added.length, 1);
 assert.equal(mapGlobals.widgets.value[widget.id].config.native.fqn, 'temperature_card');
-assert.equal(mapGlobals.nativePickerVisible.value, false);
+assert.equal(mapGlobals.addPanelVisible.value, false);
 map.applyNativeWidget({ ...widget, title: 'changed' });
 assert.equal(added.length, 1);
 assert.equal(renders, 1);
@@ -109,7 +115,11 @@ const renderer = fs.readFileSync(
   new URL(root + 'dashboard/runtime/native/NativeWidgetRenderer.vue', import.meta.url),
   'utf8',
 );
-assert.ok(renderer.includes("backgroundColor: 'transparent'"));
+assert.ok(
+  fs
+    .readFileSync(new URL(root + 'dashboard/runtime/native/nativeWidgetChartOptions.ts', import.meta.url), 'utf8')
+    .includes("backgroundColor: 'transparent'"),
+);
 assert.ok(!renderer.includes('backdrop-filter'));
 assert.ok(!renderer.includes('v-html'));
 assert.ok(!renderer.includes('eval('));
@@ -194,3 +204,46 @@ resizeGlobals.templateViewport.value = { ...DEFAULT_MAP_TEMPLATE_VIEWPORT };
 resize.beginWidgetResize();
 assert.equal(resizeGlobals.templateViewport.value.mode, 'fill', '查看时不修改模板');
 console.log('Native SFC / dashboard draft / point editing / glass integration passed');
+
+const axisWidget = createNativeWidget({ fqn: 'time_series_chart' });
+axisWidget.config.datasources = JSON.parse(JSON.stringify(widget.config.datasources));
+axisWidget.config.native.chart.axes.push({ id: 'right', label: '温度', position: 'right', min: 0, max: null });
+axisWidget.config.native.chart.thresholds.push({ axisId: 'right', value: 30, label: '高温线', color: '#ff0000' });
+axisWidget.config.datasources[0].dataKeys[0].settings = { extension: false, native: { axisId: 'right', lineWidth: 0 } };
+const composer = functions('dashboard/runtime/native/NativeWidgetComposer.vue', ['rebindAxis', 'seriesOptions'], {
+  draft: ref(axisWidget),
+  sources: ref(axisWidget.config.datasources),
+  nativeSeriesSettings,
+});
+const axisEditor = functions('dashboard/runtime/native/NativeWidgetSettingsEditor.vue', ['removeAxis', 'change'], {
+  normalized: ref(axisWidget.config.native),
+  emit: (event: string, ...args: any[]) => {
+    if (event === 'update:modelValue') axisWidget.config.native = args[0];
+    else if (event === 'remove-axis') composer.rebindAxis(...args);
+  },
+});
+axisEditor.removeAxis(1);
+assert.equal(axisWidget.config.native.chart.axes.length, 1);
+assert.equal(axisWidget.config.native.chart.thresholds[0].axisId, 'default');
+assert.equal(axisWidget.config.datasources[0].dataKeys[0].settings.native.axisId, 'default');
+assert.equal(axisWidget.config.datasources[0].dataKeys[0].settings.native.lineWidth, 0);
+assert.equal(axisWidget.config.datasources[0].dataKeys[0].settings.extension, false);
+console.log('Axis removal rebinds real composer series and thresholds without losing settings');
+
+// Execute the actual manifest: every selectable family must have a mounted renderer.
+const manifestSource = fs.readFileSync(
+  new URL(root + 'dashboard/runtime/widgets/manifests/native.ts', import.meta.url),
+  'utf8',
+);
+const manifestCode = ts.transpileModule(manifestSource, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+}).outputText;
+const rendererStub = {};
+const manifestContext = vm.createContext({ exports: {}, require: () => ({ default: rendererStub }) });
+vm.runInContext(manifestCode, manifestContext);
+for (const family of new Set(nativeWidgetCatalog.map((entry) => entry.family).filter(Boolean))) {
+  const definition = manifestContext.exports.widgets.find((item: any) => item.key === `native_${family}`);
+  assert.ok(definition, `运行注册不可遗漏 ${family}`);
+  assert.equal(definition.component, rendererStub);
+  assert.equal(definition.dataProvider, 'static');
+}

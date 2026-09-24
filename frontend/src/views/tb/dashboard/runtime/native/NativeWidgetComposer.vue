@@ -1,177 +1,306 @@
 <template>
   <Teleport :to="overlayTarget">
-    <div v-if="visible" class="nw-mask" @keydown.esc.stop="emit('close')">
-      <section class="nw-dialog" role="dialog" aria-modal="true" aria-label="Vue 部件配置" tabindex="-1">
-        <header
-          ><div
-            ><strong>配置部件 · {{ draft?.title || source?.name }}</strong
-            ><small>{{ support.reason }}</small></div
-          ><button aria-label="关闭" @click="emit('close')">×</button></header
-        >
-        <div v-if="draft" class="nw-columns">
-          <div class="nw-form">
-            <nav
-              ><button
-                v-for="item in tabs"
-                :key="item.id"
-                :class="{ active: tab === item.id }"
-                @click="tab = item.id"
-                >{{ item.label }}</button
-              ></nav
-            >
-            <label>标题<input v-model="draft.title" /></label>
-            <template v-if="tab === 'data'">
-              <p v-if="lockedEntity" class="nw-note"
-                >自动绑定当前点位：{{ lockedEntity.name || lockedEntity.entityId }}</p
+    <div v-if="visible" class="nw-mask" @keydown.esc.stop="previewVisible ? (previewVisible = false) : emit('close')">
+      <section class="nw-dialog" role="dialog" aria-modal="true" aria-label="部件配置" tabindex="-1">
+        <header>
+          <strong>{{ source?.config?.native ? '编辑' : '添加' }}：{{ source?.name || draft?.title }}</strong>
+          <div class="nw-header-actions"
+            ><div class="nw-segment"
+              ><button :class="{ active: mode === 'basic' }" @click="mode = 'basic'">基础</button
+              ><button :class="{ active: mode === 'advanced' }" @click="mode = 'advanced'">高级</button></div
+            ><button aria-label="关闭配置" @click="emit('close')">×</button></div
+          >
+        </header>
+        <div v-if="draft" class="nw-content">
+          <template v-if="mode === 'basic'">
+            <section v-if="historical" class="nw-panel">
+              <h3>时间窗口 <span class="nw-tag">使用部件时间窗口</span></h3>
+              <details class="nw-time">
+                <summary>{{
+                  draft.config.native.window.realtime
+                    ? '◷ 实时 · 最后 ' + durationLabel()
+                    : draft.config.native.window.calendar
+                      ? '◷ 日历窗口 · UTC'
+                      : '◷ 固定历史范围'
+                }}</summary>
+                <div class="nw-fields">
+                  <label
+                    >时间模式<select v-model="timeMode"
+                      ><option value="realtime">实时滚动</option
+                      ><option value="fixed">固定历史范围</option
+                      ><option value="day">今天至今（UTC）</option
+                      ><option value="week">本周至今（UTC，周一开始）</option
+                      ><option value="month">本月至今（UTC）</option></select
+                    ></label
+                  >
+                  <template v-if="draft.config.native.window.realtime">
+                    <label
+                      >快捷窗口<select v-model="draft.config.native.window.durationMs"
+                        ><option :value="60000">1 分钟</option
+                        ><option :value="300000">5 分钟</option
+                        ><option :value="600000">10 分钟</option
+                        ><option :value="3600000">1 小时</option
+                        ><option :value="86400000">24 小时</option
+                        ><option :value="604800000">7 天</option></select
+                      ></label
+                    >
+                    <label
+                      >窗口时长（毫秒）<input
+                        v-model.number="draft.config.native.window.durationMs"
+                        type="number"
+                        min="60000"
+                        :max="31 * 86400000"
+                    /></label>
+                  </template>
+                  <template v-else-if="!draft.config.native.window.calendar">
+                    <label
+                      >开始<input
+                        type="datetime-local"
+                        :value="localDate(draft.config.native.window.startTs)"
+                        @input="setDate('startTs', $event)"
+                    /></label>
+                    <label
+                      >结束<input
+                        type="datetime-local"
+                        :value="localDate(draft.config.native.window.endTs)"
+                        @input="setDate('endTs', $event)"
+                    /></label>
+                  </template>
+                  <label v-if="draft.config.native.family !== 'state'"
+                    >聚合<select v-model="draft.config.native.window.aggregation"
+                      ><option v-for="agg in ['NONE', 'AVG', 'MIN', 'MAX', 'SUM', 'COUNT']" :key="agg" :value="agg">{{
+                        agg === 'NONE' ? '无聚合' : agg
+                      }}</option></select
+                    ></label
+                  >
+                  <label v-if="draft.config.native.family !== 'state'"
+                    >聚合间隔（毫秒）<input
+                      v-model.number="draft.config.native.window.intervalMs"
+                      type="number"
+                      min="1000"
+                  /></label>
+                </div>
+              </details>
+            </section>
+            <section class="nw-panel">
+              <h3
+                >数据源 <span class="nw-tag">{{ entityType === 'DEVICE' ? '设备' : '资产' }}</span></h3
               >
+              <p v-if="lockedEntity" class="nw-note">当前点位：{{ lockedEntity.name || lockedEntity.entityId }}</p>
               <template v-else>
-                <div class="nw-row"
-                  ><select v-model="entityType" @change="searchEntities(0)"
-                    ><option value="DEVICE">设备</option
-                    ><option value="ASSET">资产自身数据</option></select
-                  ><input v-model="query" placeholder="搜索名称" @keydown.enter="searchEntities(0)" /><button
-                    :disabled="loading"
-                    @click="searchEntities(0)"
-                    >搜索</button
-                  ></div
-                >
-                <div v-if="entityType === 'DEVICE'" class="nw-row"
-                  ><span>设备配置</span
-                  ><input v-model="profileQuery" placeholder="搜索配置名称" @keydown.enter="loadProfiles" /><button
-                    @click="loadProfiles"
-                    >查找</button
-                  ></div
-                >
-                <select v-if="entityType === 'DEVICE'" v-model="profileId" @change="searchEntities(0)"
-                  ><option value="">所有配置</option
-                  ><option v-for="profile in profiles" :key="profile.id.id" :value="profile.id.id">{{
-                    profile.name
-                  }}</option></select
-                >
-                <p v-if="entityType === 'ASSET'" class="nw-note"
-                  >读取资产自身字段。下属设备汇总请使用现有“资产聚合”部件。</p
-                >
-                <div class="nw-entities"
-                  ><button
-                    v-for="entity in entities"
-                    :key="entity.id.id"
-                    :disabled="sources.length >= 8 || sources.some((s) => s.entityId === entity.id.id)"
-                    @click="addSource(entity)"
-                    >{{ entity.name }}
-                    <small>{{ entity.deviceProfileName || entity.assetProfileName }}</small> ＋</button
-                  ><p v-if="!loading && !entities.length">暂无匹配实体</p></div
-                >
-                <div class="nw-row"
+                <div class="nw-fields">
+                  <label
+                    >实体类型<select v-model="entityType" @change="searchEntities(0)"
+                      ><option value="DEVICE">设备</option
+                      ><option value="ASSET">资产自身数据</option></select
+                    ></label
+                  >
+                  <label v-if="entityType === 'DEVICE'"
+                    >设备配置<select v-model="profileId" @change="searchEntities(0)"
+                      ><option value="">所有配置</option
+                      ><option v-for="profile in profiles" :key="profile.id.id" :value="profile.id.id">{{
+                        profile.name
+                      }}</option></select
+                    ></label
+                  >
+                </div>
+                <label>选择{{ entityType === 'DEVICE' ? '设备' : '资产' }} *</label>
+                <ASelect
+                  show-search
+                  :filter-option="false"
+                  :value="[]"
+                  aria-label="选择设备或资产"
+                  :dropdown-style="{ zIndex: 12100 }"
+                  :loading="loading"
+                  :disabled="sources.length >= 8"
+                  :get-popup-container="selectPopupTarget"
+                  placeholder="输入名称搜索并选择，可添加多个实体"
+                  class="nw-entity-select"
+                  :options="
+                    entities.map((entity) => ({
+                      value: entity.id.id,
+                      label: entity.name,
+                      disabled: sources.some((s) => s.entityId === entity.id.id && s.entityType === entityType),
+                    }))
+                  "
+                  @search="searchOptions"
+                  @change="(value) => selectEntity(String(value))"
+                />
+                <div class="nw-pages"
                   ><button :disabled="page === 0 || loading" @click="searchEntities(page - 1)">上一页</button
                   ><span>{{ page + 1 }}</span
                   ><button :disabled="!hasNext || loading" @click="searchEntities(page + 1)">下一页</button></div
                 >
               </template>
-              <article v-for="(ds, index) in sources" :key="ds.entityId" class="nw-source">
-                <div class="nw-row"
+              <div v-for="(ds, index) in sources" :key="ds.entityType + ds.entityId" class="nw-source-chip"
+                ><span>{{ ds.name || ds.entityId }}</span
+                ><button v-if="!lockedEntity" aria-label="移除数据源" @click="sources.splice(index, 1)">×</button></div
+              >
+              <p v-if="entityType === 'ASSET'" class="nw-note">读取资产自身字段；下属设备汇总使用内置资产聚合部件。</p>
+            </section>
+            <section class="nw-panel">
+              <h3>{{ historical ? '时间序列' : '数据字段' }}</h3>
+              <p v-if="!sources.length" class="nw-note">先选择设备或资产，再选择数据字段。</p>
+              <article v-for="ds in sources" :key="ds.entityType + ds.entityId" class="nw-source">
+                <div class="nw-source-header"
                   ><strong>{{ ds.name || ds.entityId }}</strong
-                  ><button v-if="!lockedEntity" @click="sources.splice(index, 1)">移除</button></div
-                >
-                <div class="nw-row"
-                  ><select v-model="keyTypes[ds.entityId]" @change="loadKeys(ds)"
-                    ><option value="timeseries">遥测</option
-                    ><option v-if="!historical" value="CLIENT_SCOPE">客户端属性</option
-                    ><option v-if="!historical" value="SERVER_SCOPE">服务端属性</option
-                    ><option v-if="!historical" value="SHARED_SCOPE">共享属性</option></select
-                  ><button :disabled="keyLoading[ds.entityId]" @click="loadKeys(ds)">读取字段</button></div
-                >
-                <div class="nw-keys"
-                  ><button v-for="key in availableKeys[ds.entityId] || []" :key="key" @click="addKey(ds, key)"
-                    >{{ key }} ＋</button
+                  ><div class="nw-inline"
+                    ><select v-model="keyTypes[ds.entityId]" @change="loadKeys(ds)"
+                      ><option value="timeseries">遥测</option
+                      ><option v-if="!historical" value="CLIENT_SCOPE">客户端属性</option
+                      ><option v-if="!historical" value="SERVER_SCOPE">服务端属性</option
+                      ><option v-if="!historical" value="SHARED_SCOPE">共享属性</option></select
+                    ><button :disabled="keyLoading[ds.entityId]" @click="loadKeys(ds)">刷新字段</button></div
                   ></div
                 >
-                <small v-if="keyMessages[ds.entityId]">{{ keyMessages[ds.entityId] }}</small>
-                <div v-for="(key, ki) in ds.dataKeys" :key="ki" class="nw-key">
-                  <strong
-                    >{{ key.name }} <small>{{ key.type === 'attribute' ? key.scope : '遥测' }}</small></strong
-                  >
-                  <div class="nw-row"
-                    ><input v-model="key.label" aria-label="字段显示名称" placeholder="显示名称" /><input
-                      v-model="key.units"
-                      aria-label="单位"
-                      placeholder="单位"
-                    /><input v-model.number="key.decimals" type="number" min="0" max="8" aria-label="小数位" /><input
-                      v-model="key.color"
-                      type="color"
-                      aria-label="曲线颜色"
-                    /><button @click="ds.dataKeys.splice(ki, 1)">×</button></div
-                  >
-                </div>
+                <div class="nw-table-scroll"
+                  ><table class="nw-key-table"
+                    ><thead
+                      ><tr
+                        ><th>键</th><th v-if="draft.config.native.family !== 'liquid'">标签</th
+                        ><th v-if="historical && draft.config.native.family !== 'table'">类型</th
+                        ><th v-if="historical && draft.config.native.family !== 'table'">Y 轴</th
+                        ><th v-if="draft.config.native.family !== 'liquid'">颜色</th
+                        ><th v-if="draft.config.native.family !== 'liquid'">单位</th><th>小数</th><th></th></tr
+                    ></thead>
+                    <tbody
+                      ><tr v-for="(key, ki) in ds.dataKeys" :key="ki"
+                        ><td
+                          ><span class="nw-key-name">{{ key.name }}</span></td
+                        ><td v-if="draft.config.native.family !== 'liquid'"
+                          ><input v-model="key.label" aria-label="字段显示名称"
+                        /></td>
+                        <td v-if="historical && draft.config.native.family !== 'table'"
+                          ><select :value="seriesOptions(key).type" @change="setSeries(key, 'type', $event)"
+                            ><option value="line">折线</option
+                            ><option v-if="!['range', 'state'].includes(draft.config.native.family)" value="bar"
+                              >柱形</option
+                            ><option v-if="!['range', 'state'].includes(draft.config.native.family)" value="scatter"
+                              >散点</option
+                            ></select
+                          ></td
+                        >
+                        <td v-if="historical && draft.config.native.family !== 'table'"
+                          ><select :value="seriesOptions(key).axisId" @change="setSeries(key, 'axisId', $event)"
+                            ><option v-for="axis in draft.config.native.chart.axes" :key="axis.id" :value="axis.id">{{
+                              axis.label || axis.id
+                            }}</option></select
+                          ></td
+                        >
+                        <td v-if="draft.config.native.family !== 'liquid'"
+                          ><input v-model="key.color" type="color" aria-label="字段颜色" /></td
+                        ><td v-if="draft.config.native.family !== 'liquid'"
+                          ><input v-model="key.units" aria-label="单位" /></td
+                        ><td
+                          ><input v-model.number="key.decimals" type="number" min="0" max="8" aria-label="小数位" /></td
+                        ><td><button aria-label="删除字段" @click="ds.dataKeys.splice(ki, 1)">×</button></td></tr
+                      ></tbody
+                    ></table
+                  ></div
+                >
+                <ASelect
+                  show-search
+                  :value="[]"
+                  aria-label="添加数据字段"
+                  :dropdown-style="{ zIndex: 12100 }"
+                  :loading="keyLoading[ds.entityId]"
+                  :get-popup-container="selectPopupTarget"
+                  placeholder="＋ 添加字段"
+                  class="nw-key-select"
+                  :options="(availableKeys[ds.entityId] || []).map((name) => ({ value: name, label: name }))"
+                  @change="(name) => addKey(ds, String(name))"
+                />
+                <p v-if="keyMessages[ds.entityId]" class="nw-note">{{ keyMessages[ds.entityId] }}</p>
               </article>
-            </template>
-            <template v-if="tab === 'time'">
-              <label v-if="historical"
-                >时间模式<select v-model="draft.config.native.window.realtime"
-                  ><option :value="true">实时滚动</option
-                  ><option :value="false">固定历史范围</option></select
-                ></label
-              >
-              <template v-if="historical && draft.config.native.window.realtime"
-                ><label
-                  >时间窗口<select v-model="draft.config.native.window.durationMs"
-                    ><option :value="300000">5 分钟</option
-                    ><option :value="3600000">1 小时</option
-                    ><option :value="86400000">24 小时</option
-                    ><option :value="604800000">7 天</option></select
-                  ></label
+            </section>
+            <section class="nw-panel"
+              ><h3>标题</h3
+              ><div class="nw-fields"
+                ><label class="nw-check"><input v-model="draft.config.showTitle" type="checkbox" />显示标题</label
+                ><label>标题文本<input v-model="draft.title" /></label></div
+            ></section>
+          </template>
+          <NativeWidgetSettingsEditor v-model="draft.config.native" :mode="mode" @remove-axis="rebindAxis" />
+          <NativeStateSettingsEditor
+            v-if="draft.config.native.family === 'state' && mode === 'basic'"
+            v-model="draft.config.native"
+          />
+          <NativeLiquidSettingsEditor
+            v-if="draft.config.native.family === 'liquid' && mode === 'basic'"
+            v-model="draft.config.native"
+          />
+          <NativeAggregateSettingsEditor
+            v-if="draft.config.native.family === 'aggregate' && mode === 'basic'"
+            v-model="draft.config.native"
+          />
+          <template v-if="mode === 'advanced'">
+            <section v-if="historical && draft.config.native.family !== 'table'" class="nw-panel"
+              ><h3>序列样式</h3>
+              <template v-for="ds in sources" :key="ds.entityType + ds.entityId"
+                ><details v-for="(key, index) in ds.dataKeys" :key="index" class="nw-series-detail"
+                  ><summary>{{ ds.name }} · {{ key.label || key.name }}</summary
+                  ><div class="nw-fields">
+                    <label v-if="seriesOptions(key).type === 'line'"
+                      >线宽<input
+                        type="number"
+                        min="0"
+                        max="20"
+                        :value="seriesOptions(key).lineWidth"
+                        @input="setSeries(key, 'lineWidth', $event)"
+                    /></label>
+                    <label
+                      v-if="
+                        seriesOptions(key).type === 'scatter' ||
+                        (seriesOptions(key).type === 'line' && seriesOptions(key).showPoints)
+                      "
+                      >数据点大小<input
+                        type="number"
+                        min="1"
+                        max="40"
+                        :value="seriesOptions(key).pointSize"
+                        @input="setSeries(key, 'pointSize', $event)"
+                    /></label>
+                    <label v-if="seriesOptions(key).type === 'line' && draft.config.native.family !== 'state'"
+                      >阶梯线<select :value="String(seriesOptions(key).step)" @change="setSeries(key, 'step', $event)"
+                        ><option value="false">关闭</option
+                        ><option value="start">起点</option
+                        ><option value="middle">中点</option
+                        ><option value="end">终点</option></select
+                      ></label
+                    >
+                    <label v-for="field in seriesToggles(key)" :key="field[0]" class="nw-check"
+                      ><input
+                        type="checkbox"
+                        :checked="seriesOptions(key)[field[0]]"
+                        @change="setSeries(key, field[0], $event)"
+                      />{{ field[1] }}</label
+                    >
+                  </div></details
                 ></template
               >
-              <div v-else-if="historical" class="nw-row"
-                ><label
-                  >开始<input
-                    type="datetime-local"
-                    :value="localDate(draft.config.native.window.startTs)"
-                    @input="setDate('startTs', $event)" /></label
-                ><label
-                  >结束<input
-                    type="datetime-local"
-                    :value="localDate(draft.config.native.window.endTs)"
-                    @input="setDate('endTs', $event)" /></label
-              ></div>
-              <label v-if="historical"
-                >聚合<select v-model="draft.config.native.window.aggregation"
-                  ><option v-for="agg in ['NONE', 'AVG', 'MIN', 'MAX', 'SUM', 'COUNT']" :key="agg" :value="agg">{{
-                    agg
-                  }}</option></select
-                ></label
-              >
-              <label v-if="historical"
-                >聚合间隔（毫秒）<input v-model.number="draft.config.native.window.intervalMs" type="number" min="1000"
-              /></label>
-              <label
-                >刷新间隔（毫秒）<input
-                  v-model.number="draft.config.native.pollMs"
-                  type="number"
-                  min="5000"
-                  max="300000"
-              /></label>
-              <p class="nw-note">最多 8 个数据源。历史查询有条数上限；长时间范围建议使用聚合。固定历史仅加载一次。</p>
-            </template>
-            <template v-if="tab === 'style'">
-              <div class="nw-row"
-                ><label>量程下限<input v-model.number="draft.config.native.min" type="number" /></label
-                ><label>量程上限<input v-model.number="draft.config.native.max" type="number" /></label
-              ></div>
-              <label
-                >数值字号<input v-model.number="draft.config.native.fontSize" type="number" min="12" max="96"
-              /></label>
-              <div class="nw-row"
-                ><label><input v-model="draft.config.native.showLabel" type="checkbox" />显示字段名称</label
-                ><label><input v-model="draft.config.native.showDate" type="checkbox" />更新时间</label
-                ><label><input v-model="draft.config.native.showLegend" type="checkbox" />图例</label></div
-              >
-              <div class="nw-row"
-                ><strong>数值颜色区间</strong
-                ><button @click="draft.config.native.thresholds.push({ from: null, to: null, color: '#6ce9ff' })"
+            </section>
+            <section
+              v-if="
+                [
+                  'value',
+                  'valueChart',
+                  'progress',
+                  'gauge',
+                  'pie',
+                  'bar',
+                  'latestBar',
+                  'timeseries',
+                  'range',
+                  'polar',
+                ].includes(draft.config.native.family)
+              "
+              class="nw-panel"
+              ><h3
+                >数值颜色区间
+                <button @click="draft.config.native.thresholds.push({ from: null, to: null, color: '#6ce9ff' })"
                   >添加区间</button
-                ></div
-              >
-              <div v-for="(threshold, ti) in draft.config.native.thresholds" :key="ti" class="nw-row"
+                ></h3
+              ><div v-for="(threshold, ti) in draft.config.native.thresholds" :key="ti" class="nw-threshold"
                 ><input
                   :value="threshold.from"
                   placeholder="下限（空为无限）"
@@ -184,50 +313,66 @@
                   @input="threshold.to = optionalNumber($event)"
                 /><input v-model="threshold.color" type="color" /><button
                   @click="draft.config.native.thresholds.splice(ti, 1)"
-                  >×</button
+                  >删除</button
                 ></div
-              >
-              <p class="nw-note">液态玻璃由大屏容器统一绘制，部件内部保持透明。大屏全局样式设置优先。</p>
-              <label
-                >玻璃底色浓度<input
-                  v-model.number="draft.appearance!.backgroundOpacity"
-                  type="range"
-                  min="0"
-                  max="0.7"
-                  step="0.01"
-              /></label>
-              <label
-                >边框亮度<input
-                  v-model.number="draft.appearance!.borderOpacity"
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-              /></label>
-              <label>圆角<input v-model.number="draft.appearance!.radiusPx" type="range" min="0" max="40" /></label>
-              <label>强调色<input v-model="draft.appearance!.accentColor" type="color" /></label>
-            </template>
-          </div>
-          <aside
-            ><div class="nw-row"><strong>实际数据预览</strong><button @click="updatePreview">更新预览</button></div
-            ><p class="nw-note">修改配置后点击更新；预览与大屏共用 Vue 组件。</p
-            ><div class="nw-preview"
-              ><section
-                v-if="preview"
-                class="tb-widget-surface"
-                :style="widgetAppearanceStyle(preview.widgetKey, preview.appearance)"
-                ><NativeWidgetRenderer :key="preview.id" :config="preview.config" /></section
-              ><p v-else>选择数据源和字段后预览</p></div
-            ></aside
-          >
+              ></section
+            >
+            <section class="nw-panel"
+              ><h3>刷新</h3
+              ><label
+                >刷新间隔（毫秒）<input
+                  v-model.number="draft.config.native.pollMs"
+                  type="number"
+                  min="5000"
+                  max="300000" /></label
+              ><p class="nw-note">实时窗口随当前时间推进，数据按此间隔读取。固定历史只加载一次。</p></section
+            >
+            <section class="nw-panel"
+              ><h3>大屏外观</h3><p class="nw-note">大屏全局玻璃设置优先于单个部件。</p
+              ><div class="nw-fields"
+                ><label
+                  >玻璃底色浓度<input
+                    v-model.number="draft.appearance!.backgroundOpacity"
+                    type="range"
+                    min="0"
+                    max="0.7"
+                    step="0.01" /></label
+                ><label
+                  >边框亮度<input
+                    v-model.number="draft.appearance!.borderOpacity"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01" /></label
+                ><label>圆角<input v-model.number="draft.appearance!.radiusPx" type="range" min="0" max="40" /></label
+                ><label>强调色<input v-model="draft.appearance!.accentColor" type="color" /></label></div
+            ></section>
+          </template>
         </div>
         <p v-else class="nw-error">{{ message || support.reason }}</p>
         <footer
-          ><p v-if="draft && message" role="alert" class="nw-error nw-submit-error">{{ message }}</p
           ><button @click="emit('close')">取消</button
-          ><button v-if="!previewOnly && draft" class="nw-primary" @click="confirm">{{
-            source?.config?.native ? '应用配置' : '添加部件'
-          }}</button></footer
+          ><p v-if="draft && message" role="alert" class="nw-error nw-submit-error">{{ message }}</p
+          ><div class="nw-footer-actions"
+            ><button :disabled="!draft" @click="updatePreview">预览</button
+            ><button v-if="!previewOnly && draft" class="nw-primary" @click="confirm">{{
+              source?.config?.native ? '应用配置' : '添加'
+            }}</button></div
+          ></footer
+        >
+        <div v-if="previewVisible && preview" class="nw-preview-overlay" role="dialog" aria-label="部件预览"
+          ><header
+            ><strong>预览：{{ preview.title }}</strong
+            ><button aria-label="关闭预览" @click="previewVisible = false">×</button></header
+          ><div class="nw-preview"
+            ><section class="tb-widget-surface" :style="widgetAppearanceStyle(preview.widgetKey, preview.appearance)"
+              ><NativeWidgetRenderer :key="preview.id" :config="preview.config" /></section></div
+          ><div class="nw-preview-footer"
+            ><button @click="previewVisible = false">返回配置</button
+            ><button v-if="!previewOnly" class="nw-primary" @click="confirm">{{
+              source?.config?.native ? '应用配置' : '添加'
+            }}</button></div
+          ></div
         >
       </section>
     </div>
@@ -237,10 +382,19 @@
   import { computed, ref, watch, onBeforeUnmount } from 'vue';
   import { useNativeOverlayTarget } from './useNativeOverlayTarget';
   const overlayTarget = useNativeOverlayTarget();
+  function selectPopupTarget(): HTMLElement {
+    return overlayTarget.value instanceof HTMLElement ? overlayTarget.value : document.body;
+  }
   import { createNativeWidget, getNativeWidgetSupport, validateNativeWidget } from './nativeWidgetCatalog';
   import type { NativeSource } from './nativeWidgetTypes';
   import type { DashboardWidget } from '../types';
   import NativeWidgetRenderer from './NativeWidgetRenderer.vue';
+  import NativeWidgetSettingsEditor from './NativeWidgetSettingsEditor.vue';
+  import NativeStateSettingsEditor from './NativeStateSettingsEditor.vue';
+  import NativeLiquidSettingsEditor from './NativeLiquidSettingsEditor.vue';
+  import NativeAggregateSettingsEditor from './NativeAggregateSettingsEditor.vue';
+  import { Select as ASelect } from 'ant-design-vue';
+  import { withNativeSettings, nativeSeriesSettings } from './nativeWidgetSettings';
   import { widgetAppearanceStyle } from '../widgets/core/widgetInstance';
   import '../widgets/core/widgetSurface.css';
   import { getTenantDeviceInfoList, getCustomerDeviceInfoList } from '/@/api/tb/device';
@@ -256,14 +410,10 @@
     lockedEntity?: { entityId: string; name?: string };
   }>();
   const emit = defineEmits<{ (e: 'close'): void; (e: 'confirm', widget: DashboardWidget): void }>();
-  const tabs = [
-    { id: 'data', label: '数据源与字段' },
-    { id: 'time', label: '时间与刷新' },
-    { id: 'style', label: '外观与阈值' },
-  ];
   const draft = ref<DashboardWidget | null>(null),
     preview = ref<DashboardWidget | null>(null),
-    tab = ref('data'),
+    mode = ref<'basic' | 'advanced'>('basic'),
+    previewVisible = ref(false),
     message = ref('');
   const entityType = ref<'DEVICE' | 'ASSET'>('DEVICE'),
     query = ref(''),
@@ -286,27 +436,49 @@
   const user = useUserStoreWithOut();
   const support = computed(() => getNativeWidgetSupport(props.source));
   const sources = computed(() => (draft.value?.config.datasources || []) as NativeSource[]);
-  const historical = computed(() => ['valueChart', 'timeseries', 'table'].includes(draft.value?.config.native.family));
+  const timeMode = computed({
+    get: () =>
+      draft.value?.config.native.window.realtime ? 'realtime' : draft.value?.config.native.window.calendar || 'fixed',
+    set: (mode: string) => {
+      const window = draft.value?.config.native.window;
+      if (!window) return;
+      window.realtime = mode === 'realtime';
+      if (['day', 'week', 'month'].includes(mode)) window.calendar = mode as 'day' | 'week' | 'month';
+      else delete window.calendar;
+      if (mode === 'fixed' && (!Number.isFinite(window.startTs) || !Number.isFinite(window.endTs))) {
+        window.endTs = Date.now();
+        window.startTs = window.endTs - window.durationMs;
+      }
+    },
+  });
+  const historical = computed(() =>
+    ['valueChart', 'timeseries', 'table', 'bar', 'range', 'aggregate', 'state'].includes(
+      draft.value?.config.native.family,
+    ),
+  );
   watch(
     () => [props.visible, props.source],
     () => {
       generation++;
       preview.value = null;
       message.value = '';
-      tab.value = 'data';
+      mode.value = 'basic';
+      previewVisible.value = false;
       availableKeys.value = {};
       keyMessages.value = {};
       keyLoading.value = {};
       if (!props.visible) return;
       try {
         draft.value = createNativeWidget(props.source);
+        draft.value.config.native = withNativeSettings(draft.value.config.native);
       } catch (e: any) {
         draft.value = null;
         message.value = e.message;
         return;
       }
-      draft.value.config.native.window.startTs ||= Date.now() - 3600000;
-      draft.value.config.native.window.endTs ||= Date.now();
+      draft.value.config.showTitle ??= true;
+      draft.value.config.native.window.startTs ??= Date.now() - 3600000;
+      draft.value.config.native.window.endTs ??= Date.now();
       if (props.lockedEntity) {
         const previous = sources.value.find((s) => s.entityId === props.lockedEntity!.entityId);
         draft.value.config.datasources = [
@@ -320,12 +492,14 @@
         ];
       }
       sources.value.forEach((s) => {
-        keyTypes.value[s.entityId] = 'timeseries';
+        keyTypes.value[s.entityId] =
+          s.dataKeys[0]?.type === 'attribute' ? s.dataKeys[0].scope || 'SERVER_SCOPE' : 'timeseries';
+        void loadKeys(s);
       });
       if (!props.lockedEntity) {
         void searchEntities(0);
         void loadProfiles();
-      } else void loadKeys(sources.value[0]);
+      }
     },
     { immediate: true },
   );
@@ -386,7 +560,12 @@
     }
   }
   function addSource(entity: any) {
-    if (!draft.value || sources.value.length >= 8) return;
+    if (
+      !draft.value ||
+      sources.value.length >= 8 ||
+      sources.value.some((source) => source.entityId === entity.id.id && source.entityType === entityType.value)
+    )
+      return;
     const ds: NativeSource = {
       type: 'entity',
       entityType: entityType.value,
@@ -456,14 +635,61 @@
     draft.value!.config.title = draft.value!.title;
     preview.value = JSON.parse(JSON.stringify(draft.value));
     preview.value!.id = `preview-${Date.now()}`;
+    previewVisible.value = true;
   }
   function confirm() {
     if (!valid()) return;
     draft.value!.config.title = draft.value!.title;
     emit('confirm', JSON.parse(JSON.stringify(draft.value)));
   }
+  function selectEntity(id: string) {
+    const entity = entities.value.find((entry) => entry.id.id === id);
+    if (entity) addSource(entity);
+  }
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  function searchOptions(value: string) {
+    query.value = value;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => void searchEntities(0), 250);
+  }
+  onBeforeUnmount(() => clearTimeout(searchTimer));
+  function seriesOptions(key: any) {
+    return nativeSeriesSettings(key, draft.value!.config.native);
+  }
+  function rebindAxis(id: string, replacement: string) {
+    for (const source of sources.value)
+      for (const key of source.dataKeys) {
+        if (seriesOptions(key).axisId === id)
+          key.settings = { ...key.settings, native: { ...seriesOptions(key), axisId: replacement } };
+      }
+  }
+  function seriesToggles(key: any) {
+    const common = [
+      ['hidden', '默认隐藏'],
+      ['showLabel', '显示数值标签'],
+    ];
+    return seriesOptions(key).type === 'line'
+      ? [
+          ...(draft.value!.config.native.family === 'state' ? [] : [['smooth', '平滑曲线']]),
+          ['showPoints', '显示数据点'],
+          ['area', '填充面积'],
+          ...common,
+        ]
+      : common;
+  }
+  function setSeries(key: any, field: string, event: Event) {
+    const target = event.target as HTMLInputElement;
+    let value: any =
+      target.type === 'checkbox' ? target.checked : target.type === 'number' ? Number(target.value) : target.value;
+    if (field === 'step' && value === 'false') value = false;
+    key.settings = { ...key.settings, native: { ...seriesOptions(key), [field]: value } };
+  }
+  function durationLabel() {
+    const minutes = Number(draft.value?.config.native.window.durationMs) / 60000;
+    return minutes >= 1440 ? minutes / 1440 + ' 天' : minutes >= 60 ? minutes / 60 + ' 小时' : minutes + ' 分钟';
+  }
   function localDate(ts: number) {
-    if (!Number.isFinite(ts) || !ts) return '';
+    if (ts == null || !Number.isFinite(ts)) return '';
     const date = new Date(ts);
     return new Date(ts - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   }
@@ -480,200 +706,347 @@
     position: fixed;
     inset: 0;
     z-index: 12000;
-    background: rgba(2, 10, 22, 0.76);
+    background: #13263699;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 24px;
-    color: #e6f6ff;
+    color: #263742;
   }
   .nw-dialog {
-    width: min(1160px, 100%);
-    max-height: 94vh;
+    position: relative;
+    width: min(1060px, 100%);
+    height: min(920px, 94vh);
     display: flex;
     flex-direction: column;
-    background: #102536;
-    border: 1px solid #496777;
-    border-radius: 18px;
-    box-shadow: 0 24px 80px #0008;
+    background: #f3f6f8;
+    border-radius: 5px;
+    box-shadow: 0 20px 70px #0005;
     overflow: hidden;
   }
-  header,
-  footer {
+  header {
     display: flex;
+    align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 18px 24px;
-    align-items: center;
-    border-bottom: 1px solid #ffffff20;
-  }
-  header small {
-    display: block;
-    max-width: 900px;
-    margin-top: 6px;
-    color: #abc4d2;
-    font-size: 12px;
-  }
-  footer {
-    justify-content: flex-end;
-    border-top: 1px solid #ffffff20;
+    padding: 16px 20px;
+    background: #30577f;
+    color: white;
     flex-shrink: 0;
+    min-height: 64px;
   }
-  footer button {
-    flex-shrink: 0;
+  header strong {
+    font-size: 20px;
   }
-  .nw-submit-error {
-    flex: 1;
-    min-width: 0;
-    max-height: 80px;
-    overflow: auto;
-    margin: 0;
-  }
-  .nw-columns {
-    display: grid;
-    grid-template-columns: 1.15fr 1fr;
-    overflow: auto;
-    min-height: 0;
-  }
-  .nw-form,
-  aside {
-    padding: 20px;
-    min-width: 0;
-  }
-  .nw-form {
-    border-right: 1px solid #ffffff20;
-    overflow: auto;
-  }
-  nav,
-  .nw-row {
+  .nw-header-actions,
+  .nw-footer-actions,
+  .nw-inline {
     display: flex;
-    gap: 8px;
     align-items: center;
-    margin-bottom: 12px;
+    gap: 10px;
   }
-  .nw-row > * {
-    min-width: 0;
+  .nw-header-actions > button {
+    background: transparent;
+    color: white;
+    border: 0;
+    font-size: 24px;
   }
-  .nw-row input {
-    width: 100%;
+  .nw-segment {
+    display: flex;
+    border-radius: 20px;
+    background: #26486b;
+    padding: 3px;
   }
-  nav button {
+  .nw-segment button {
+    border: 0;
+    background: transparent;
+    color: #d0dfed;
+    border-radius: 20px;
+    padding: 5px 14px;
+  }
+  .nw-segment button.active {
+    background: white;
+    color: #30577f;
+  }
+  .nw-content {
+    overflow: auto;
     flex: 1;
+    min-height: 0;
+    padding: 18px;
   }
-  button,
+  .nw-panel {
+    background: white;
+    padding: 18px;
+    border-radius: 5px;
+    margin-bottom: 16px;
+  }
+  h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+  .nw-tag {
+    font-size: 13px;
+    font-weight: 400;
+    border: 1px solid #d1dae0;
+    color: #30577f;
+    border-radius: 18px;
+    padding: 4px 12px;
+  }
+  .nw-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    font-size: 13px;
+    color: #566670;
+    margin-bottom: 10px;
+  }
   input,
-  select {
+  select,
+  button {
     font: inherit;
-    color: inherit;
-    background: #ffffff0b;
-    border: 1px solid #ffffff30;
-    border-radius: 7px;
-    padding: 7px 10px;
+    color: #344857;
+    border: 1px solid #d5dce0;
+    border-radius: 4px;
+    background: white;
+    padding: 8px;
+    min-width: 0;
+    max-width: 100%;
   }
   button {
     cursor: pointer;
+    color: #30577f;
   }
   button:disabled {
     opacity: 0.45;
     cursor: default;
   }
-  button.active,
-  .nw-primary {
-    background: #237e93;
-  }
-  input,
-  select {
-    max-width: 100%;
-  }
-  select option {
-    background: #102536;
-  }
-  label {
-    display: flex;
-    gap: 8px;
-    flex-direction: column;
-    margin: 12px 0;
-  }
   input[type='checkbox'] {
-    width: auto;
+    accent-color: #30577f;
+    width: 18px;
+    height: 18px;
   }
   input[type='color'] {
     width: 42px;
     min-width: 42px;
-    padding: 2px;
+    height: 36px;
+    padding: 3px;
   }
-  strong {
-    font-weight: 600;
+  .nw-check {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
   }
-  small,
-  .nw-note {
-    color: #a6bfcb;
+  .nw-primary {
+    background: #30577f;
+    color: #fff;
+    border-color: #30577f;
+  }
+  .nw-entity-select {
+    width: 100%;
+  }
+  .nw-key-select {
+    width: 260px;
+    max-width: 100%;
+    margin-top: 12px;
+  }
+  .nw-pages {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    align-items: center;
+    margin-top: 8px;
     font-size: 12px;
   }
-  .nw-entities,
-  .nw-keys {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin: 10px 0;
-    max-height: 150px;
-    overflow: auto;
+  .nw-pages button {
+    padding: 4px 8px;
   }
-  .nw-entities button {
-    text-align: left;
+  .nw-source-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    background: #eaf0f4;
+    border-radius: 18px;
+    padding: 4px 10px;
+    margin: 8px 8px 0 0;
   }
-  .nw-entities small {
-    display: block;
+  .nw-source-chip button {
+    border: 0;
+    background: transparent;
+    padding: 0;
   }
   .nw-source {
-    border: 1px solid #ffffff25;
-    border-radius: 10px;
+    padding: 12px 0;
+    border-top: 1px solid #e4e8eb;
+  }
+  .nw-source-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .nw-note {
+    color: #74838e;
+    font-size: 12px;
+    margin: 10px 0 0;
+  }
+  .nw-table-scroll {
+    overflow: auto;
+  }
+  .nw-key-table {
+    border-collapse: collapse;
+    min-width: 680px;
+    width: 100%;
+    font-size: 13px;
+  }
+  .nw-key-table th {
+    font-weight: 400;
+    color: #7a848c;
+    text-align: left;
+    border-bottom: 1px solid #dde3e7;
+    padding: 10px 6px;
+  }
+  .nw-key-table td {
+    padding: 10px 6px;
+    border-bottom: 1px solid #edf0f2;
+  }
+  .nw-key-table input:not([type='color']) {
+    width: 100%;
+    min-width: 50px;
+  }
+  .nw-key-table input[type='number'] {
+    width: 66px;
+  }
+  .nw-key-table select {
+    max-width: 130px;
+  }
+  .nw-key-name {
+    display: block;
+    padding: 6px 10px;
+    border-radius: 16px;
+    background: #edf0f2;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .nw-threshold {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .nw-threshold input[type='number'] {
+    flex: 1;
+    width: 100%;
+  }
+  .nw-time,
+  .nw-series-detail {
+    border: 1px solid #dfe5e9;
+    border-radius: 5px;
     padding: 12px;
-    margin: 12px 0;
   }
-  .nw-key {
-    padding: 8px 0;
+  .nw-series-detail {
+    margin: 10px 0;
   }
-  .nw-key input[type='number'] {
-    width: 65px;
+  summary {
+    cursor: pointer;
+    color: #30577f;
+    font-size: 14px;
+  }
+  details[open] > summary {
+    margin-bottom: 18px;
+  }
+  footer {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    padding: 14px 18px;
+    background: white;
+    flex-shrink: 0;
+    border-top: 1px solid #e2e7ea;
+  }
+  .nw-footer-actions {
+    margin-left: auto;
+  }
+  .nw-submit-error {
+    flex: 1;
+    max-height: 70px;
+    overflow: auto;
+    margin: 0;
   }
   .nw-error {
-    color: #ffb3a8;
-    padding: 12px;
+    color: #b72923;
+    font-size: 13px;
+    padding: 8px;
+  }
+  .nw-preview-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    background: #f3f6f8;
+    display: flex;
+    flex-direction: column;
   }
   .nw-preview {
-    padding: 22px;
-    min-height: 340px;
-    border-radius: 12px;
+    flex: 1;
+    min-height: 0;
+    padding: 24px;
     background:
       radial-gradient(ellipse at 10% 20%, #236b79, transparent 55%), linear-gradient(125deg, #0b1828, #244533);
-    display: grid;
+    display: flex;
     align-items: center;
+    justify-content: center;
   }
   .nw-preview > section {
-    height: 310px;
+    height: 100%;
+    max-height: 540px;
+    width: 100%;
+    padding: 16px;
     overflow: hidden;
-    padding: 14px;
   }
-  .nw-preview > p {
-    text-align: center;
+  .nw-preview-footer {
+    display: flex;
+    justify-content: space-between;
+    padding: 16px;
   }
-  .nw-row label {
-    flex: 1;
-  }
-  @media (max-width: 800px) {
+  @media (max-width: 650px) {
     .nw-mask {
-      padding: 8px;
+      padding: 6px;
     }
-    .nw-columns {
+    .nw-dialog {
+      height: 96vh;
+    }
+    .nw-content {
+      padding: 10px;
+    }
+    .nw-panel {
+      padding: 12px;
+    }
+    .nw-fields {
       grid-template-columns: 1fr;
     }
-    .nw-form {
-      overflow: visible;
-      border: 0;
+    header {
+      padding: 12px;
     }
-    aside {
-      border-top: 1px solid #ffffff20;
+    header strong {
+      font-size: 16px;
+    }
+    .nw-source-header {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .nw-preview {
+      padding: 12px;
     }
   }
 </style>

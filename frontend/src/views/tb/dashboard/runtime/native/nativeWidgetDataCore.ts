@@ -1,4 +1,7 @@
+import { loadLiquidSettings } from './nativeLiquidCore';
+import { withNativeSettings } from './nativeWidgetSettings';
 import type { NativeOptions, NativeSource } from './nativeWidgetTypes';
+import { loadNativeAggregateSlots, type NativeAggregateResult } from './nativeAggregateCore';
 
 export const MAX_NATIVE_POINTS = 2000;
 type Scope = 'CLIENT_SCOPE' | 'SERVER_SCOPE' | 'SHARED_SCOPE';
@@ -13,10 +16,14 @@ export interface NativeSeries {
   key: NativeSource['dataKeys'][number];
   latest: NativePoint | null;
   points: NativePoint[];
+  previous?: NativePoint | null;
+  historyFailed?: boolean;
   error?: string;
   truncated: boolean;
 }
 export interface NativeSnapshot {
+  liquid?: Awaited<ReturnType<typeof loadLiquidSettings>>;
+  aggregate?: NativeAggregateResult[];
   series: NativeSeries[];
   updatedAt: number;
   errors: string[];
@@ -36,6 +43,7 @@ export interface NativeHistoryQuery {
   agg: NativeOptions['window']['aggregation'];
   limit: number;
   orderBy: 'DESC';
+  useStrictDataTypes?: boolean;
 }
 export interface NativeDataApi {
   latest: (source: NativeSource, keys: string) => Promise<unknown>;
@@ -70,6 +78,16 @@ export function nativeThresholdColor(value: unknown, options: NativeOptions, fal
 }
 
 export function nativeWindow(options: NativeOptions, now: number): { startTs: number; endTs: number } {
+  if (!options.window.realtime && options.window.calendar) {
+    const date = new Date(now);
+    let startTs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+    if (options.window.calendar === 'month') startTs = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+    else if (options.window.calendar === 'week') startTs -= ((date.getUTCDay() + 6) % 7) * 86400000;
+    else if (options.window.calendar !== 'day') throw new Error('日历窗口无效');
+    if (!Number.isFinite(startTs) || startTs < 0) throw new Error('时间窗口无效');
+    // The API requires a positive interval, also on the first millisecond of a calendar period.
+    return { startTs, endTs: Math.max(now, startTs + 1) };
+  }
   const endTs = options.window.realtime ? now : Number(options.window.endTs);
   const startTs = options.window.realtime ? endTs - Number(options.window.durationMs) : Number(options.window.startTs);
   if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || startTs < 0 || endTs <= startTs) {
@@ -133,7 +151,11 @@ export function createNativeDataClient(api: NativeDataApi, concurrency = 6) {
     const series: NativeSeries[] = [];
     const jobs: Promise<void>[] = [];
     const errors: string[] = [];
-    const needsHistory = ['valueChart', 'timeseries', 'table'].includes(config.native.family);
+    let aggregate: NativeAggregateResult[] | undefined;
+    let liquid: NativeSnapshot['liquid'];
+    const needsHistory = ['valueChart', 'timeseries', 'bar', 'table', 'range', 'aggregate', 'state'].includes(
+      config.native.family,
+    );
     let window: ReturnType<typeof nativeWindow> | undefined;
     if (needsHistory) {
       try {
@@ -176,31 +198,37 @@ export function createNativeDataClient(api: NativeDataApi, concurrency = 6) {
         const identity = `${source.entityType}:${source.entityId}:${group}:${keys}`;
         const readLatest =
           group === 'timeseries' ? () => api.latest(source, keys) : () => api.attributes(source, group as Scope, keys);
-        jobs.push(
-          request(`latest:${identity}`, readLatest)
-            .then((response) => {
-              for (const entry of entries) {
-                if (group === 'timeseries') {
-                  entry.latest = pointsFromResponse(response, entry.key.name).at(-1) || null;
-                } else {
-                  const attribute = Array.isArray(response)
-                    ? response.find((item) => item?.key === entry.key.name)
-                    : null;
-                  if (attribute && 'value' in attribute) {
-                    entry.latest = { ts: Number(attribute.lastUpdateTs) || 0, value: attribute.value };
+        if (!['range', 'aggregate', 'state'].includes(config.native.family))
+          jobs.push(
+            request(`latest:${identity}`, readLatest)
+              .then((response) => {
+                for (const entry of entries) {
+                  if (group === 'timeseries') {
+                    entry.latest = pointsFromResponse(response, entry.key.name).at(-1) || null;
+                  } else {
+                    const attribute = Array.isArray(response)
+                      ? response.find((item) => item?.key === entry.key.name)
+                      : null;
+                    if (attribute && 'value' in attribute) {
+                      entry.latest = { ts: Number(attribute.lastUpdateTs) || 0, value: attribute.value };
+                    }
                   }
                 }
-              }
-            })
-            .catch(() => {
-              entries.forEach((entry) => {
-                entry.error = '最新值读取失败';
-              });
-            }),
-        );
-        if (group === 'timeseries' && needsHistory && window) {
+              })
+              .catch(() => {
+                entries.forEach((entry) => {
+                  entry.error = '最新值读取失败';
+                });
+              }),
+          );
+        if (
+          group === 'timeseries' &&
+          needsHistory &&
+          window &&
+          (config.native.family !== 'aggregate' || config.native.aggregate?.showChart !== false)
+        ) {
           const interval = Number(config.native.window.intervalMs);
-          const aggregation = config.native.window.aggregation;
+          const aggregation = config.native.family === 'state' ? 'NONE' : config.native.window.aggregation;
           if (
             !['NONE', 'AVG', 'MIN', 'MAX', 'SUM', 'COUNT'].includes(aggregation) ||
             !Number.isFinite(interval) ||
@@ -220,7 +248,28 @@ export function createNativeDataClient(api: NativeDataApi, concurrency = 6) {
             agg: aggregation,
             limit: MAX_NATIVE_POINTS + 1,
             orderBy: 'DESC',
+            ...(config.native.family === 'state' ? { useStrictDataTypes: true } : {}),
           };
+          if (
+            config.native.family === 'state' &&
+            withNativeSettings(config.native).state.includePrevious &&
+            window.startTs > 0
+          ) {
+            const previousQuery = { ...query, startTs: 0, endTs: window.startTs - 1, limit: 1 };
+            jobs.push(
+              request(`history:${JSON.stringify(previousQuery)}`, () => api.history(previousQuery))
+                .then((response) => {
+                  for (const entry of entries)
+                    entry.previous =
+                      pointsFromResponse(response, entry.key.name)
+                        .filter((point) => point.ts >= 0 && point.ts <= previousQuery.endTs)
+                        .at(-1) || null;
+                })
+                .catch(() => {
+                  errors.push(`${source.name || source.entityId}：窗口前状态读取失败，起点可能缺失`);
+                }),
+            );
+          }
           jobs.push(
             request(`history:${JSON.stringify(query)}`, () => api.history(query))
               .then((response) => {
@@ -234,6 +283,7 @@ export function createNativeDataClient(api: NativeDataApi, concurrency = 6) {
               })
               .catch(() => {
                 entries.forEach((entry) => {
+                  entry.historyFailed = true;
                   entry.error = entry.error ? `${entry.error}；历史值读取失败` : '历史值读取失败';
                 });
               }),
@@ -241,8 +291,45 @@ export function createNativeDataClient(api: NativeDataApi, concurrency = 6) {
         }
       });
     });
+    if (config.native.family === 'liquid' && config.datasources.length === 1) {
+      jobs.push(
+        loadLiquidSettings(config.datasources[0], withNativeSettings(config.native).liquid, (source, scope, keys) =>
+          request(`attributes:${source.entityType}:${source.entityId}:${scope}:${keys}`, () =>
+            api.attributes(source, scope, keys),
+          ),
+        ).then((result) => {
+          liquid = result;
+        }),
+      );
+    }
+    if (config.native.family === 'aggregate' && window && config.datasources.length === 1) {
+      jobs.push(
+        loadNativeAggregateSlots(
+          config.datasources[0],
+          config.native.aggregate?.slots || [],
+          window,
+          config.native.window.realtime,
+          {
+            latest: (source, keys) =>
+              request(`latest:${source.entityType}:${source.entityId}:timeseries:${keys}`, () =>
+                api.latest(source, keys),
+              ),
+            history: (query) => request(`history:${JSON.stringify(query)}`, () => api.history(query)),
+          },
+        ).then((result) => {
+          aggregate = result;
+        }),
+      );
+    }
     await Promise.all(jobs);
-    return { series, updatedAt: now, loading: false, errors };
+    return {
+      series,
+      updatedAt: now,
+      loading: false,
+      errors,
+      ...(aggregate ? { aggregate } : {}),
+      ...(liquid ? { liquid } : {}),
+    };
   }
   return { load };
 }
@@ -252,7 +339,12 @@ export interface NativeTableRow {
   values: Record<string, unknown>;
 }
 /** Align historical telemetry on timestamps; attributes stay latest-only, never forward-filled into history. */
-export function nativeTableRows(series: NativeSeries[], page = 1, pageSize = 20) {
+export function nativeTableRows(
+  series: NativeSeries[],
+  page = 1,
+  pageSize = 20,
+  settings?: { sortOrder?: 'asc' | 'desc'; pagination?: boolean; query?: string },
+) {
   const rows = new Map<number, NativeTableRow>();
   for (const entry of series) {
     const points = entry.key.type === 'attribute' ? (entry.latest ? [entry.latest] : []) : entry.points;
@@ -261,12 +353,22 @@ export function nativeTableRows(series: NativeSeries[], page = 1, pageSize = 20)
       rows.get(point.ts)!.values[entry.id] = point.value;
     }
   }
-  const sorted = [...rows.values()].sort((a, b) => b.ts - a.ts);
+  const query = settings?.query?.trim().toLocaleLowerCase();
+  const sorted = [...rows.values()]
+    .filter(
+      (row) =>
+        !query ||
+        [
+          new Date(row.ts).toLocaleString(),
+          ...series.map((entry) => formatNativeValue(row.values[entry.id], entry.key.decimals ?? 2, entry.key.units)),
+        ].some((value) => value.toLocaleLowerCase().includes(query)),
+    )
+    .sort((a, b) => (settings?.sortOrder === 'asc' ? a.ts - b.ts : b.ts - a.ts));
   const size = Math.max(1, Math.min(100, Math.floor(pageSize) || 20));
-  const totalPages = Math.max(1, Math.ceil(sorted.length / size));
+  const totalPages = settings?.pagination === false ? 1 : Math.max(1, Math.ceil(sorted.length / size));
   const currentPage = Math.max(1, Math.min(totalPages, Math.floor(page) || 1));
   return {
-    rows: sorted.slice((currentPage - 1) * size, currentPage * size),
+    rows: settings?.pagination === false ? sorted : sorted.slice((currentPage - 1) * size, currentPage * size),
     total: sorted.length,
     page: currentPage,
     totalPages,
@@ -301,7 +403,8 @@ export function createNativePoller(
         if (current !== generation) void run();
         else if (
           target.native.window.realtime ||
-          !['timeseries', 'valueChart', 'table'].includes(target.native.family)
+          target.native.window.calendar ||
+          !['timeseries', 'valueChart', 'bar', 'table', 'range', 'state'].includes(target.native.family)
         ) {
           timer = schedule(
             () => {

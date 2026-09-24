@@ -9,12 +9,19 @@ const families: [NativeFamily, string][] = [
   ['gauge', '仪表盘'],
   ['timeseries', '时序图'],
   ['pie', '最新值饼图'],
-  ['bar', '最新值条形图'],
+  ['bar', '带标签历史柱形图'],
+  ['latestBar', '最新值柱形图'],
+  ['radar', '雷达图'],
+  ['polar', '极区图'],
+  ['range', '范围图'],
+  ['aggregate', '聚合数值卡'],
+  ['liquid', '液位容器'],
+  ['state', '状态图'],
   ['table', '历史数据表'],
 ];
 
 export const widgets: WidgetDefinition[] = families.map(([family, title]) => {
-  const historical = ['valueChart', 'timeseries', 'table'].includes(family);
+  const historical = ['valueChart', 'timeseries', 'bar', 'table', 'range', 'aggregate', 'state'].includes(family);
   const native: NativeOptions = {
     version: 1,
     fqn: `vue.native.${family}`,
@@ -38,11 +45,19 @@ export const widgets: WidgetDefinition[] = families.map(([family, title]) => {
     component: NativeWidgetRenderer,
     editor: historical ? 'timeseries' : 'latest',
     supportsTimewindow: historical,
-    allowedKeyTypes: ['timeseries', 'attribute'],
+    allowedKeyTypes: historical ? ['timeseries'] : ['timeseries', 'attribute'],
     hosts: ['dashboard', 'point-detail', 'editor'],
     dataProvider: 'static',
     previewKind:
-      family === 'table' ? 'table' : family === 'pie' ? 'pie' : family === 'bar' ? 'bar' : historical ? 'line' : 'card',
+      family === 'table'
+        ? 'table'
+        : family === 'pie'
+          ? 'pie'
+          : ['bar', 'latestBar'].includes(family)
+            ? 'bar'
+            : historical
+              ? 'line'
+              : 'card',
     defaultConfig: { showTitle: true, native, datasources: [] },
     defaultAppearance: { surface: 'clear-glass', backgroundOpacity: 0.04, blurPx: 0 },
     dashboardPlacement: { width: 5, height: 4 },

@@ -36,7 +36,7 @@ async function main() {
       assert.deepEqual(validateNativeWidget(configured), [], raw.fqn + ' 默认配置可用');
     }
   }
-  assert.equal(count, 292);
+  assert.equal(count, 405);
   const source = JSON.parse(
     readFileSync('../backend/application/src/main/data/json/system/widget_types/temperature_card.json', 'utf8'),
   );
@@ -45,8 +45,8 @@ async function main() {
     false,
   );
   assert.equal(getNativeWidgetSupport({ fqn: 'unknown_temperature_card' }).supported, false);
-  assert.equal(getNativeWidgetSupport({ fqn: 'state_chart' }).supported, false);
-  assert.equal(getNativeWidgetSupport({ fqn: 'temperature_chart_card' }).supported, false);
+  assert.equal(getNativeWidgetSupport({ fqn: 'charts.state_chart' }).supported, false);
+  assert.equal(getNativeWidgetSupport({ fqn: 'temperature_chart_card' }).supported, true);
   const imported = importThingsboardJson({ widgetTypes: [source, { fqn: 'custom', name: 'Custom', descriptor: {} }] });
   assert.equal(imported.length, 2);
   assert.equal(imported[1].kind, 'unknown');
@@ -144,6 +144,8 @@ async function main() {
   assert.equal(queries[0].agg, 'AVG');
   assert.equal(queries[0].startTs, 1000);
   assert.equal(queries[0].endTs, 5000);
+  const barHistory = await client.load({ ...config, native: { ...config.native, family: 'bar' } }, 6000);
+  assert.equal(barHistory.series[0].points[0].value, 11, '带标签柱形图读取历史值，不以最新值代替');
   const table = nativeTableRows(result.series.slice(0, 2));
   assert.equal(table.total, 2);
   assert.equal(table.rows[0].ts, 3000);
@@ -261,7 +263,7 @@ async function main() {
   assert.equal(queries.at(-1).endTs, 15000, '轮询时重新计算滚动查询边界');
   rolling.stop();
   assert.equal(nextPoll, undefined);
-  console.log('Native catalog/import/data/lifecycle tests passed (521 definitions, 292 base adapters)');
+  console.log('Native catalog/import/data/lifecycle tests passed (521 definitions, 405 base adapters)');
 }
 void main().catch((error) => {
   console.error(error);

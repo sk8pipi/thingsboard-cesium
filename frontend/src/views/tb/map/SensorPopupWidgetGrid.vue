@@ -1,7 +1,7 @@
 <template>
   <div class="sensor-popup-widget-grid">
     <section
-      v-for="(widget, index) in widgets"
+      v-for="widget in widgets"
       :key="widgetRenderKey(widget)"
       :aria-label="widget.title"
       class="sensor-popup-widget-grid__item tb-widget-surface tb-widget-surface--nested"
@@ -12,7 +12,7 @@
         v-if="editable && widget.config?.native"
         class="sensor-popup-widget-grid__edit"
         type="button"
-        @click="emit('edit', index)"
+        @click="emit('edit', widget.id)"
         >配置</button
       >
       <button
@@ -20,7 +20,7 @@
         class="sensor-popup-widget-grid__remove"
         type="button"
         :aria-label="`删除部件：${widget.title}`"
-        @click="emit('remove', index)"
+        @click="emit('remove', widget.id)"
       >
         删除
       </button>
@@ -63,8 +63,8 @@
   );
 
   const emit = defineEmits<{
-    (e: 'remove', index: number): void;
-    (e: 'edit', index: number): void;
+    (e: 'remove', id: string): void;
+    (e: 'edit', id: string): void;
   }>();
 
   function widgetKey(widget: DashboardWidget) {
