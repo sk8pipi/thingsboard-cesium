@@ -27,6 +27,23 @@ for (const file of [
   'dashboard/runtime/native/NativeWidgetSettingsEditor.vue',
   'dashboard/runtime/native/NativeAggregateSettingsEditor.vue',
   'dashboard/runtime/native/NativeLiquidSettingsEditor.vue',
+  'dashboard/runtime/native/NativeIndicatorSettingsEditor.vue',
+  'dashboard/runtime/native/NativeIndicatorView.vue',
+  'dashboard/runtime/native/NativeInputView.vue',
+  'dashboard/runtime/native/NativeLocationInputView.vue',
+  'dashboard/runtime/native/NativePhotoInputView.vue',
+  'dashboard/runtime/native/NativeLedView.vue',
+  'dashboard/runtime/native/NativeWindView.vue',
+  'dashboard/runtime/native/NativeRpcButtonView.vue',
+  'dashboard/runtime/native/NativeControlView.vue',
+  'dashboard/runtime/native/NativeAdvancedControlView.vue',
+  'dashboard/runtime/native/NativeMultiInputView.vue',
+  'dashboard/runtime/native/NativeCountView.vue',
+  'dashboard/runtime/native/NativeAttributeCardView.vue',
+  'dashboard/runtime/native/NativeAlarmTableView.vue',
+  'dashboard/runtime/native/NativeDeviceClaimView.vue',
+  'dashboard/runtime/native/NativeEntityHierarchyView.vue',
+  'dashboard/runtime/native/NativeEntityTableView.vue',
   'dashboard/runtime/native/NativeStateSettingsEditor.vue',
 ]) {
   const { descriptor, errors } = parse(fs.readFileSync(new URL(root + file, import.meta.url), 'utf8'));
@@ -143,6 +160,9 @@ const keyGlobals: any = {
   keyLoading: ref({}),
   message: ref(''),
   draft: ref(widget),
+  indicator: ref(false),
+  singleSource: ref(false),
+  multiInput: ref(false),
   getTimeseriesKeys: () => new Promise((resolve) => (resolveOldKeys = resolve)),
   getAttributeKeysByScope: async () => ['model'],
 };
@@ -159,6 +179,48 @@ assert.equal(ds.dataKeys.length, 0, '拒绝过期范围字段');
 keys.addKey(ds, 'model');
 assert.equal(ds.dataKeys.length, 1);
 assert.equal(ds.dataKeys[0].scope, 'SERVER_SCOPE');
+const jsonDraft: any = createNativeWidget({ fqn: 'input_widgets.update_json_attribute' });
+jsonDraft.config.datasources = [
+  {
+    type: 'entity',
+    entityType: 'DEVICE',
+    entityId: 'device-json',
+    dataKeys: [{ name: 'old', type: 'attribute', scope: 'SERVER_SCOPE' }],
+  },
+  {
+    type: 'entity',
+    entityType: 'ASSET',
+    entityId: 'asset-json',
+    dataKeys: [{ name: 'old', type: 'attribute', scope: 'SERVER_SCOPE' }],
+  },
+];
+const jsonDraftRef = ref(jsonDraft);
+const targetGlobals: any = {
+  draft: jsonDraftRef,
+  sources: {
+    get value() {
+      return jsonDraftRef.value.config.datasources;
+    },
+  },
+  inputSpec: ref({ mode: 'attribute', scope: 'SHARED_SCOPE', valueType: 'json' }),
+  entityType: ref('ASSET'),
+  keyTypes: ref({}),
+  loadKeys: (source: any) => requested.push(source.entityId),
+};
+const requested: string[] = [];
+const jsonTarget = functions('dashboard/runtime/native/NativeWidgetComposer.vue', ['changeInputTarget'], targetGlobals);
+jsonTarget.changeInputTarget();
+assert.equal(targetGlobals.entityType.value, 'DEVICE');
+assert.equal(jsonDraft.config.datasources.map((source: any) => source.entityId).join(','), 'device-json');
+assert.equal(jsonDraft.config.datasources[0].dataKeys.length, 0);
+assert.equal(targetGlobals.keyTypes.value['device-json'], 'SHARED_SCOPE');
+assert.deepEqual(requested, ['device-json']);
+targetGlobals.inputSpec.value = { mode: 'timeseries', valueType: 'json' };
+jsonDraft.config.datasources[0].dataKeys = [{ name: 'old', type: 'attribute', scope: 'SHARED_SCOPE' }];
+jsonTarget.changeInputTarget();
+assert.equal(jsonDraft.config.datasources[0].dataKeys.length, 0);
+assert.equal(targetGlobals.keyTypes.value['device-json'], 'timeseries');
+assert.deepEqual(requested, ['device-json', 'device-json']);
 const resizeGlobals: any = {
   grid: { getRow: () => 8 },
   editorMode: ref('editing'),

@@ -6,7 +6,7 @@
     "sources": 681,
     "widget-json": 521,
     "generated-scada": 160,
-    "baseAdapters": 405,
+    "baseAdapters": 478,
     "fullParityVerified": 0
   },
   "entries": [
@@ -41,8 +41,8 @@
         "borderRadius",
         "configMode"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "advancedControl",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -765,8 +765,8 @@
         "timewindowStyle.font.lineHeight",
         "timewindowStyle.color"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "count",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -837,8 +837,8 @@
         "configMode",
         "alarmFilterConfig"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "alarmTable",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -979,8 +979,8 @@
         "titleFont",
         "titleColor"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "entityTable",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -1008,8 +1008,8 @@
         "title",
         "decimals"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "attributeCard",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -1467,8 +1467,8 @@
         "settings",
         "title"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "latestBar",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -1498,8 +1498,8 @@
         "settings.gpioList[].row",
         "title"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "advancedControl",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -1532,8 +1532,8 @@
         "datasources[].name",
         "datasources[].type"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "advancedControl",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -1633,8 +1633,8 @@
         "timewindowStyle.font.lineHeight",
         "timewindowStyle.color"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "battery",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -2892,8 +2892,8 @@
         "configMode",
         "borderRadius"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "rpcButton",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -2950,8 +2950,8 @@
         "noDataDisplayMessage",
         "configMode"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "wind",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -3134,8 +3134,8 @@
         "actions.actionCellButton[].useShowWidgetActionFunction",
         "configMode"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "entityTable",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -3176,8 +3176,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "deviceClaim",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -4726,8 +4726,8 @@
         "widgetStyle",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "entityHierarchy",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -4790,8 +4790,8 @@
         "titleIcon",
         "iconColor"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "entityTable",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -4902,8 +4902,8 @@
         "timewindowStyle.font.lineHeight",
         "timewindowStyle.color"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "count",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -8244,8 +8244,8 @@
         "titleStyle.fontWeight",
         "mobileHeight"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "timeseries",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -8340,8 +8340,8 @@
         "titleStyle.fontWeight",
         "mobileHeight"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "timeseries",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -28289,8 +28289,8 @@
         "decimals",
         "units"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "control",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -28358,8 +28358,8 @@
         "timewindowStyle.font.lineHeight",
         "timewindowStyle.color"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "value",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -29435,8 +29435,8 @@
         "actions",
         "decimals"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "ledIndicator",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -32330,8 +32330,8 @@
         "titleStyle.fontWeight",
         "titleStyle.padding"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "advancedControl",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -32376,8 +32376,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "photoInput",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -32476,8 +32476,8 @@
         "settings",
         "title"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "pie",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -32522,8 +32522,8 @@
         "titleStyle.fontSize",
         "titleStyle.fontWeight"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "pie",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -34098,8 +34098,8 @@
         "settings",
         "title"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "polar",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -34141,8 +34141,8 @@
         "titleColor",
         "borderRadius"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "control",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -36907,8 +36907,8 @@
         "settings",
         "title"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "radar",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -38356,8 +38356,8 @@
         "settings.gpioList[].row",
         "title"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "advancedControl",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -38390,8 +38390,8 @@
         "datasources[].name",
         "datasources[].type"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "advancedControl",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -39742,8 +39742,8 @@
         "actions",
         "decimals"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "control",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -40295,8 +40295,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "rpcButton",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -40333,8 +40333,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "advancedControl",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -40371,8 +40371,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "advancedControl",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -40443,8 +40443,8 @@
         "settings.isConnector",
         "title"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "advancedControl",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -40561,8 +40561,8 @@
         "timewindowStyle.font.lineHeight",
         "timewindowStyle.color"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "signal",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -41020,8 +41020,8 @@
         "actions",
         "configMode"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "value",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -47736,8 +47736,8 @@
         "iconSize",
         "configMode"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "control",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -47777,8 +47777,8 @@
         "widgetCss",
         "noDataDisplayMessage"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "control",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -47818,8 +47818,8 @@
         "configMode",
         "titleColor"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "control",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -50297,8 +50297,8 @@
         "titleIcon",
         "iconColor"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "state",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -50340,8 +50340,8 @@
         "titleColor",
         "borderRadius"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "advancedControl",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -50981,8 +50981,8 @@
         "actions",
         "decimals"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "control",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -52285,8 +52285,8 @@
         "configMode",
         "units"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "gauge",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -52584,8 +52584,8 @@
         "titleIcon",
         "iconColor"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "timeseries",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -52664,8 +52664,8 @@
         "titleIcon",
         "iconColor"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "timeseries",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -52778,8 +52778,8 @@
         "titleColor",
         "borderRadius"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "control",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53171,8 +53171,8 @@
         "titleStyle.fontSize",
         "titleStyle.fontWeight"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "advancedControl",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53275,8 +53275,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53306,8 +53306,8 @@
         "actions",
         "targetDeviceAliases"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "advancedControl",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53341,8 +53341,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53376,8 +53376,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53418,8 +53418,8 @@
         "titleStyle.fontWeight",
         "showLegend"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53465,8 +53465,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "locationInput",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53501,8 +53501,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "multiInput",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53536,8 +53536,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53572,8 +53572,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53609,8 +53609,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53649,8 +53649,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53684,8 +53684,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53731,8 +53731,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "locationInput",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53769,8 +53769,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53804,8 +53804,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53843,8 +53843,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53878,8 +53878,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53918,8 +53918,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -53953,8 +53953,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -54000,8 +54000,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "locationInput",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -54036,8 +54036,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -54071,8 +54071,8 @@
         "showLegend",
         "actions"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "input",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -55142,8 +55142,8 @@
         "datasources",
         "borderRadius"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "control",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -57569,8 +57569,8 @@
         "timewindowStyle.font.lineHeight",
         "timewindowStyle.color"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "wind",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {
@@ -57677,8 +57677,8 @@
         "timewindowStyle.font.lineHeight",
         "timewindowStyle.color"
       ],
-      "baseFamily": null,
-      "status": "待实现",
+      "baseFamily": "wind",
+      "status": "基础实现待完整验收",
       "fullParityVerified": false
     },
     {

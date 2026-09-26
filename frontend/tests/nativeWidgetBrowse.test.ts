@@ -7,6 +7,8 @@ import {
   mergeBrowseWidgets,
   mergeNativeBundles,
   filterBrowseWidgets,
+  hiddenNativeWidgetFqns,
+  isNativeWidgetVisible,
 } from '../src/views/tb/dashboard/runtime/native/nativeWidgetBrowse';
 import { safePreviewSource, createPreviewImageCache } from '../src/views/tb/widgetsLibrary/widgetResourceCore';
 const directory = new URL('../../backend/application/src/main/data/json/system/widget_bundles/', import.meta.url);
@@ -14,13 +16,18 @@ const originals = fs
   .readdirSync(directory)
   .filter((file) => file.endsWith('.json'))
   .map((file) => JSON.parse(fs.readFileSync(new URL(file, directory), 'utf8')));
-assert.equal(nativeWidgetBundles.length, originals.length);
+assert.equal(hiddenNativeWidgetFqns.size, 34);
 for (const { widgetsBundle, widgetTypeFqns } of originals) {
-  const bundle = nativeWidgetBundles.find((item) => item.alias === widgetsBundle.alias)!;
+  const visibleFqns = widgetTypeFqns.filter(isNativeWidgetVisible);
+  const bundle = nativeWidgetBundles.find((item) => item.alias === widgetsBundle.alias);
+  if (!visibleFqns.length) {
+    assert.equal(bundle, undefined, `${widgetsBundle.alias} 空包应隐藏`);
+    continue;
+  }
   assert.ok(bundle);
   assert.equal(bundle.image, widgetsBundle.image);
-  assert.deepEqual(bundle.widgetTypeFqns, widgetTypeFqns);
-  assert.equal(localBundleWidgets(bundle).length, widgetTypeFqns.length);
+  assert.deepEqual(bundle.widgetTypeFqns, visibleFqns);
+  assert.equal(localBundleWidgets(bundle).length, visibleFqns.length);
   assert.ok(safePreviewSource(bundle.image), bundle.alias);
 }
 const charts = localBundleWidgets(nativeWidgetBundles.find((b) => b.alias === 'charts'));
@@ -53,6 +60,18 @@ assert.equal(remoteFirst.length, localCharts.length);
 assert.equal(remoteFirst[0].name, 'Remote chart');
 assert.equal(remoteFirst[0].local, false);
 assert.equal(remoteFirst[0].image, localCharts[0].image);
+assert.ok(localBundleWidgets().every((entry) => !hiddenNativeWidgetFqns.has(entry.fqn)));
+assert.equal(
+  mergeBrowseWidgets(
+    [],
+    [
+      { fqn: 'map', name: 'Remote map' },
+      { fqn: 'entity_count', name: 'Count' },
+    ],
+  ).length,
+  1,
+  '服务端结果也不能重新引入已排除部件',
+);
 assert.equal(
   safePreviewSource('tb-image:name:description;data:image/svg+xml;base64,PHN2Zy8+'),
   'data:image/svg+xml;base64,PHN2Zy8+',

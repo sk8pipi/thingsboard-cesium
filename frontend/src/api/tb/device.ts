@@ -184,10 +184,10 @@ export function getDeviceTypes() {
   });
 }
 
-export function claimDevice(deviceName: string, secretKey: string) {
+export function claimDevice(deviceName: string, secretKey?: string) {
   return defHttp.postJson<any>({
-    url: `/api/customer/device/${deviceName}/claim`,
-    data: { secretKey: secretKey },
+    url: `/api/customer/device/${encodeURIComponent(deviceName)}/claim`,
+    data: secretKey === undefined ? {} : { secretKey },
   });
 }
 

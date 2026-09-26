@@ -418,6 +418,13 @@ export function createNativePoller(
     }
   }
   return {
+    refresh() {
+      if (stopped || !config) return;
+      generation++;
+      if (timer !== undefined) cancel(timer);
+      timer = undefined;
+      void run();
+    },
     pause() {
       generation++;
       config = null;

@@ -27,7 +27,22 @@ export function useNativeWidgetData(config: Ref<NativeDataConfig | null>) {
   watch(
     () => JSON.stringify(config.value),
     () => {
-      if (config.value) poller.update(config.value);
+      if (
+        [
+          'rpcButton',
+          'control',
+          'advancedControl',
+          'count',
+          'alarmTable',
+          'deviceClaim',
+          'entityHierarchy',
+          'entityTable',
+          'ledIndicator',
+        ].includes(config.value?.native.family || '')
+      ) {
+        poller.pause();
+        data.value = { series: [], updatedAt: 0, loading: false, errors: [] };
+      } else if (config.value) poller.update(config.value);
       else {
         poller.pause();
         data.value = { series: [], updatedAt: 0, loading: false, errors: ['部件配置不完整'] };
@@ -36,5 +51,5 @@ export function useNativeWidgetData(config: Ref<NativeDataConfig | null>) {
     { immediate: true },
   );
   onBeforeUnmount(() => poller.stop());
-  return data;
+  return { data, refresh: () => poller.refresh() };
 }

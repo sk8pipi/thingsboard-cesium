@@ -9,6 +9,9 @@ import * as core from '../src/views/tb/dashboard/runtime/native/nativeWidgetData
 import * as stateCore from '../src/views/tb/dashboard/runtime/native/nativeStateCore';
 import * as settings from '../src/views/tb/dashboard/runtime/native/nativeWidgetSettings';
 import * as chartOptions from '../src/views/tb/dashboard/runtime/native/nativeWidgetChartOptions';
+import * as inputCore from '../src/views/tb/dashboard/runtime/native/nativeInputCore';
+import * as locationCore from '../src/views/tb/dashboard/runtime/native/nativeLocationInputCore';
+import * as ledCore from '../src/views/tb/dashboard/runtime/native/nativeLedCore';
 
 const source = fs.readFileSync(
   new URL('../src/views/tb/dashboard/runtime/native/NativeWidgetRenderer.vue', import.meta.url),
@@ -63,8 +66,25 @@ const context = vm.createContext({
   require: (name: string) => {
     if (name === 'vue') return { ...vue, onBeforeUnmount: (fn: () => void) => unmount.push(fn) };
     if (name === './NativeLiquidView') return {};
+    if (name === './NativeIndicatorView.vue') return {};
+    if (name === './NativeInputView.vue') return {};
+    if (name === './NativeLocationInputView.vue') return {};
+    if (name === './NativePhotoInputView.vue') return {};
+    if (name === './NativeLedView.vue') return {};
+    if (name === './NativeWindView.vue') return {};
+    if (name === './NativeRpcButtonView.vue') return {};
+    if (name === './NativeMultiInputView.vue') return {};
+    if (name === './NativeCountView.vue') return {};
+    if (name === './NativeAttributeCardView.vue') return {};
+    if (name === './NativeAlarmTableView.vue') return {};
+    if (name === './NativeDeviceClaimView.vue') return {};
+    if (name === './NativeEntityHierarchyView.vue') return {};
+    if (name === './NativeEntityTableView.vue') return {};
+    if (name === './nativeInputCore') return inputCore;
+    if (name === './nativeLocationInputCore') return locationCore;
+    if (name === './nativeLedCore') return ledCore;
     if (name === 'echarts') return { init: () => chart };
-    if (name === './nativeWidgetData') return { useNativeWidgetData: () => snapshot };
+    if (name === './nativeWidgetData') return { useNativeWidgetData: () => ({ data: snapshot, refresh: () => {} }) };
     if (name === './nativeWidgetDataCore') return core;
     if (name === './nativeStateCore') return stateCore;
     if (name === './nativeWidgetSettings') return settings;

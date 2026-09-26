@@ -13,7 +13,13 @@
         </header>
         <div v-if="draft" class="nw-content">
           <template v-if="mode === 'basic'">
-            <section v-if="historical" class="nw-panel">
+            <section
+              v-if="
+                historical ||
+                (draft.config.native.family === 'alarmTable' && draft.config.native.alarmTable.useTimeWindow)
+              "
+              class="nw-panel"
+            >
               <h3>时间窗口 <span class="nw-tag">使用部件时间窗口</span></h3>
               <details class="nw-time">
                 <summary>{{
@@ -66,14 +72,14 @@
                         @input="setDate('endTs', $event)"
                     /></label>
                   </template>
-                  <label v-if="draft.config.native.family !== 'state'"
+                  <label v-if="!['state', 'alarmTable'].includes(draft.config.native.family)"
                     >聚合<select v-model="draft.config.native.window.aggregation"
                       ><option v-for="agg in ['NONE', 'AVG', 'MIN', 'MAX', 'SUM', 'COUNT']" :key="agg" :value="agg">{{
                         agg === 'NONE' ? '无聚合' : agg
                       }}</option></select
                     ></label
                   >
-                  <label v-if="draft.config.native.family !== 'state'"
+                  <label v-if="!['state', 'alarmTable'].includes(draft.config.native.family)"
                     >聚合间隔（毫秒）<input
                       v-model.number="draft.config.native.window.intervalMs"
                       type="number"
@@ -82,7 +88,7 @@
                 </div>
               </details>
             </section>
-            <section class="nw-panel">
+            <section v-if="usesDataSource" class="nw-panel">
               <h3
                 >数据源 <span class="nw-tag">{{ entityType === 'DEVICE' ? '设备' : '资产' }}</span></h3
               >
@@ -92,7 +98,17 @@
                   <label
                     >实体类型<select v-model="entityType" @change="searchEntities(0)"
                       ><option value="DEVICE">设备</option
-                      ><option value="ASSET">资产自身数据</option></select
+                      ><option
+                        v-if="
+                          inputSpec?.scope !== 'SHARED_SCOPE' &&
+                          locationSpec?.scope !== 'SHARED_SCOPE' &&
+                          !['rpcButton', 'control', 'advancedControl', 'ledIndicator'].includes(
+                            draft.config.native.family,
+                          )
+                        "
+                        value="ASSET"
+                        >资产自身数据</option
+                      ></select
                     ></label
                   >
                   <label v-if="entityType === 'DEVICE'"
@@ -112,7 +128,7 @@
                   aria-label="选择设备或资产"
                   :dropdown-style="{ zIndex: 12100 }"
                   :loading="loading"
-                  :disabled="sources.length >= 8"
+                  :disabled="sources.length >= (singleSource ? 1 : 8)"
                   :get-popup-container="selectPopupTarget"
                   placeholder="输入名称搜索并选择，可添加多个实体"
                   class="nw-entity-select"
@@ -138,18 +154,47 @@
               >
               <p v-if="entityType === 'ASSET'" class="nw-note">读取资产自身字段；下属设备汇总使用内置资产聚合部件。</p>
             </section>
-            <section class="nw-panel">
+            <section
+              v-if="
+                ![
+                  'rpcButton',
+                  'control',
+                  'advancedControl',
+                  'count',
+                  'alarmTable',
+                  'deviceClaim',
+                  'entityHierarchy',
+                  'entityTable',
+                  'locationInput',
+                  'ledIndicator',
+                ].includes(draft.config.native.family)
+              "
+              class="nw-panel"
+            >
               <h3>{{ historical ? '时间序列' : '数据字段' }}</h3>
               <p v-if="!sources.length" class="nw-note">先选择设备或资产，再选择数据字段。</p>
               <article v-for="ds in sources" :key="ds.entityType + ds.entityId" class="nw-source">
                 <div class="nw-source-header"
                   ><strong>{{ ds.name || ds.entityId }}</strong
                   ><div class="nw-inline"
-                    ><select v-model="keyTypes[ds.entityId]" @change="loadKeys(ds)"
-                      ><option value="timeseries">遥测</option
-                      ><option v-if="!historical" value="CLIENT_SCOPE">客户端属性</option
-                      ><option v-if="!historical" value="SERVER_SCOPE">服务端属性</option
-                      ><option v-if="!historical" value="SHARED_SCOPE">共享属性</option></select
+                    ><select v-model="keyTypes[ds.entityId]" :disabled="!!inputSpec" @change="loadKeys(ds)"
+                      ><option v-if="!inputSpec || inputSpec.mode === 'timeseries'" value="timeseries">遥测</option
+                      ><option v-if="!historical && !inputSpec && !multiInput && !photoInput" value="CLIENT_SCOPE"
+                        >客户端属性</option
+                      ><option
+                        v-if="!historical && (!inputSpec || inputSpec.scope === 'SERVER_SCOPE')"
+                        value="SERVER_SCOPE"
+                        >服务端属性</option
+                      ><option
+                        v-if="
+                          !historical &&
+                          (!inputSpec || inputSpec.scope === 'SHARED_SCOPE') &&
+                          !photoInput &&
+                          (!multiInput || ds.entityType === 'DEVICE')
+                        "
+                        value="SHARED_SCOPE"
+                        >共享属性</option
+                      ></select
                     ><button :disabled="keyLoading[ds.entityId]" @click="loadKeys(ds)">刷新字段</button></div
                   ></div
                 >
@@ -157,17 +202,20 @@
                   ><table class="nw-key-table"
                     ><thead
                       ><tr
-                        ><th>键</th><th v-if="draft.config.native.family !== 'liquid'">标签</th
+                        ><th>键</th
+                        ><th v-if="!['liquid', 'battery', 'signal'].includes(draft.config.native.family)">标签</th
                         ><th v-if="historical && draft.config.native.family !== 'table'">类型</th
                         ><th v-if="historical && draft.config.native.family !== 'table'">Y 轴</th
-                        ><th v-if="draft.config.native.family !== 'liquid'">颜色</th
-                        ><th v-if="draft.config.native.family !== 'liquid'">单位</th><th>小数</th><th></th></tr
+                        ><th v-if="!['liquid', 'battery', 'signal', 'input'].includes(draft.config.native.family)"
+                          >颜色</th
+                        ><th v-if="!['liquid', 'input'].includes(draft.config.native.family)">单位</th
+                        ><th v-if="!inputSpec">小数</th><th></th></tr
                     ></thead>
                     <tbody
                       ><tr v-for="(key, ki) in ds.dataKeys" :key="ki"
                         ><td
                           ><span class="nw-key-name">{{ key.name }}</span></td
-                        ><td v-if="draft.config.native.family !== 'liquid'"
+                        ><td v-if="!['liquid', 'battery', 'signal'].includes(draft.config.native.family)"
                           ><input v-model="key.label" aria-label="字段显示名称"
                         /></td>
                         <td v-if="historical && draft.config.native.family !== 'table'"
@@ -187,11 +235,11 @@
                             }}</option></select
                           ></td
                         >
-                        <td v-if="draft.config.native.family !== 'liquid'"
+                        <td v-if="!['liquid', 'battery', 'signal', 'input'].includes(draft.config.native.family)"
                           ><input v-model="key.color" type="color" aria-label="字段颜色" /></td
-                        ><td v-if="draft.config.native.family !== 'liquid'"
+                        ><td v-if="!['liquid', 'input'].includes(draft.config.native.family)"
                           ><input v-model="key.units" aria-label="单位" /></td
-                        ><td
+                        ><td v-if="!inputSpec"
                           ><input v-model.number="key.decimals" type="number" min="0" max="8" aria-label="小数位" /></td
                         ><td><button aria-label="删除字段" @click="ds.dataKeys.splice(ki, 1)">×</button></td></tr
                       ></tbody
@@ -204,6 +252,7 @@
                   aria-label="添加数据字段"
                   :dropdown-style="{ zIndex: 12100 }"
                   :loading="keyLoading[ds.entityId]"
+                  :disabled="singleSource && ds.dataKeys.length >= (draft.config.native.family === 'wind' ? 2 : 1)"
                   :get-popup-container="selectPopupTarget"
                   placeholder="＋ 添加字段"
                   class="nw-key-select"
@@ -211,6 +260,75 @@
                   @change="(name) => addKey(ds, String(name))"
                 />
                 <p v-if="keyMessages[ds.entityId]" class="nw-note">{{ keyMessages[ds.entityId] }}</p>
+                <div v-if="multiInput" class="nw-multi-keys">
+                  <details v-for="key in ds.dataKeys" :key="`${key.type}:${key.scope}:${key.name}`" class="nw-panel">
+                    <summary
+                      >{{ key.label || key.name }} ·
+                      {{
+                        key.type === 'timeseries' ? '遥测' : key.scope === 'SHARED_SCOPE' ? '共享属性' : '服务端属性'
+                      }}</summary
+                    >
+                    <div class="nw-fields">
+                      <label
+                        >输入类型<select v-model="multiSettings(key).dataKeyValueType">
+                          <option value="string">文本</option
+                          ><option value="double">浮点数</option
+                          ><option value="integer">整数</option>
+                          <option value="booleanCheckbox">复选框</option
+                          ><option value="booleanSwitch">开关</option>
+                          <option value="date">日期</option
+                          ><option value="dateTime">日期时间</option
+                          ><option value="time">时间</option>
+                          <option value="JSON">JSON</option
+                          ><option value="select">下拉选择</option
+                          ><option value="radio">单选</option
+                          ><option value="color">颜色</option>
+                        </select></label
+                      >
+                      <label class="nw-check"
+                        ><input v-model="multiSettings(key).required" type="checkbox" />必填</label
+                      >
+                      <label
+                        >编辑方式<select v-model="multiSettings(key).isEditable"
+                          ><option value="editable">可编辑</option
+                          ><option value="readonly">只读</option
+                          ><option value="disabled">禁用</option></select
+                        ></label
+                      >
+                      <label class="nw-check"
+                        ><input v-model="multiSettings(key).dataKeyHidden" type="checkbox" />隐藏字段</label
+                      >
+                      <label
+                        >被哪个字段禁用<input
+                          v-model="multiSettings(key).disabledOnDataKey"
+                          placeholder="留空表示始终可编辑"
+                      /></label>
+                      <template v-if="['integer', 'double'].includes(multiSettings(key).dataKeyValueType)">
+                        <label
+                          >最小值<input
+                            :value="multiSettings(key).minValue ?? ''"
+                            type="number"
+                            @input="multiSettings(key).minValue = optionalNumber($event)"
+                        /></label>
+                        <label
+                          >最大值<input
+                            :value="multiSettings(key).maxValue ?? ''"
+                            type="number"
+                            @input="multiSettings(key).maxValue = optionalNumber($event)"
+                        /></label>
+                        <label>步长<input v-model.number="multiSettings(key).step" type="number" min="0.001" /></label>
+                      </template>
+                      <label v-if="['select', 'radio'].includes(multiSettings(key).dataKeyValueType)"
+                        >选项（每行 标签=值）
+                        <textarea
+                          :value="multiOptionsText(key)"
+                          rows="4"
+                          @input="setMultiOptions(key, $event)"
+                        ></textarea>
+                      </label>
+                    </div>
+                  </details>
+                </div>
               </article>
             </section>
             <section class="nw-panel"
@@ -220,7 +338,335 @@
                 ><label>标题文本<input v-model="draft.title" /></label></div
             ></section>
           </template>
-          <NativeWidgetSettingsEditor v-model="draft.config.native" :mode="mode" @remove-axis="rebindAxis" />
+          <NativeWidgetSettingsEditor
+            v-if="
+              !['count', 'alarmTable', 'deviceClaim', 'entityHierarchy', 'entityTable'].includes(
+                draft.config.native.family,
+              )
+            "
+            v-model="draft.config.native"
+            :mode="mode"
+            @remove-axis="rebindAxis"
+          />
+          <section v-if="draft.config.native.family === 'attributeCard' && mode === 'basic'" class="nw-panel">
+            <h3>属性卡片</h3>
+            <div class="nw-fields">
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.attributeCard.showSourceTitle"
+                  type="checkbox"
+                />显示实体标题</label
+              >
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.attributeCard.showMissing"
+                  type="checkbox"
+                />显示暂无值的字段</label
+              >
+              <label
+                >标签列宽度（%）<input
+                  v-model.number="draft.config.native.attributeCard.labelWidth"
+                  type="number"
+                  min="10"
+                  max="90"
+              /></label>
+            </div>
+          </section>
+          <section v-if="draft.config.native.family === 'count' && mode === 'basic'" class="nw-panel">
+            <h3>{{ draft.config.native.count.kind === 'alarm' ? '告警计数' : '实体计数' }}</h3>
+            <div class="nw-fields">
+              <p v-if="draft.config.native.count.singleEntityId" class="nw-note"
+                >当前点位设备：{{ lockedEntity?.name || draft.config.native.count.singleEntityId }}</p
+              >
+              <label v-if="!draft.config.native.count.singleEntityId"
+                >统计范围<select v-model="draft.config.native.count.entityType">
+                  <option v-if="draft.config.native.count.kind === 'alarm'" value="ALL">全部实体</option>
+                  <option value="DEVICE">设备</option
+                  ><option value="ASSET">资产</option>
+                </select></label
+              >
+              <label v-if="!draft.config.native.count.singleEntityId && draft.config.native.count.entityType !== 'ALL'"
+                >名称前缀<input v-model="draft.config.native.count.nameFilter" placeholder="留空表示全部"
+              /></label>
+              <template v-if="draft.config.native.count.kind === 'alarm'">
+                <label
+                  >告警状态<select v-model="draft.config.native.count.statusList" multiple>
+                    <option value="ACTIVE">活跃</option
+                    ><option value="CLEARED">已清除</option>
+                    <option value="ACK">已确认</option
+                    ><option value="UNACK">未确认</option>
+                  </select></label
+                >
+                <label
+                  >告警等级<select v-model="draft.config.native.count.severityList" multiple>
+                    <option value="CRITICAL">严重</option
+                    ><option value="MAJOR">重要</option>
+                    <option value="MINOR">次要</option
+                    ><option value="WARNING">警告</option>
+                    <option value="INDETERMINATE">未确定</option>
+                  </select></label
+                >
+                <label>告警类型（逗号分隔）<input v-model="draft.config.native.count.typeList" /></label>
+                <label
+                  >最近时长（毫秒；0 为不限）<input
+                    v-model.number="draft.config.native.count.timeWindowMs"
+                    type="number"
+                    min="0"
+                    :max="31 * 86400000"
+                /></label>
+              </template>
+              <label>计数标签<input v-model="draft.config.native.count.label" /></label>
+              <label class="nw-check"
+                ><input v-model="draft.config.native.count.showLabel" type="checkbox" />显示标签</label
+              >
+              <label
+                >布局<select v-model="draft.config.native.count.layout"
+                  ><option value="column">纵向</option
+                  ><option value="row">横向</option></select
+                ></label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.count.showIcon" type="checkbox" />显示图标</label
+              >
+              <label v-if="draft.config.native.count.showIcon"
+                >图标名（如 ant-design:warning-filled）<input v-model="draft.config.native.count.icon"
+              /></label>
+              <label v-if="draft.config.native.count.showIcon"
+                >图标字号<input v-model.number="draft.config.native.count.iconSize" type="number" min="8" max="96"
+              /></label>
+              <label class="nw-check"
+                ><input v-model="draft.config.native.count.showIconBackground" type="checkbox" />显示图标底色</label
+              >
+              <label>图标颜色<input v-model="draft.config.native.count.iconColor" /></label>
+              <label>图标底色<input v-model="draft.config.native.count.iconBackgroundColor" /></label>
+              <label>数值颜色<input v-model="draft.config.native.count.valueColor" /></label>
+              <label
+                >数值字号<input v-model.number="draft.config.native.count.valueFontSize" type="number" min="8" max="96"
+              /></label>
+            </div>
+            <p class="nw-note">使用当前账户权限查询真实计数；预览也会读取。原始函数数据源不会执行。</p>
+          </section>
+          <section v-if="draft.config.native.family === 'alarmTable' && mode === 'basic'" class="nw-panel">
+            <h3>告警表格</h3>
+            <div class="nw-fields">
+              <p v-if="draft.config.native.alarmTable.singleEntityId" class="nw-note"
+                >当前点位设备：{{ lockedEntity?.name || draft.config.native.alarmTable.singleEntityId }}</p
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.alarmTable.enableSearch" type="checkbox" />启用搜索</label
+              >
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.alarmTable.enableFilter"
+                  type="checkbox"
+                />启用状态和等级筛选</label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.alarmTable.enableSelection" type="checkbox" />启用行选择</label
+              >
+              <label
+                >默认状态<select v-model="draft.config.native.alarmTable.statusList" multiple>
+                  <option value="ACTIVE">活跃</option
+                  ><option value="CLEARED">已清除</option>
+                  <option value="ACK">已确认</option
+                  ><option value="UNACK">未确认</option>
+                </select></label
+              >
+              <label
+                >默认等级<select v-model="draft.config.native.alarmTable.severityList" multiple>
+                  <option value="CRITICAL">严重</option
+                  ><option value="MAJOR">重要</option>
+                  <option value="MINOR">次要</option
+                  ><option value="WARNING">警告</option>
+                  <option value="INDETERMINATE">未确定</option>
+                </select></label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.alarmTable.displayDetails" type="checkbox" />显示告警详情</label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.alarmTable.displayPagination" type="checkbox" />显示分页</label
+              >
+              <label
+                >每页条数<input
+                  v-model.number="draft.config.native.alarmTable.defaultPageSize"
+                  type="number"
+                  min="1"
+                  max="100"
+              /></label>
+              <label
+                >时间排序<select v-model="draft.config.native.alarmTable.defaultSortOrder"
+                  ><option value="DESC">最新优先</option
+                  ><option value="ASC">最早优先</option></select
+                ></label
+              >
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.alarmTable.useTimeWindow"
+                  type="checkbox"
+                />按部件时间窗口筛选</label
+              >
+              <label
+                >刷新间隔（毫秒）<input
+                  v-model.number="draft.config.native.pollMs"
+                  type="number"
+                  min="5000"
+                  max="300000"
+              /></label>
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.alarmTable.allowAcknowledgment"
+                  type="checkbox"
+                />允许确认告警</label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.alarmTable.allowClear" type="checkbox" />允许清除告警</label
+              >
+            </div>
+            <p class="nw-note">预览只读；确认和清除仅在正式部件中由用户点击触发。</p>
+          </section>
+          <section v-if="draft.config.native.family === 'deviceClaim' && mode === 'basic'" class="nw-panel">
+            <h3>设备认领</h3>
+            <div class="nw-fields">
+              <label class="nw-check"
+                ><input v-model="draft.config.native.deviceClaim.deviceSecret" type="checkbox" />要求填写密钥</label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.deviceClaim.showLabel" type="checkbox" />显示字段标签</label
+              >
+              <label>设备名称标签<input v-model="draft.config.native.deviceClaim.deviceLabel" /></label>
+              <label>密钥标签<input v-model="draft.config.native.deviceClaim.secretKeyLabel" /></label>
+              <label>按钮文字<input v-model="draft.config.native.deviceClaim.claimButtonLabel" /></label>
+              <label>成功提示<input v-model="draft.config.native.deviceClaim.successfulClaimDevice" /></label>
+              <label>失败提示<input v-model="draft.config.native.deviceClaim.failedClaimDevice" /></label>
+            </div>
+            <p class="nw-note">设备名和密钥在正式部件中由用户填写；密钥不会保存到模板。预览不会提交。</p>
+          </section>
+          <section v-if="draft.config.native.family === 'entityHierarchy' && mode === 'basic'" class="nw-panel">
+            <h3>实体层级</h3>
+            <div class="nw-fields">
+              <label
+                >关系类型<input v-model="draft.config.native.entityHierarchy.relationType" placeholder="Contains"
+              /></label>
+              <label
+                >关系方向<select v-model="draft.config.native.entityHierarchy.direction"
+                  ><option value="FROM">从根节点向外</option
+                  ><option value="TO">从根节点向内</option></select
+                ></label
+              >
+              <label
+                >最大展开深度<input
+                  v-model.number="draft.config.native.entityHierarchy.maxDepth"
+                  type="number"
+                  min="1"
+                  max="5"
+              /></label>
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.entityHierarchy.showEntityType"
+                  type="checkbox"
+                />显示实体类型</label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.entityHierarchy.sortByName" type="checkbox" />按名称排序</label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.entityHierarchy.expandRoot" type="checkbox" />默认展开根节点</label
+              >
+            </div>
+            <p class="nw-note">通过当前账户可见的关系读取子节点；原始自定义函数不会执行。</p>
+          </section>
+          <section v-if="draft.config.native.family === 'entityTable' && mode === 'basic'" class="nw-panel">
+            <h3>实体表格</h3>
+            <div class="nw-fields">
+              <p v-if="draft.config.native.entityTable.singleEntityId" class="nw-note"
+                >当前点位设备：{{ lockedEntity?.name || draft.config.native.entityTable.singleEntityId }}</p
+              >
+              <label v-else-if="!draft.config.native.entityTable.adminMode"
+                >实体类型<select v-model="draft.config.native.entityTable.entityType"
+                  ><option value="DEVICE">设备</option
+                  ><option value="ASSET">资产</option></select
+                ></label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.entityTable.enableSearch" type="checkbox" />启用搜索</label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.entityTable.displayPagination" type="checkbox" />显示分页</label
+              >
+              <label
+                >每页条数<input
+                  v-model.number="draft.config.native.entityTable.pageSize"
+                  type="number"
+                  min="1"
+                  max="100"
+              /></label>
+              <label
+                >名称排序<select v-model="draft.config.native.entityTable.sortOrder"
+                  ><option value="ASC">升序</option
+                  ><option value="DESC">降序</option></select
+                ></label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.entityTable.showLabel" type="checkbox" />显示实体标签</label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.entityTable.showType" type="checkbox" />显示实体类型</label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.entityTable.stickyHeader" type="checkbox" />固定表头</label
+              >
+              <template v-if="draft.config.native.entityTable.adminMode">
+                <label class="nw-check"
+                  ><input v-model="draft.config.native.entityTable.allowCreate" type="checkbox" />允许新增</label
+                >
+                <label class="nw-check"
+                  ><input v-model="draft.config.native.entityTable.allowEdit" type="checkbox" />允许编辑</label
+                >
+                <label class="nw-check"
+                  ><input v-model="draft.config.native.entityTable.allowDelete" type="checkbox" />允许删除</label
+                >
+                <label class="nw-check"
+                  ><input v-model="draft.config.native.entityTable.editLocation" type="checkbox" />编辑经纬度</label
+                >
+              </template>
+              <label
+                >刷新间隔（毫秒）<input
+                  v-model.number="draft.config.native.pollMs"
+                  type="number"
+                  min="5000"
+                  max="300000"
+              /></label>
+            </div>
+            <h4
+              >附加字段
+              <button
+                type="button"
+                :disabled="draft.config.native.entityTable.columns.length >= 16"
+                @click="draft.config.native.entityTable.columns.push({ type: 'TIME_SERIES', key: '', label: '' })"
+                >添加列</button
+              ></h4
+            >
+            <div v-for="(column, index) in draft.config.native.entityTable.columns" :key="index" class="nw-fields">
+              <label
+                >来源<select v-model="column.type"
+                  ><option value="TIME_SERIES">最新遥测</option
+                  ><option value="SERVER_ATTRIBUTE">服务端属性</option
+                  ><option value="CLIENT_ATTRIBUTE">客户端属性</option
+                  ><option value="SHARED_ATTRIBUTE">共享属性</option></select
+                ></label
+              >
+              <label>字段键<input v-model="column.key" /></label><label>列标题<input v-model="column.label" /></label>
+              <button type="button" @click="draft.config.native.entityTable.columns.splice(index, 1)">删除列</button>
+            </div>
+            <p class="nw-note">
+              {{
+                draft.config.native.entityTable.adminMode
+                  ? '使用当前账户权限新增、编辑和删除实体；配置预览不会提交任何变更。'
+                  : '查询当前账户可见的实体与最新字段；原始函数数据源不会执行。'
+              }}
+            </p>
+          </section>
           <NativeStateSettingsEditor
             v-if="draft.config.native.family === 'state' && mode === 'basic'"
             v-model="draft.config.native"
@@ -229,6 +675,663 @@
             v-if="draft.config.native.family === 'liquid' && mode === 'basic'"
             v-model="draft.config.native"
           />
+          <NativeIndicatorSettingsEditor v-if="indicator" v-model="draft.config.native" :mode="mode" />
+          <section v-if="multiInput" class="nw-panel">
+            <h3>多属性更新</h3>
+            <div class="nw-fields">
+              <label class="nw-check"
+                ><input v-model="draft.config.native.multiInput.showResultMessage" type="checkbox" />显示保存结果</label
+              >
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.multiInput.showActionButtons"
+                  type="checkbox"
+                />显示整表操作按钮</label
+              >
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.multiInput.updateAllValues"
+                  type="checkbox"
+                />每次更新全部可编辑值</label
+              >
+              <label
+                >保存按钮文字<input v-model="draft.config.native.multiInput.saveButtonLabel" placeholder="保存"
+              /></label>
+              <label
+                >重置按钮文字<input v-model="draft.config.native.multiInput.resetButtonLabel" placeholder="重置"
+              /></label>
+              <label class="nw-check"
+                ><input v-model="draft.config.native.multiInput.showGroupTitle" type="checkbox" />显示分组标题</label
+              >
+              <label v-if="draft.config.native.multiInput.showGroupTitle"
+                >分组标题<input v-model="draft.config.native.multiInput.groupTitle"
+              /></label>
+              <label
+                >排列<select v-model="draft.config.native.multiInput.fieldsAlignment"
+                  ><option value="row">多列</option
+                  ><option value="column">单列</option></select
+                ></label
+              >
+              <label v-if="draft.config.native.multiInput.fieldsAlignment === 'row'"
+                >每行字段<input
+                  v-model.number="draft.config.native.multiInput.fieldsInRow"
+                  type="number"
+                  min="1"
+                  max="8"
+              /></label>
+              <label
+                >行距<input v-model.number="draft.config.native.multiInput.rowGap" type="number" min="0" max="80"
+              /></label>
+              <label
+                >列距<input v-model.number="draft.config.native.multiInput.columnGap" type="number" min="0" max="80"
+              /></label>
+            </div>
+            <p class="nw-note">选择字段时可切换遥测/服务端/共享属性。预览不写入；自定义脚本不执行。</p>
+          </section>
+          <section v-if="draft.config.native.family === 'rpcButton'" class="nw-panel">
+            <h3>RPC 按钮</h3>
+            <div class="nw-fields">
+              <label>按钮文字<input v-model="draft.config.native.rpcButton.buttonText" /></label>
+              <label>方法名<input v-model="draft.config.native.rpcButton.methodName" /></label>
+              <label
+                >参数（JSON 或文本）<textarea v-model="draft.config.native.rpcButton.methodParams" rows="4"></textarea>
+              </label>
+              <label
+                >超时（毫秒）<input
+                  v-model.number="draft.config.native.rpcButton.requestTimeout"
+                  type="number"
+                  min="0"
+                  max="60000"
+              /></label>
+              <label
+                >调用方式<select v-model="draft.config.native.rpcButton.oneWayElseTwoWay"
+                  ><option :value="true">单向请求</option
+                  ><option :value="false">双向请求</option></select
+                ></label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.rpcButton.styleButton.isRaised" type="checkbox" />按钮阴影</label
+              >
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.rpcButton.styleButton.isPrimary"
+                  type="checkbox"
+                />主按钮配色</label
+              >
+              <template v-if="!draft.config.native.rpcButton.styleButton.isPrimary">
+                <label
+                  >按钮背景色<input v-model="draft.config.native.rpcButton.styleButton.bgColor" placeholder="沿用主题"
+                /></label>
+                <label
+                  >按钮文字色<input
+                    v-model="draft.config.native.rpcButton.styleButton.textColor"
+                    placeholder="沿用主题"
+                /></label>
+              </template>
+            </div>
+            <p class="nw-note">预览不会发出 RPC；正式点击才向所选设备发送。单向请求不代表设备执行成功。</p>
+          </section>
+          <section v-if="draft.config.native.family === 'control'" class="nw-panel">
+            <h3>设备控制</h3>
+            <div class="nw-fields">
+              <label>标题<input v-model="draft.config.native.control.title" /></label>
+              <label
+                >状态读取<select v-model="draft.config.native.control.retrieveValueMethod"
+                  ><option value="rpc">双向 RPC</option
+                  ><option value="attribute">属性</option
+                  ><option value="timeseries">遥测</option
+                  ><option value="none">使用初始值</option></select
+                ></label
+              >
+              <label v-if="draft.config.native.control.retrieveValueMethod === 'rpc'"
+                >读取方法<input v-model.trim="draft.config.native.control.getValueMethod"
+              /></label>
+              <label v-if="['attribute', 'timeseries'].includes(draft.config.native.control.retrieveValueMethod)"
+                >状态字段<input v-model.trim="draft.config.native.control.valueKey"
+              /></label>
+              <label v-if="draft.config.native.control.retrieveValueMethod === 'attribute'"
+                >属性范围<select v-model="draft.config.native.control.attributeScope"
+                  ><option value="SERVER_SCOPE">服务端</option
+                  ><option value="SHARED_SCOPE">共享</option
+                  ><option value="CLIENT_SCOPE">客户端</option></select
+                ></label
+              >
+              <label>写入方法<input v-model.trim="draft.config.native.control.setValueMethod" /></label>
+              <label
+                >超时（毫秒）<input
+                  v-model.number="draft.config.native.control.requestTimeout"
+                  type="number"
+                  min="0"
+                  max="60000"
+              /></label>
+              <label class="nw-check"
+                ><input v-model="draft.config.native.control.requestPersistent" type="checkbox" />持久 RPC</label
+              >
+              <label v-if="draft.config.native.control.requestPersistent"
+                >持久轮询（毫秒）<input
+                  v-model.number="draft.config.native.control.persistentPollingInterval"
+                  type="number"
+                  min="1000"
+                  max="60000"
+              /></label>
+              <template v-if="['knob', 'slider', 'stepper'].includes(draft.config.native.control.kind)">
+                <label>最小值<input v-model.number="draft.config.native.control.min" type="number" /></label>
+                <label>最大值<input v-model.number="draft.config.native.control.max" type="number" /></label>
+                <label
+                  >步长<input v-model.number="draft.config.native.control.step" type="number" min="0.000001"
+                /></label>
+                <label
+                  >小数位<input v-model.number="draft.config.native.control.decimals" type="number" min="0" max="8"
+                /></label>
+                <label>单位<input v-model="draft.config.native.control.units" /></label>
+                <label class="nw-check"
+                  ><input v-model="draft.config.native.control.showValue" type="checkbox" />显示数值</label
+                >
+              </template>
+              <template v-else>
+                <label class="nw-check"
+                  ><input v-model="draft.config.native.control.showOnOffLabels" type="checkbox" />显示开关文字</label
+                >
+                <label>开启文字<input v-model="draft.config.native.control.onLabel" /></label>
+                <label>关闭文字<input v-model="draft.config.native.control.offLabel" /></label>
+              </template>
+              <label>开启/主颜色<input v-model="draft.config.native.control.activeColor" type="color" /></label>
+              <label>关闭/轨道颜色<input v-model="draft.config.native.control.inactiveColor" type="color" /></label>
+            </div>
+            <p class="nw-note">预览不会发送 RPC。原生自定义 JavaScript 转换函数不会执行。</p>
+          </section>
+          <section v-if="draft.config.native.family === 'advancedControl'" class="nw-panel">
+            <h3>控制、RPC 与 GPIO</h3>
+            <div class="nw-fields">
+              <label>标题<input v-model="draft.config.native.advancedControl.title" /></label>
+              <label
+                v-if="
+                  ['actionButton', 'serviceRpc', 'attributeUpdate'].includes(draft.config.native.advancedControl.mode)
+                "
+                >按钮文字<input v-model="draft.config.native.advancedControl.buttonText"
+              /></label>
+              <template v-if="['actionButton', 'segment'].includes(draft.config.native.advancedControl.mode)">
+                <label
+                  >点击动作<select v-model="draft.config.native.advancedControl.actionMode"
+                    ><option value="none">不执行</option
+                    ><option value="url">打开链接</option></select
+                  ></label
+                >
+                <label v-if="draft.config.native.advancedControl.actionMode === 'url'"
+                  >链接<input
+                    v-model.trim="draft.config.native.advancedControl.actionTarget"
+                    placeholder="/dashboard 或 https://..."
+                /></label>
+              </template>
+              <template v-if="draft.config.native.advancedControl.mode === 'segment'">
+                <label>左侧文字<input v-model="draft.config.native.advancedControl.leftLabel" /></label>
+                <label>右侧文字<input v-model="draft.config.native.advancedControl.rightLabel" /></label>
+                <label class="nw-check"
+                  ><input
+                    v-model="draft.config.native.advancedControl.initialValue"
+                    type="checkbox"
+                  />默认选择右侧</label
+                >
+              </template>
+              <template v-if="['gpioControl', 'gpioPanel'].includes(draft.config.native.advancedControl.mode)">
+                <label v-if="draft.config.native.advancedControl.mode === 'gpioControl'"
+                  >读取方法<input v-model.trim="draft.config.native.advancedControl.readMethod"
+                /></label>
+                <label v-if="draft.config.native.advancedControl.mode === 'gpioControl'"
+                  >写入方法<input v-model.trim="draft.config.native.advancedControl.writeMethod"
+                /></label>
+                <label v-else
+                  >面板背景<input v-model="draft.config.native.advancedControl.panelColor" type="color"
+                /></label>
+                <div class="nw-span-all">
+                  <label>引脚</label>
+                  <div v-for="(pin, index) in draft.config.native.advancedControl.pins" :key="index" class="nw-inline">
+                    <input v-model.trim="pin.pin" aria-label="引脚编号" placeholder="编号" />
+                    <input v-model="pin.label" aria-label="引脚名称" placeholder="名称" />
+                    <input v-model="pin.color" aria-label="引脚颜色" type="color" />
+                    <button type="button" @click="draft.config.native.advancedControl.pins.splice(index, 1)"
+                      >删除</button
+                    >
+                  </div>
+                  <button
+                    type="button"
+                    @click="
+                      draft.config.native.advancedControl.pins.push({
+                        pin: '',
+                        label: 'GPIO',
+                        row: 0,
+                        col: 0,
+                        color: '#5469ff',
+                      })
+                    "
+                    >添加引脚</button
+                  >
+                </div>
+              </template>
+              <template v-if="draft.config.native.advancedControl.mode === 'persistentTable'">
+                <label
+                  >每页条数<input
+                    v-model.number="draft.config.native.advancedControl.pageSize"
+                    type="number"
+                    min="1"
+                    max="100"
+                /></label>
+                <label class="nw-check"
+                  ><input
+                    v-model="draft.config.native.advancedControl.allowDelete"
+                    type="checkbox"
+                  />允许删除请求</label
+                >
+              </template>
+              <template v-if="draft.config.native.advancedControl.mode === 'serviceRpc'">
+                <label>RPC 方法<input v-model.trim="draft.config.native.advancedControl.method" /></label>
+                <label
+                  >参数（JSON 或文本）<textarea
+                    v-model="draft.config.native.advancedControl.params"
+                    rows="4"
+                  ></textarea>
+                </label>
+                <label class="nw-check"
+                  ><input v-model="draft.config.native.advancedControl.isConnector" type="checkbox" />连接器 RPC</label
+                >
+                <p class="nw-note nw-span-all"
+                  >网关命令可填 Ping、Stats 等，运行时加 gateway_ 前缀；连接器模式填写完整方法（如 mqtt_get），连接器 ID
+                  放入参数。</p
+                >
+              </template>
+              <template v-if="['rpcTerminal', 'rpcShell'].includes(draft.config.native.advancedControl.mode)">
+                <label
+                  >最大输出行数<input
+                    v-model.number="draft.config.native.advancedControl.maxLines"
+                    type="number"
+                    min="10"
+                    max="1000"
+                /></label>
+              </template>
+              <template v-if="draft.config.native.advancedControl.mode === 'status'">
+                <label>读取方法<input v-model.trim="draft.config.native.advancedControl.readMethod" /></label>
+                <label>在线文字<input v-model="draft.config.native.advancedControl.onLabel" /></label>
+                <label>离线文字<input v-model="draft.config.native.advancedControl.offLabel" /></label>
+                <label>在线颜色<input v-model="draft.config.native.advancedControl.onColor" type="color" /></label>
+                <label>离线颜色<input v-model="draft.config.native.advancedControl.offColor" type="color" /></label>
+              </template>
+              <template v-if="draft.config.native.advancedControl.mode === 'attributeUpdate'">
+                <label
+                  >属性范围<select v-model="draft.config.native.advancedControl.attributeScope"
+                    ><option value="SERVER_SCOPE">服务端</option
+                    ><option value="SHARED_SCOPE">共享</option
+                    ><option value="CLIENT_SCOPE">客户端</option></select
+                  ></label
+                >
+                <label
+                  >属性 JSON<textarea v-model="draft.config.native.advancedControl.attributesJson" rows="5"></textarea>
+                </label>
+              </template>
+              <template
+                v-if="
+                  ['gpioControl', 'rpcTerminal', 'rpcShell', 'serviceRpc', 'status'].includes(
+                    draft.config.native.advancedControl.mode,
+                  )
+                "
+              >
+                <label
+                  >RPC 超时（毫秒）<input
+                    v-model.number="draft.config.native.advancedControl.requestTimeout"
+                    type="number"
+                    min="0"
+                    max="60000"
+                /></label>
+                <label class="nw-check"
+                  ><input v-model="draft.config.native.advancedControl.requestPersistent" type="checkbox" />持久
+                  RPC</label
+                >
+              </template>
+              <label v-if="['gpioControl', 'rpcShell', 'status'].includes(draft.config.native.advancedControl.mode)"
+                >轮询间隔（毫秒）<input
+                  v-model.number="draft.config.native.advancedControl.pollingInterval"
+                  type="number"
+                  min="200"
+                  max="60000"
+              /></label>
+            </div>
+            <p class="nw-note">预览不发送 RPC、不写属性、不打开链接；正式运行只执行这里明确配置的声明式动作。</p>
+          </section>
+          <section v-if="draft.config.native.family === 'wind'" class="nw-panel">
+            <h3>风速风向</h3>
+            <p class="nw-note">第一个字段是风向角度（°）；第二个字段可选，作为风速。缺少第二个字段时中心显示角度。</p>
+            <div class="nw-fields">
+              <label
+                >布局<select v-model="draft.config.native.wind.layout"
+                  ><option value="default">标准</option
+                  ><option value="advanced">八方位</option
+                  ><option value="simplified">简洁</option></select
+                ></label
+              >
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.wind.directionalNamesElseDegrees"
+                  type="checkbox"
+                />刻度显示方位名</label
+              >
+              <label
+                >中心字号<input
+                  v-model.number="draft.config.native.wind.centerValueFontSize"
+                  type="number"
+                  min="8"
+                  max="96"
+              /></label>
+              <label>中心默认颜色<input v-model="draft.config.native.wind.centerValueColor.color" /></label>
+              <label>箭头颜色<input v-model="draft.config.native.wind.arrowColor" /></label>
+              <label>主刻度颜色<input v-model="draft.config.native.wind.majorTicksColor" /></label>
+              <label>副刻度颜色<input v-model="draft.config.native.wind.minorTicksColor" /></label>
+              <label>细刻度颜色<input v-model="draft.config.native.wind.ticksColor" /></label>
+              <label
+                >主刻度字号<input
+                  v-model.number="draft.config.native.wind.majorTicksFontSize"
+                  type="number"
+                  min="8"
+                  max="96"
+              /></label>
+              <label v-if="draft.config.native.wind.layout === 'advanced'"
+                >副刻度字号<input
+                  v-model.number="draft.config.native.wind.minorTicksFontSize"
+                  type="number"
+                  min="8"
+                  max="96"
+              /></label>
+              <label
+                >背景类型<select v-model="draft.config.native.wind.backgroundType"
+                  ><option value="color">颜色</option
+                  ><option value="image">原生图片</option></select
+                ></label
+              >
+              <label>背景颜色<input v-model="draft.config.native.wind.backgroundColor" /></label>
+              <label v-if="draft.config.native.wind.backgroundType === 'image'"
+                >图片引用<input v-model="draft.config.native.wind.backgroundImage"
+              /></label>
+              <label class="nw-check"
+                ><input v-model="draft.config.native.wind.overlayEnabled" type="checkbox" />背景遮罩</label
+              >
+              <label v-if="draft.config.native.wind.overlayEnabled"
+                >遮罩颜色<input v-model="draft.config.native.wind.overlayColor"
+              /></label>
+              <label v-if="draft.config.native.wind.overlayEnabled"
+                >遮罩模糊<input v-model.number="draft.config.native.wind.overlayBlur" type="number" min="0" max="24"
+              /></label>
+              <label
+                >留白<input v-model.number="draft.config.native.wind.padding" type="number" min="0" max="48"
+              /></label>
+            </div>
+            <div v-if="mode === 'advanced'" class="nw-fields">
+              <label v-for="(range, index) in draft.config.native.wind.centerValueColor.ranges" :key="index">
+                中心颜色区间 {{ index + 1 }}
+                <input
+                  :value="range.from ?? ''"
+                  type="number"
+                  placeholder="起点"
+                  @input="range.from = optionalNumber($event)"
+                />
+                <input
+                  :value="range.to ?? ''"
+                  type="number"
+                  placeholder="终点；留空表示无上限"
+                  @input="range.to = optionalNumber($event)"
+                />
+                <input v-model="range.color" placeholder="颜色" />
+                <button type="button" @click="draft.config.native.wind.centerValueColor.ranges.splice(index, 1)"
+                  >删除</button
+                >
+              </label>
+              <button
+                type="button"
+                @click="
+                  draft.config.native.wind.centerValueColor.ranges.push({ from: null, to: null, color: '#6ce9ff' })
+                "
+                >添加颜色区间</button
+              >
+            </div>
+          </section>
+          <section v-if="draft.config.native.family === 'ledIndicator' && mode === 'basic'" class="nw-panel">
+            <h3>LED 指示灯配置</h3>
+            <div class="nw-fields">
+              <label>标题<input v-model="draft.config.native.ledIndicator.title" /></label>
+              <label>亮灯颜色<input v-model="draft.config.native.ledIndicator.ledColor" type="color" /></label>
+              <label class="nw-check"
+                ><input v-model="draft.config.native.ledIndicator.initialValue" type="checkbox" />初始亮灯</label
+              >
+              <label
+                >读取类型<select v-model="draft.config.native.ledIndicator.retrieveValueMethod"
+                  ><option value="attribute">属性</option
+                  ><option value="timeseries">遥测</option></select
+                ></label
+              >
+              <label v-if="draft.config.native.ledIndicator.retrieveValueMethod === 'attribute'"
+                >属性范围<select v-model="draft.config.native.ledIndicator.attributeScope"
+                  ><option value="SERVER_SCOPE">服务端</option
+                  ><option value="SHARED_SCOPE">共享</option
+                  ><option value="CLIENT_SCOPE">客户端</option></select
+                ></label
+              >
+              <label>值字段键<input v-model.trim="draft.config.native.ledIndicator.valueAttribute" /></label>
+              <label class="nw-check"
+                ><input v-model="draft.config.native.ledIndicator.performCheckStatus" type="checkbox" />先用 RPC
+                检查设备状态</label
+              >
+              <label v-if="draft.config.native.ledIndicator.performCheckStatus"
+                >状态检查方法<input v-model.trim="draft.config.native.ledIndicator.checkStatusMethod"
+              /></label>
+              <label v-if="draft.config.native.ledIndicator.performCheckStatus"
+                >RPC 超时（毫秒）<input
+                  v-model.number="draft.config.native.ledIndicator.requestTimeout"
+                  type="number"
+                  min="0"
+                  max="60000"
+              /></label>
+              <label v-if="draft.config.native.ledIndicator.performCheckStatus" class="nw-check"
+                ><input v-model="draft.config.native.ledIndicator.requestPersistent" type="checkbox" />持久 RPC</label
+              >
+              <label
+                v-if="
+                  draft.config.native.ledIndicator.performCheckStatus &&
+                  draft.config.native.ledIndicator.requestPersistent
+                "
+                >持久 RPC 轮询间隔（毫秒）<input
+                  v-model.number="draft.config.native.ledIndicator.persistentPollingInterval"
+                  type="number"
+                  min="1000"
+                  max="60000"
+              /></label>
+            </div>
+            <p class="nw-note"
+              >仅支持原生默认真值解析函数；自定义 JavaScript 解析函数不会执行。预览不会发送状态检查 RPC。</p
+            >
+          </section>
+          <section v-if="photoInput && mode === 'basic'" class="nw-panel">
+            <h3>拍照输入配置</h3>
+            <div class="nw-fields">
+              <label class="nw-check"
+                ><input v-model="draft.config.native.photoInput.saveToGallery" type="checkbox" />保存到图片库</label
+              >
+              <label v-if="draft.config.native.photoInput.saveToGallery" class="nw-check"
+                ><input
+                  v-model="draft.config.native.photoInput.usePublicGalleryLink"
+                  type="checkbox"
+                />保存公开图片链接</label
+              >
+              <label
+                >图片格式<select v-model="draft.config.native.photoInput.imageFormat"
+                  ><option value="image/png">PNG</option
+                  ><option value="image/jpeg">JPEG</option
+                  ><option value="image/webp">WebP</option></select
+                ></label
+              >
+              <label
+                >图片质量（0–1）<input
+                  v-model.number="draft.config.native.photoInput.imageQuality"
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+              /></label>
+              <label
+                >最大宽度（像素）<input
+                  v-model.number="draft.config.native.photoInput.maxWidth"
+                  type="number"
+                  min="1"
+                  max="4096"
+              /></label>
+              <label
+                >最大高度（像素）<input
+                  v-model.number="draft.config.native.photoInput.maxHeight"
+                  type="number"
+                  min="1"
+                  max="4096"
+              /></label>
+            </div>
+            <p class="nw-note"
+              >相机仅在正式部件中由用户主动打开，拍照后须再次点击保存。保存到图片库会创建图片资源，然后把链接写入所选字段。</p
+            >
+          </section>
+          <section v-if="locationSpec && mode === 'basic'" class="nw-panel">
+            <h3>位置输入配置</h3>
+            <div class="nw-fields">
+              <label
+                >纬度字段键<input
+                  v-model.trim="draft.config.native.locationInput.latKeyName"
+                  @change="syncLocationKeys()"
+              /></label>
+              <label
+                >经度字段键<input
+                  v-model.trim="draft.config.native.locationInput.lngKeyName"
+                  @change="syncLocationKeys()"
+              /></label>
+              <label>纬度标签<input v-model="draft.config.native.locationInput.latLabel" placeholder="纬度" /></label>
+              <label>经度标签<input v-model="draft.config.native.locationInput.lngLabel" placeholder="经度" /></label>
+              <label
+                >排列<select v-model="draft.config.native.locationInput.inputFieldsAlignment"
+                  ><option value="column">纵向</option
+                  ><option value="row">横向</option></select
+                ></label
+              >
+              <label
+                >必填提示<input
+                  v-model="draft.config.native.locationInput.requiredErrorMessage"
+                  placeholder="使用默认提示"
+              /></label>
+              <label class="nw-check"
+                ><input v-model="draft.config.native.locationInput.showLabel" type="checkbox" />显示标签</label
+              >
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.locationInput.showResultMessage"
+                  type="checkbox"
+                />显示保存结果</label
+              >
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.locationInput.isLatRequired"
+                  type="checkbox"
+                  :disabled="locationSpec.mode === 'timeseries'"
+                />纬度必填</label
+              >
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.locationInput.isLngRequired"
+                  type="checkbox"
+                  :disabled="locationSpec.mode === 'timeseries'"
+                />经度必填</label
+              >
+              <label class="nw-check"
+                ><input
+                  v-model="draft.config.native.locationInput.showGetLocation"
+                  type="checkbox"
+                />显示获取当前位置</label
+              >
+              <label v-if="draft.config.native.locationInput.showGetLocation" class="nw-check"
+                ><input
+                  v-model="draft.config.native.locationInput.enableHighAccuracy"
+                  type="checkbox"
+                />高精度定位</label
+              >
+            </div>
+            <p class="nw-note"
+              >{{
+                locationSpec.mode === 'timeseries'
+                  ? '写入经纬度遥测'
+                  : '写入' + (locationSpec.scope === 'SERVER_SCOPE' ? '服务端' : '共享') + '经纬度属性'
+              }}；浏览器定位仅在正式部件中由用户主动触发，保存前可检查数值。</p
+            >
+          </section>
+          <section v-if="inputSpec && mode === 'basic'" class="nw-panel">
+            <h3>输入配置</h3>
+            <div class="nw-fields">
+              <template v-if="draft.config.native.fqn === 'input_widgets.update_json_attribute'">
+                <label
+                  >写入目标<select v-model="draft.config.native.input.widgetMode" @change="changeInputTarget"
+                    ><option value="ATTRIBUTE">属性</option
+                    ><option value="TIME_SERIES">遥测</option></select
+                  ></label
+                >
+                <label v-if="draft.config.native.input.widgetMode === 'ATTRIBUTE'"
+                  >属性范围<select v-model="draft.config.native.input.attributeScope" @change="changeInputTarget"
+                    ><option value="SERVER_SCOPE">服务端属性</option
+                    ><option value="SHARED_SCOPE">共享属性</option></select
+                  ></label
+                >
+              </template>
+              <label class="nw-check"
+                ><input v-model="draft.config.native.input.showLabel" type="checkbox" />显示字段标签</label
+              >
+              <label class="nw-check"
+                ><input v-model="draft.config.native.input.showResultMessage" type="checkbox" />显示保存结果</label
+              >
+              <label>标签文本<input v-model="draft.config.native.input.label" placeholder="默认使用字段名称" /></label>
+              <template v-if="inputSpec.valueType === 'image'">
+                <label class="nw-check"
+                  ><input v-model="draft.config.native.input.displayPreview" type="checkbox" />显示图片预览</label
+                >
+                <label class="nw-check"
+                  ><input v-model="draft.config.native.input.displayClearButton" type="checkbox" />允许清除图片</label
+                >
+                <label class="nw-check"
+                  ><input v-model="draft.config.native.input.displayApplyButton" type="checkbox" />显示保存按钮</label
+                >
+                <label class="nw-check"
+                  ><input
+                    v-model="draft.config.native.input.displayDiscardButton"
+                    type="checkbox"
+                  />显示放弃修改按钮</label
+                >
+              </template>
+              <label v-if="['string', 'json'].includes(inputSpec.valueType)" class="nw-check"
+                ><input v-model="draft.config.native.input.required" type="checkbox" />必填</label
+              >
+              <label v-if="inputSpec.valueType === 'date'" class="nw-check"
+                ><input v-model="draft.config.native.input.showTimeInput" type="checkbox" />包含时间</label
+              >
+              <template v-if="['double', 'integer'].includes(inputSpec.valueType)">
+                <label
+                  >最小值<input
+                    :value="draft.config.native.input.min ?? ''"
+                    type="number"
+                    @input="draft.config.native.input.min = optionalNumber($event)"
+                /></label>
+                <label
+                  >最大值<input
+                    :value="draft.config.native.input.max ?? ''"
+                    type="number"
+                    @input="draft.config.native.input.max = optionalNumber($event)"
+                /></label>
+              </template>
+            </div>
+            <p class="nw-note"
+              >{{
+                inputSpec.mode === 'timeseries'
+                  ? '写入遥测'
+                  : '写入' + (inputSpec.scope === 'SERVER_SCOPE' ? '服务端' : '共享') + '属性'
+              }}；预览不会发送写入请求。</p
+            >
+          </section>
           <NativeAggregateSettingsEditor
             v-if="draft.config.native.family === 'aggregate' && mode === 'basic'"
             v-model="draft.config.native"
@@ -366,7 +1469,7 @@
             ><button aria-label="关闭预览" @click="previewVisible = false">×</button></header
           ><div class="nw-preview"
             ><section class="tb-widget-surface" :style="widgetAppearanceStyle(preview.widgetKey, preview.appearance)"
-              ><NativeWidgetRenderer :key="preview.id" :config="preview.config" /></section></div
+              ><NativeWidgetRenderer :key="preview.id" :config="preview.config" preview-only /></section></div
           ><div class="nw-preview-footer"
             ><button @click="previewVisible = false">返回配置</button
             ><button v-if="!previewOnly" class="nw-primary" @click="confirm">{{
@@ -392,9 +1495,14 @@
   import NativeWidgetSettingsEditor from './NativeWidgetSettingsEditor.vue';
   import NativeStateSettingsEditor from './NativeStateSettingsEditor.vue';
   import NativeLiquidSettingsEditor from './NativeLiquidSettingsEditor.vue';
+  import NativeIndicatorSettingsEditor from './NativeIndicatorSettingsEditor.vue';
   import NativeAggregateSettingsEditor from './NativeAggregateSettingsEditor.vue';
   import { Select as ASelect } from 'ant-design-vue';
   import { withNativeSettings, nativeSeriesSettings } from './nativeWidgetSettings';
+  import { nativeInputSpec } from './nativeInputCore';
+  import { nativeLocationSpec } from './nativeLocationInputCore';
+  import { multiKeySettings } from './nativeMultiInputCore';
+  import { advancedControlNeedsDevice } from './nativeAdvancedControlCore';
   import { widgetAppearanceStyle } from '../widgets/core/widgetInstance';
   import '../widgets/core/widgetSurface.css';
   import { getTenantDeviceInfoList, getCustomerDeviceInfoList } from '/@/api/tb/device';
@@ -436,6 +1544,30 @@
   const user = useUserStoreWithOut();
   const support = computed(() => getNativeWidgetSupport(props.source));
   const sources = computed(() => (draft.value?.config.datasources || []) as NativeSource[]);
+  const indicator = computed(() => ['battery', 'signal'].includes(draft.value?.config.native.family));
+  const multiInput = computed(() => draft.value?.config.native.family === 'multiInput');
+  const inputSpec = computed(() =>
+    nativeInputSpec(draft.value?.config.native.fqn || '', draft.value?.config.native.input),
+  );
+  const locationSpec = computed(() => nativeLocationSpec(draft.value?.config.native.fqn || ''));
+  const photoInput = computed(() => draft.value?.config.native.family === 'photoInput');
+  const usesDataSource = computed(() => {
+    const family = draft.value?.config.native.family;
+    if (!family || ['count', 'alarmTable', 'deviceClaim', 'entityTable'].includes(family)) return false;
+    if (family === 'advancedControl')
+      return advancedControlNeedsDevice(draft.value!.config.native.advancedControl.mode);
+    return true;
+  });
+  const singleSource = computed(
+    () =>
+      indicator.value ||
+      !!inputSpec.value ||
+      !!locationSpec.value ||
+      photoInput.value ||
+      ['wind', 'rpcButton', 'control', 'advancedControl', 'entityHierarchy', 'ledIndicator'].includes(
+        draft.value?.config.native.family,
+      ),
+  );
   const timeMode = computed({
     get: () =>
       draft.value?.config.native.window.realtime ? 'realtime' : draft.value?.config.native.window.calendar || 'fixed',
@@ -479,7 +1611,28 @@
       draft.value.config.showTitle ??= true;
       draft.value.config.native.window.startTs ??= Date.now() - 3600000;
       draft.value.config.native.window.endTs ??= Date.now();
-      if (props.lockedEntity) {
+      if (draft.value.config.native.family === 'count' && props.lockedEntity) {
+        draft.value.config.native.count.singleEntityId = props.lockedEntity.entityId;
+        draft.value.config.native.count.entityType = 'DEVICE';
+        draft.value.config.native.count.nameFilter = '';
+      }
+      if (draft.value.config.native.family === 'alarmTable' && props.lockedEntity)
+        draft.value.config.native.alarmTable.singleEntityId = props.lockedEntity.entityId;
+      if (
+        draft.value.config.native.family === 'entityTable' &&
+        draft.value.config.native.fqn === 'cards.entities_table' &&
+        props.lockedEntity
+      ) {
+        draft.value.config.native.entityTable.singleEntityId = props.lockedEntity.entityId;
+        draft.value.config.native.entityTable.entityType = 'DEVICE';
+      }
+      if (
+        inputSpec.value?.scope === 'SHARED_SCOPE' ||
+        locationSpec.value?.scope === 'SHARED_SCOPE' ||
+        ['rpcButton', 'control', 'advancedControl', 'ledIndicator'].includes(draft.value.config.native.family)
+      )
+        entityType.value = 'DEVICE';
+      if (props.lockedEntity && usesDataSource.value) {
         const previous = sources.value.find((s) => s.entityId === props.lockedEntity!.entityId);
         draft.value.config.datasources = [
           previous || {
@@ -491,12 +1644,25 @@
           },
         ];
       }
+      if (multiInput.value)
+        for (const source of sources.value)
+          for (const key of source.dataKeys) {
+            key.settings ??= {};
+            key.settings.nativeMulti = multiKeySettings(key);
+          }
       sources.value.forEach((s) => {
+        if (locationSpec.value) syncLocationKeys(s);
         keyTypes.value[s.entityId] =
-          s.dataKeys[0]?.type === 'attribute' ? s.dataKeys[0].scope || 'SERVER_SCOPE' : 'timeseries';
-        void loadKeys(s);
+          inputSpec.value?.scope ||
+          (s.dataKeys[0]?.type === 'attribute' ? s.dataKeys[0].scope || 'SERVER_SCOPE' : 'timeseries');
+        if (
+          !['rpcButton', 'control', 'advancedControl', 'entityHierarchy', 'locationInput', 'ledIndicator'].includes(
+            draft.value?.config.native.family || '',
+          )
+        )
+          void loadKeys(s);
       });
-      if (!props.lockedEntity) {
+      if (!props.lockedEntity && usesDataSource.value) {
         void searchEntities(0);
         void loadProfiles();
       }
@@ -562,7 +1728,7 @@
   function addSource(entity: any) {
     if (
       !draft.value ||
-      sources.value.length >= 8 ||
+      sources.value.length >= (singleSource.value ? 1 : 8) ||
       sources.value.some((source) => source.entityId === entity.id.id && source.entityType === entityType.value)
     )
       return;
@@ -574,8 +1740,38 @@
       dataKeys: [],
     };
     sources.value.push(ds);
-    keyTypes.value[ds.entityId] = 'timeseries';
-    void loadKeys(ds);
+    keyTypes.value[ds.entityId] = inputSpec.value?.scope || 'timeseries';
+    if (locationSpec.value) syncLocationKeys(ds);
+    else if (
+      !['rpcButton', 'control', 'advancedControl', 'entityHierarchy', 'ledIndicator'].includes(
+        draft.value.config.native.family,
+      )
+    )
+      void loadKeys(ds);
+  }
+  function syncLocationKeys(source?: NativeSource) {
+    if (!locationSpec.value || !draft.value) return;
+    const settings = draft.value.config.native.locationInput;
+    const spec = locationSpec.value;
+    for (const ds of source ? [source] : sources.value) {
+      ds.dataKeys = [
+        { name: settings.latKeyName.trim(), label: settings.latLabel || '纬度', type: spec.mode, scope: spec.scope },
+        { name: settings.lngKeyName.trim(), label: settings.lngLabel || '经度', type: spec.mode, scope: spec.scope },
+      ];
+    }
+  }
+  function changeInputTarget() {
+    const spec = inputSpec.value;
+    if (!spec) return;
+    if (spec.scope === 'SHARED_SCOPE') {
+      entityType.value = 'DEVICE';
+      draft.value!.config.datasources = sources.value.filter((source) => source.entityType === 'DEVICE');
+    }
+    for (const source of sources.value) {
+      source.dataKeys = [];
+      keyTypes.value[source.entityId] = spec.scope || 'timeseries';
+      void loadKeys(source);
+    }
   }
   async function loadKeys(ds: NativeSource) {
     const request = (keyRequests[ds.entityId] || 0) + 1;
@@ -611,8 +1807,9 @@
       return;
     const type = kind === 'timeseries' ? 'timeseries' : 'attribute';
     if (ds.dataKeys.some((k) => k.name === name && k.type === type && (k.scope || 'timeseries') === kind)) return;
-    if (ds.dataKeys.length >= 16) {
-      message.value = '每个数据源最多 16 个字段';
+    const maxKeys = draft.value?.config.native.family === 'wind' ? 2 : singleSource.value ? 1 : 16;
+    if (ds.dataKeys.length >= maxKeys) {
+      message.value = singleSource.value ? `此部件最多需要 ${maxKeys} 个字段` : '每个数据源最多 16 个字段';
       return;
     }
     ds.dataKeys.push({
@@ -623,7 +1820,34 @@
       color: '#6ce9ff',
       units: draft.value?.config.units || '',
       decimals: draft.value?.config.decimals ?? 2,
+      ...(multiInput.value
+        ? { settings: { nativeMulti: multiKeySettings({ name, type } as NativeSource['dataKeys'][number]) } }
+        : {}),
     });
+  }
+  function multiOptionsText(key: NativeSource['dataKeys'][number]) {
+    return (key.settings?.nativeMulti?.selectOptions || [])
+      .map((option: { label: string; value: string | null }) => `${option.label}=${option.value ?? ''}`)
+      .join('\n');
+  }
+  function multiSettings(key: NativeSource['dataKeys'][number]) {
+    key.settings ??= {};
+    return (key.settings.nativeMulti ??= multiKeySettings(key));
+  }
+  function setMultiOptions(key: NativeSource['dataKeys'][number], event: Event) {
+    const text = (event.target as HTMLTextAreaElement).value;
+    multiSettings(key).selectOptions = text
+      .split(/\r?\n/)
+      .filter((line) => line.trim())
+      .map((line) => {
+        const separator = line.indexOf('=');
+        return separator < 0
+          ? { label: line.trim(), value: line.trim() }
+          : {
+              label: line.slice(0, separator).trim(),
+              value: line.slice(separator + 1).trim() || null,
+            };
+      });
   }
   function valid() {
     if (!draft.value) return false;

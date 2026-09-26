@@ -28,10 +28,10 @@ export const getCustomerDeviceInfoList=getTenantDeviceInfoList;
 export const getTenantAssetInfoList=getTenantDeviceInfoList;
 export const getCustomerAssetInfoList=getTenantDeviceInfoList;
 export const getDeviceProfileInfoList=async()=>({data:[{id:{id:'fixture-profile'},name:'temperature'}],hasNext:false});
-export const getTimeseriesKeys=async()=>['temperature','humidity','enabled'];
+export const getTimeseriesKeys=async()=>['temperature','humidity','enabled','battery','rssi'];
 export const getAttributeKeysByScope=async()=>['model','enabled'];
 export const getAttributesByScope=async()=>[{key:'model',value:'模拟验收',lastUpdateTs:Date.now()},{key:'enabled',value:false,lastUpdateTs:Date.now()}];
-export const getLatestTimeseries=async()=>({temperature:[{ts:Date.now(),value:25.4}],humidity:[{ts:Date.now(),value:66}]});
+export const getLatestTimeseries=async()=>({temperature:[{ts:Date.now(),value:25.4}],humidity:[{ts:Date.now(),value:66}],battery:[{ts:Date.now(),value:47}],rssi:[{ts:Date.now(),value:-72}]});
 export const getTimeseries=async(query)=>Object.fromEntries((query.keys||'temperature,humidity').split(',').map(k=>{
  const base=k==='temperature'?24:60;
  if(k==='enabled') return [k,query.limit===1?[{ts:query.endTs,value:false}]:Array.from({length:6},(_,i)=>({ts:query.startTs+(query.endTs-query.startTs)*(i+1)/8,value:i%2===0}))];

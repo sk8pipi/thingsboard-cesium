@@ -17,6 +17,8 @@ import type { NativeDataConfig, NativeSnapshot } from '../src/views/tb/dashboard
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { importThingsboardJson } from '../src/views/tb/map/widgetLibrary/importThingsboardWidget';
+import { nativeInputSpec } from '../src/views/tb/dashboard/runtime/native/nativeInputCore';
+import { nativeLocationSpec } from '../src/views/tb/dashboard/runtime/native/nativeLocationInputCore';
 
 async function main() {
   assert.equal(nativeWidgetCatalog.length, 521);
@@ -30,13 +32,33 @@ async function main() {
       count++;
       assert.equal(createNativeWidget(raw).config.native.fqn, raw.fqn);
       const configured = createNativeWidget(raw);
-      configured.config.datasources = [
-        { type: 'entity', entityType: 'DEVICE', entityId: 'test', dataKeys: [{ name: 'test', type: 'timeseries' }] },
-      ];
+      const input = nativeInputSpec(raw.fqn);
+      const location = nativeLocationSpec(raw.fqn);
+      configured.config.datasources = ['count', 'alarmTable', 'deviceClaim', 'entityTable'].includes(
+        configured.config.native.family,
+      )
+        ? []
+        : [
+            {
+              type: 'entity',
+              entityType: 'DEVICE',
+              entityId: 'test',
+              dataKeys: ['rpcButton', 'control', 'advancedControl', 'entityHierarchy', 'ledIndicator'].includes(
+                configured.config.native.family,
+              )
+                ? []
+                : location
+                  ? [
+                      { name: 'latitude', type: location.mode, scope: location.scope },
+                      { name: 'longitude', type: location.mode, scope: location.scope },
+                    ]
+                  : [{ name: 'test', type: input?.mode || 'timeseries', scope: input?.scope }],
+            },
+          ];
       assert.deepEqual(validateNativeWidget(configured), [], raw.fqn + ' 默认配置可用');
     }
   }
-  assert.equal(count, 405);
+  assert.equal(count, 478);
   const source = JSON.parse(
     readFileSync('../backend/application/src/main/data/json/system/widget_types/temperature_card.json', 'utf8'),
   );
@@ -45,7 +67,10 @@ async function main() {
     false,
   );
   assert.equal(getNativeWidgetSupport({ fqn: 'unknown_temperature_card' }).supported, false);
-  assert.equal(getNativeWidgetSupport({ fqn: 'charts.state_chart' }).supported, false);
+  assert.equal(getNativeWidgetSupport({ fqn: 'charts.state_chart' }).supported, true);
+  for (const fqn of ['gateway_widgets.gateway_custom_statistics', 'gateway_widgets.gateway_general_chart_statistics']) {
+    assert.equal(createNativeWidget({ fqn }).config.native.family, 'timeseries');
+  }
   assert.equal(getNativeWidgetSupport({ fqn: 'temperature_chart_card' }).supported, true);
   const imported = importThingsboardJson({ widgetTypes: [source, { fqn: 'custom', name: 'Custom', descriptor: {} }] });
   assert.equal(imported.length, 2);
@@ -223,8 +248,12 @@ async function main() {
   await tick();
   assert.equal(published.filter((s) => !s.loading).length, 0);
   assert.equal(scheduled, 0);
+  let fixedLoads = 0;
   const fixed = createNativePoller(
-    async () => result,
+    async () => {
+      fixedLoads++;
+      return result;
+    },
     () => {},
     () => ++scheduled,
     () => {},
@@ -232,6 +261,9 @@ async function main() {
   fixed.update(config);
   await tick();
   assert.equal(scheduled, 0);
+  fixed.refresh();
+  await tick();
+  assert.equal(fixedLoads, 2, '写入后固定窗口也可立即回读');
   fixed.stop();
   let rollingNow = 10000;
   let nextPoll: (() => void) | undefined;
@@ -263,7 +295,7 @@ async function main() {
   assert.equal(queries.at(-1).endTs, 15000, '轮询时重新计算滚动查询边界');
   rolling.stop();
   assert.equal(nextPoll, undefined);
-  console.log('Native catalog/import/data/lifecycle tests passed (521 definitions, 405 base adapters)');
+  console.log('Native catalog/import/data/lifecycle tests passed (521 definitions, 478 base adapters)');
 }
 void main().catch((error) => {
   console.error(error);

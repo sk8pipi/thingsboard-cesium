@@ -6,10 +6,126 @@
     <div v-if="data.loading" class="native-empty" role="status">正在读取数据…</div>
     <template v-else>
       <div v-if="warnings.length" class="native-warning" role="status">{{ warnings.join('；') }}</div>
-      <div v-if="!options || !data.series.length" class="native-empty">{{
+      <NativeRpcButtonView
+        v-if="options?.family === 'rpcButton'"
+        :settings="options.rpcButton"
+        :source="inputSource"
+        :preview-only="props.previewOnly"
+      />
+      <NativeControlView
+        v-else-if="options?.family === 'control'"
+        :settings="options.control"
+        :source="inputSource"
+        :poll-ms="options.pollMs"
+        :preview-only="props.previewOnly"
+      />
+      <NativeAdvancedControlView
+        v-else-if="options?.family === 'advancedControl'"
+        :settings="options.advancedControl"
+        :source="inputSource"
+        :preview-only="props.previewOnly"
+      />
+      <NativeCountView
+        v-else-if="options?.family === 'count'"
+        :settings="options.count"
+        :fqn="options.fqn"
+        :poll-ms="options.pollMs"
+      />
+      <NativeAlarmTableView
+        v-else-if="options?.family === 'alarmTable'"
+        :settings="options.alarmTable"
+        :options="options"
+        :poll-ms="options.pollMs"
+        :preview-only="props.previewOnly"
+      />
+      <NativeDeviceClaimView
+        v-else-if="options?.family === 'deviceClaim'"
+        :settings="options.deviceClaim"
+        :preview-only="props.previewOnly"
+      />
+      <NativeEntityHierarchyView
+        v-else-if="options?.family === 'entityHierarchy'"
+        :settings="options.entityHierarchy"
+        :source="inputSource"
+      />
+      <NativeEntityTableView
+        v-else-if="options?.family === 'entityTable'"
+        :settings="options.entityTable"
+        :poll-ms="options.pollMs"
+        :preview-only="props.previewOnly"
+      />
+      <NativeLedView
+        v-else-if="options?.family === 'ledIndicator'"
+        :settings="options.ledIndicator"
+        :source="inputSource"
+        :poll-ms="options.pollMs"
+        :preview-only="props.previewOnly"
+      />
+      <div v-else-if="!options || !data.series.length" class="native-empty">{{
         options ? '请选择实体与数据字段' : '部件配置不完整'
       }}</div>
       <template v-else>
+        <NativeAttributeCardView
+          v-if="options.family === 'attributeCard'"
+          :settings="options.attributeCard"
+          :sources="multiSources"
+          :series="data.series"
+          :decimals="props.config?.decimals"
+          :units="props.config?.units"
+        />
+        <NativeMultiInputView
+          v-if="options.family === 'multiInput'"
+          :settings="options.multiInput"
+          :sources="multiSources"
+          :series="data.series"
+          :preview-only="props.previewOnly"
+          @saved="refresh()"
+        />
+        <NativeInputView
+          v-if="options.family === 'input' && inputSpec && inputSource"
+          :spec="inputSpec"
+          :settings="options.input"
+          :source="inputSource"
+          :series="data.series[0]"
+          :preview-only="props.previewOnly"
+          @saved="refresh()"
+        />
+        <NativeLocationInputView
+          v-if="options.family === 'locationInput' && locationSpec && inputSource"
+          :spec="locationSpec"
+          :settings="options.locationInput"
+          :source="inputSource"
+          :series="data.series"
+          :preview-only="props.previewOnly"
+          @saved="refresh()"
+        />
+        <NativePhotoInputView
+          v-if="options.family === 'photoInput' && inputSource"
+          :settings="options.photoInput"
+          :source="inputSource"
+          :series="data.series[0]"
+          :preview-only="props.previewOnly"
+          @saved="refresh()"
+        />
+        <NativeIndicatorView
+          v-if="options.family === 'battery' || options.family === 'signal'"
+          :kind="options.family"
+          :settings="options.family === 'battery' ? options.battery : options.signal"
+          :value="data.series[0].latest?.value"
+          :timestamp="data.series[0].latest?.ts"
+          :units="data.series[0].key.units ?? props.config?.units ?? ''"
+          :decimals="data.series[0].key.decimals ?? props.config?.decimals ?? 0"
+          :now="now"
+        />
+        <NativeWindView
+          v-if="options.family === 'wind'"
+          :settings="options.wind"
+          :direction="data.series[0].latest?.value"
+          :speed="data.series[1]?.latest?.value"
+          :has-speed="data.series.length > 1"
+          :units="data.series[1]?.key.units ?? 'm/s'"
+          :decimals="data.series[1]?.key.decimals ?? 1"
+        />
         <NativeLiquidView
           v-if="options.family === 'liquid'"
           :settings="data.liquid?.settings || options.liquid"
@@ -153,8 +269,26 @@
   import * as echarts from 'echarts';
   import { nativeStatePoints } from './nativeStateCore';
   import NativeLiquidView from './NativeLiquidView';
+  import NativeIndicatorView from './NativeIndicatorView.vue';
+  import NativeWindView from './NativeWindView.vue';
+  import NativeRpcButtonView from './NativeRpcButtonView.vue';
+  import NativeControlView from './NativeControlView.vue';
+  import NativeAdvancedControlView from './NativeAdvancedControlView.vue';
+  import NativeCountView from './NativeCountView.vue';
+  import NativeAttributeCardView from './NativeAttributeCardView.vue';
+  import NativeAlarmTableView from './NativeAlarmTableView.vue';
+  import NativeDeviceClaimView from './NativeDeviceClaimView.vue';
+  import NativeEntityHierarchyView from './NativeEntityHierarchyView.vue';
+  import NativeEntityTableView from './NativeEntityTableView.vue';
+  import NativeMultiInputView from './NativeMultiInputView.vue';
+  import NativeInputView from './NativeInputView.vue';
+  import NativeLocationInputView from './NativeLocationInputView.vue';
+  import NativePhotoInputView from './NativePhotoInputView.vue';
+  import NativeLedView from './NativeLedView.vue';
+  import { nativeInputSpec } from './nativeInputCore';
+  import { nativeLocationSpec } from './nativeLocationInputCore';
   import type { TbWidgetConfig } from '../types';
-  import type { NativeAggregateSlot } from './nativeWidgetTypes';
+  import type { NativeAggregateSlot, NativeSource } from './nativeWidgetTypes';
   import { withNativeSettings, nativeTimestamp } from './nativeWidgetSettings';
   import { nativeChartOptions } from './nativeWidgetChartOptions';
   import { useNativeWidgetData } from './nativeWidgetData';
@@ -168,7 +302,7 @@
     type NativeSeries,
   } from './nativeWidgetDataCore';
 
-  const props = defineProps<{ config?: TbWidgetConfig; widgetId?: string; data?: unknown }>();
+  const props = defineProps<{ config?: TbWidgetConfig; widgetId?: string; data?: unknown; previewOnly?: boolean }>();
   const options = computed(() =>
     props.config?.native?.version === 1 ? withNativeSettings(props.config.native) : null,
   );
@@ -177,7 +311,11 @@
       ? ({ native: options.value, datasources: props.config?.datasources || [] } as NativeDataConfig)
       : null,
   );
-  const data = useNativeWidgetData(dataConfig);
+  const { data, refresh } = useNativeWidgetData(dataConfig);
+  const inputSpec = computed(() => nativeInputSpec(options.value?.fqn || '', options.value?.input));
+  const locationSpec = computed(() => nativeLocationSpec(options.value?.fqn || ''));
+  const inputSource = computed(() => props.config?.datasources?.[0] as NativeSource | undefined);
+  const multiSources = computed(() => (props.config?.datasources || []) as NativeSource[]);
   const page = ref(1);
   const search = ref('');
   const radarHidden = ref<Record<string, boolean>>({});
@@ -216,7 +354,12 @@
       ((options.value?.showDate ||
         options.value?.family === 'table' ||
         (options.value?.family === 'liquid' && options.value.liquid.showTooltipDate)) &&
-        options.value?.presentation.dateFormat === 'relative'),
+        options.value?.presentation.dateFormat === 'relative') ||
+      (options.value?.family === 'signal' &&
+        ((options.value.signal.showDate && options.value.signal.dateFormat === 'relative') ||
+          (options.value.signal.showTooltip &&
+            options.value.signal.showTooltipDate &&
+            options.value.signal.tooltipDateFormat === 'relative'))),
     (rolling, _previous, onCleanup) => {
       if (!rolling) return;
       now.value = Date.now();

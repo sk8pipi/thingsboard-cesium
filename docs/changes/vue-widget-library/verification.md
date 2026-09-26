@@ -1,5 +1,64 @@
 # 验证记录
 
+## 2026-09-25 属性卡片、告警表与输入部件
+
+- 控制部件续批：`nativeControl.test.ts`、`nativeControlView.test.ts` 通过九种 control fqn 精确映射、安全布尔/数值解析、范围/步进和配置校验；实际 Vue setup 验证预览禁发 RPC、正式模式向目标设备发送原方法和值并显示“请求已提交”。`command_button` 使用原生默认 `setState(true)` 接入 RPC Button 家族。该批次的 `nativeWidgetData.test.ts` 通过 521 项逐定义创建与 464 项默认配置校验，后续 advancedControl 批次已提升为 476 项；`nativeWidgetIntegration.test.ts` 通过实际 SFC 编译和保存链路回归。受影响文件 ESLint 通过。定向 `vue-tsc` 仍为既有诊断；本批控制路径无新增诊断。
+
+- 目录生成与覆盖审计的最新结果：681 个源，478/521 个 JSON 基础适配，43 个 JSON 与 160 个 SCADA 源没有 Vue 入口；43 个 JSON 中 34 个按产品范围隐藏、9 个保留为可见待适配；完整原生一致性验收 0。两张网关统计曲线按原时序曲线设置复用 Vue 家族；两种图片属性输入复用认证属性写入与回读，三种位置输入按原定义分范围写入经纬度，拍照输入复用图库上传和遥测/服务端属性写入；LED 通过设备 RPC 状态检查后读取属性或遥测。
+- `nativeAttributeCard.test.ts`、`nativeAlarmTable.test.ts`、`nativeAlarmTableView.test.ts`、`nativeDeviceClaim.test.ts`、`nativeEntityHierarchy.test.ts`、`nativeEntityTable.test.ts` 通过：多实体分组、空值/零值、告警查询时间窗、筛选、分页、点位设备限制、预览禁写、显式确认后刷新；设备认领的预览禁发、有/无密钥请求、设备名路径编码和密钥成功后清空；实体关系双向查询、排序、防循环；实体表格搜索、分页查询和 0/false 字段显示；资产管理新增、属性保存、删除、预览禁写及管理配置往返。`nativeWidgetData.test.ts`、`nativeWidgetIntegration.test.ts`、`nativeWidgetRolling.test.ts`、`nativeWidgetPersistence.test.ts`、`nativeWidgetSettings.test.ts`、`nativeWidgetBrowse.test.ts` 回归通过，组件模板可编译。目录测试同时验证 34 个排除 FQN 不会被本地目录或服务器结果重新引入，空包不显示。
+- `nativeInput.test.ts`、`nativeLocationInput.test.ts`、`nativePhotoInput.test.ts`、`nativeLed.test.ts` 通过：17 种标量/JSON/图片输入定义、三种位置输入、拍照输入和 LED 的配置往返、范围/字段验证、经纬度边界、写入路由及回读顺序、拍照尺寸约束及预览禁申请相机权限、LED 真值解析与普通/持久 RPC 状态检查；LED 组件预览禁发 RPC，正式模式读到 false 时熄灯。目录、实际 Vue SFC 编译、滚动窗口渲染回归已在后续 464 项目录上通过。
+- 受影响 TS/Vue ESLint 与 `git diff --check` 通过。定向 vue-tsc 仍有 15 条先前记录的其他路径诊断；本次新增原生部件路径无诊断，不能称完整类型检查通过。
+- 隔离输出到 `frontend/node_modules/.cache/native-widget-adaptation-build` 的 Vite production 构建两次 exit 0，第二次包含 LED 适配主体（7346 模块）。构建提示 `.env.production` 不存在及既有 CSS 压缩警告；本次没有创建密钥文件或部署产物。第二次构建启动后只修正 LED 运行时脚本校验与 RPC 路由，专项测试、SFC 编译、ESLint 和定向类型诊断已单独复验。
+- 测试使用模拟与纯函数，没有连接真实 ThingsBoard、执行真实告警确认/清除、设备认领、图片图库上传或相机/浏览器定位，也未做客户权限验收或模板保存刷新；原生告警分配、活动记录、列显示和批量操作仍未重写。图库上传成功后若字段写入失败，可能留下未引用图片。
+
+## 2026-09-25 实体与告警计数
+
+- 生成目录和覆盖审计：681 个源，440/521 个 JSON 基础适配，81 个 JSON 与 160 个 SCADA 源未适配；完整原生一致性验收 0。
+- `nativeCount.test.ts` 与 `nativeCountView.test.ts` 通过：设备/资产及名称前缀、告警状态/等级/类型/最近时长查询，点位单实体查询，配置 JSON 往返、零计数显示、认证查询分流。`nativeWidgetData.test.ts`、`nativeWidgetIntegration.test.ts`、`nativeWidgetRolling.test.ts` 回归通过。模拟 API 测试没有连接真实 ThingsBoard 服务。
+- 受影响 Vue/TS ESLint 通过；定向 `vue-tsc --noEmit -p tests/tsconfig.native-widgets.json` 仍返回 15 条已有的其他路径诊断，新增计数路径无诊断。真实用户权限、服务返回和模板保存刷新未验收。
+
+## 2026-09-25 多属性更新
+
+- 目录生成与覆盖审计：681 个源，438/521 个 JSON 基础适配，83 个 JSON 与 160 个 SCADA 源未适配；完整原生一致性验收 0。
+- `nativeMultiInput.test.ts`、`nativeMultiInputView.test.ts`、`nativeWidgetData.test.ts`、`nativeWidgetIntegration.test.ts`、`nativeWidgetRolling.test.ts` 通过；覆盖混合属性范围与类型、配置 JSON 往返、预览禁写、分组写入/回读及部分失败提示。测试使用模拟传输，没有真实设备写入、权限或模板刷新验证。
+- 受影响代码 ESLint 与 `git diff --check` 通过。定向 `vue-tsc --noEmit -p tests/tsconfig.native-widgets.json` 仍报告 15 条先前记录的其他路径诊断；新增原生路径无诊断，不能称全量类型检查通过。
+- 新增原生脚本选项仍拒绝执行；全部原生设置及外观未逐项验收。
+
+## 2026-09-24 指定五类的本轮增量
+
+- 目录与覆盖审计为 681 个源（521 JSON + 160 SCADA），437 个 JSON 基础适配、84 个 JSON 未适配，完整原生一致性验收 0。
+- `nativeRpcButton.test.ts`、`nativeRpcButtonView.test.ts`、`nativeThermometer.test.ts`、`nativeWind.test.ts`、`nativeWidgetData.test.ts`、`nativeWidgetIntegration.test.ts` 通过；RPC 设备绑定/零字段/参数/类型/配置往返、预览禁发、单/双向认证 API 调用选择和目标校验，罗盘与温度计预设、全部目录默认配置、实际 SFC 编译均已检查。`nativeWidgetRolling.test.ts` 通过。
+- 受影响 Vue/TS 的 ESLint 与 `git diff --check` 通过。定向 `vue-tsc --noEmit -p tests/tsconfig.native-widgets.json` 返回 15 条既有诊断，均在本轮新增原生路径之外；不能称整个类型检查通过。
+- 没有向真实设备发送 RPC，也没有验证真实客户权限、图片服务器或模板保存刷新；RPC 持久化、罗盘/温度计专属原生细节与其余指定部件仍待实施。
+
+## 2026-09-24 风速风向
+
+- 两个原生 wind 定义接入 Vue wind 家族，目录/审计为 434/521 基础适配、87 个 JSON 与 160 个 SCADA 源未适配；完整原生一致性验收 0。
+- `nativeWind.test.ts`、`nativeWidgetData.test.ts`、`nativeWidgetIntegration.test.ts` 通过：风向/风速字段顺序、可选风速、颜色区间、三布局和背景设置 JSON 往返、SFC 模板编译及全目录校验。受影响 Vue/TS ESLint 通过。尚未在真实设备与认证图片服务器上验证背景图。
+
+## 2026-09-24 JSON 输入后续适配
+
+- 生成目录与覆盖审计通过：681 个源（521 JSON + 160 SCADA），432 个 JSON 基础适配，剩余 89 个 JSON 与 160 个 SCADA；完整原生一致性验收仍为 0。
+- `nativeInput.test.ts` 通过：第 15 个输入定义的属性/遥测目标、服务端/共享属性范围、JSON 对象/数组与错误输入、标签/必填/结果提示配置 JSON 往返、写入目标及回读顺序。`nativeWidgetIntegration.test.ts` 通过：实际配置器切换目标时清空字段、共享范围剔除资产并重选键；新增视图模板编译通过。`nativeWidgetData.test.ts` 通过全部 521 项目录默认绑定校验。测试使用模拟传输，没有写真实设备。
+- 本轮修改文件 ESLint 通过；全项目 `vue-tsc` 仍被大量仓库其他路径的既有诊断阻断，不能标作全量类型检查通过。真实客户权限、设备写入、模板保存刷新尚未验证。
+
+## 2026-09-24 旧版图表与标量输入
+
+- 原生 JSON 目录生成和覆盖审计通过：681 个源（521 JSON + 160 安装生成 SCADA），431 个 JSON 基础适配，完整原生一致性验收 0；剩余 90 个 JSON 与 160 个 SCADA 源。
+- `nativeLegacyCharts.test.ts` 通过：原始 Chart.js 四图、Flot 折线/状态/柱图和饼图、两张简单数值卡的家族识别、数据读取、渲染选项和配置重新编辑。旧图表的 Flot/Chart.js 高级选项尚未逐项重现。
+- `nativeInput.test.ts` 通过：14 个标量输入原始定义精确匹配、单字段范围校验、标签/必填配置 JSON 往返、布尔/日期/整数/浮点/文本解析、属性和遥测写入后回读顺序；共享属性限设备。`nativeWidgetData.test.ts` 额外验证写入后固定窗口可立即刷新。复杂输入仍未放开。
+- 全部 `native*.test.ts` 专项在 429 项阶段依次通过（首次回归发现旧数量断言、旧状态图不支持断言及测试夹具未注入新组件，已更新并复验）；追加 Flot 饼/柱两个定义至 431 项后，相关目录与旧图表专项复验通过。`nativeWidgetIntegration.test.ts` 编译新输入视图和 Composer/Renderer 模板通过。写入测试使用模拟传输，未写真实设备。
+- 定向 `vue-tsc` 仍报告 15 条历史诊断，均不在本轮原生适配路径；不能标作全量类型检查通过。真实服务器、客户权限、实体写入及模板刷新尚未联调。
+
+## 2026-09-24 电池电量与信号强度
+
+- 原生源核对：`battery_level`、`signal_strength` 属于 Status indicators；使用仓库原 SVG 轮廓/路径生成静态形状数据，不执行原始 `colorFunction`。两项的布局、默认颜色区间和信号阈值来自原定义；文字/提示颜色按当前深色玻璃底色调整。
+- `nativeIndicator.test.ts`：电池 0/25/25.1/100 分段边界、超界裁剪、信号 -100/-85/-55 与自定义无信号阈值、空值、颜色区间、默认配置校验、修改后 JSON 保存/重新编辑回显及多数据源拒绝通过。
+- `nativeWidgetData.test.ts` 与 `nativeWidgetIntegration.test.ts` 通过：521 个定义中 407 个基础适配，新增组件通过 SFC 编译，注册和宿主草稿链路回归通过。受影响 TypeScript/Vue ESLint 通过；定向类型检查仍有先前记录的 15 个非本轮路径诊断，新增指示器路径没有诊断，不能称全量类型检查通过。
+- 其余原生专项回归 `nativeWidgetSettings`、`nativeWidgetPersistence`、`nativeWidgetBrowse`、`nativeLiquid`、`nativeAggregate`、`nativeStateChart`、`nativeWidgetRolling`、`nativeRangeChart`、`nativeRadialCharts`、`nativeLatestCharts` 通过。滚动测试的隔离模块映射同步加入新渲染组件。
+- 隔离浏览器使用实际大屏抽屉、原生浏览器、配置器和 GridStack/WidgetHost，模拟设备只读测试遥测 `battery=47`、`rssi=-72`：Status indicators 包能打开两项。电池选字段、切横向六段、预览出现 47% 与三段黄色、添加后重新编辑保留布局和段数。信号改蜂窝图、无信号阈值 -95、开启更新时间，预览出现两根橙色有效柱和相对时间，添加后重新编辑保留上述配置，时间随时钟推进。未使用真实服务器；夹具原图接口故意失败，因此不能据此判断真实部件缩略图加载。测试端口已释放。
+- 完整清单为 681 个源，基础适配 407，完整原生一致性验收 0；剩余 114 个 JSON 和 160 个 SCADA 源。尚未在真实服务、真实设备和模板保存刷新上验证；颜色函数与原生动作未适配，不标为“完全适配”。
+
 ## 2026-09-24 原生部件库空列表修复
 
 - 原因核对：原加载逻辑仅在接口抛错时使用本地系统目录；服务器正常返回空包、空部件列表或只返回部分系统包时，界面会被空结果覆盖。新逻辑先显示仓库原始 32 包及原生定义，再按 alias/fqn 合并服务器结果；本地条目直接进入配置，远端条目仍在选择时读取完整定义并校验适配状态。
@@ -99,6 +158,13 @@
 - Renderer 和上述两个修改/新增测试文件 ESLint 通过；`git diff --check` 通过。
 - `pnpm run type:check` 最终退出 2，诊断位于未修改文件（包括租户配置可空字段及 camera-adapter 缺少 mqtt 类型）；本轮 Renderer 和测试文件无诊断。不能宣称全仓库类型检查通过。
 - 未执行真实设备页面联调或生产构建：未修改构建、路由、环境变量或依赖。未启动共享服务、读取本地密钥、修改设备或保存用户模板；AI 未执行暂存、提交、推送或 GitHub 操作。
+
+## 2026-09-25 控制、RPC 与 GPIO 验证
+
+- 目录生成：521 个定义中 478 个具有 Vue 基础入口；覆盖审计同步为 478 基础适配、43 JSON 无入口、160 SCADA 待接入；34 个无入口 JSON 按产品范围隐藏。
+- `nativeAdvancedControl.test.ts` 覆盖 12 个 fqn 映射、设备约束、参数/终端命令/属性 JSON 解析、GPIO 状态、安全链接、默认配置校验，以及 JSON 往返后配置仍保留。
+- `nativeWidgetData.test.ts` 对 478 个默认适配逐项创建并校验；`nativeWidgetIntegration.test.ts` 编译新增运行 SFC 和既有配置/宿主流程。受影响文件 ESLint 通过。
+- 全仓 `vue-tsc --noEmit` 仍被仓库既有诊断阻断；本轮发现并修复了 advancedControl 默认对象的重复字段，最终输出未出现本轮新增运行组件、核心或目录文件诊断。未连接真实 GPIO、网关或远程 Shell 设备，因此不能把模拟/静态测试当作设备协议与权限验收。
 
 ## 基线与环境
 

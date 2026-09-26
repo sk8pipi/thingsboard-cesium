@@ -17,7 +17,7 @@ import {
 } from '../src/views/tb/dashboard/runtime/native/nativeStateCore';
 
 const widget = createNativeWidget({ fqn: 'state_chart' });
-assert.equal(getNativeWidgetSupport({ fqn: 'charts.state_chart' }).supported, false);
+assert.equal(getNativeWidgetSupport({ fqn: 'charts.state_chart' }).supported, true);
 widget.config.datasources = [
   { type: 'entity', entityType: 'DEVICE', entityId: 'test', dataKeys: [{ name: 'enabled', type: 'timeseries' }] },
 ];

@@ -95,8 +95,9 @@ export function deletePersistedRpc(rpcId: string) {
     url: `/api/rpc/persistent/${rpcId}`,
   });
 }
-export function getPersistedRpcByDevice(deviceId: string) {
+export function getPersistedRpcByDevice(deviceId: string, params: Recordable = {}) {
   return defHttp.get<any>({
     url: `/api/rpc/persistent/device/${deviceId}`,
+    params,
   });
 }

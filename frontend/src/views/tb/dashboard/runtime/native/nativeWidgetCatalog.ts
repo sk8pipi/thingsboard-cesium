@@ -1,7 +1,22 @@
 import { validateStateSettings } from './nativeStateCore';
 import { validateLiquidSettings } from './nativeLiquidCore';
+import { validateIndicatorSettings } from './nativeIndicatorCore';
+import { nativeInputSpec } from './nativeInputCore';
+import { locationKeysValid, nativeLocationSpec } from './nativeLocationInputCore';
+import { nativePhotoSpec, validateNativePhotoSettings } from './nativePhotoInputCore';
+import { nativeLedSpec, validateNativeLedSettings } from './nativeLedCore';
+import { validateWindSettings } from './nativeWindCore';
+import { validateRpcButtonSettings } from './nativeRpcButtonCore';
+import { nativeControlKind, validateNativeControlSettings } from './nativeControlCore';
+import {
+  advancedControlNeedsDevice,
+  nativeAdvancedControlMode,
+  validateNativeAdvancedControlSettings,
+} from './nativeAdvancedControlCore';
+import { validateMultiInputKey, validateMultiInputSettings } from './nativeMultiInputCore';
+import { validateNativeCount } from './nativeCountCore';
 import generated from './nativeWidgetCatalog.generated.json';
-import type { NativeFamily, NativeOptions } from './nativeWidgetTypes';
+import type { NativeFamily, NativeOptions, NativeSource } from './nativeWidgetTypes';
 import type { DashboardWidget } from '../types';
 import { nativeSeriesSettings, withNativeSettings } from './nativeWidgetSettings';
 
@@ -22,6 +37,23 @@ export const nativeFamilyLabels: Record<NativeFamily, string> = {
   liquid: '液位容器',
   state: '状态图',
   table: '历史表格',
+  battery: '电池电量',
+  signal: '信号强度',
+  wind: '风速风向',
+  rpcButton: 'RPC 按钮',
+  control: '设备控制',
+  advancedControl: '控制、RPC 与 GPIO',
+  multiInput: '多属性更新',
+  count: '实体与告警计数',
+  attributeCard: '属性卡片',
+  alarmTable: '告警表格',
+  deviceClaim: '设备认领',
+  entityHierarchy: '实体层级',
+  entityTable: '实体表格',
+  input: '属性与遥测输入',
+  locationInput: '位置输入',
+  photoInput: '拍照输入',
+  ledIndicator: 'LED 指示灯',
 };
 function fingerprint(value: string) {
   let hash = 2166136261;
@@ -111,6 +143,8 @@ export function createNativeWidget(source: any): DashboardWidget {
     : 'top';
   native.presentation.dateFormat = preset.dateFormat?.lastUpdateAgo ? 'relative' : 'locale';
   native.pie.innerRadius = preset.innerRadius ?? 0;
+  native.pie.showPercent = preset.showPercent ?? native.pie.showPercent;
+  native.chart.stack = preset.stack ?? native.chart.stack;
   if (entry.family === 'aggregate') {
     const now = new Date();
     native.window = {
@@ -163,6 +197,23 @@ export function createNativeWidget(source: any): DashboardWidget {
     native.chart.legendPosition = 'right';
   }
   if (entry.family === 'liquid') native.liquid = { ...native.liquid, ...preset.liquid };
+  if (entry.family === 'battery') native.battery = { ...native.battery, ...preset.battery };
+  if (entry.family === 'signal') native.signal = { ...native.signal, ...preset.signal };
+  if (entry.family === 'wind') native.wind = { ...native.wind, ...preset.wind };
+  if (entry.family === 'rpcButton') native.rpcButton = { ...native.rpcButton, ...preset.rpcButton };
+  if (entry.family === 'control') native.control = { ...native.control, ...preset.control };
+  if (entry.family === 'advancedControl')
+    native.advancedControl = { ...native.advancedControl, ...preset.advancedControl };
+  if (entry.family === 'input') native.input = { ...native.input, ...preset.input };
+  if (entry.family === 'locationInput') native.locationInput = { ...native.locationInput, ...preset.locationInput };
+  if (entry.family === 'photoInput') native.photoInput = { ...native.photoInput, ...preset.photoInput };
+  if (entry.family === 'ledIndicator') native.ledIndicator = { ...native.ledIndicator, ...preset.ledIndicator };
+  if (entry.family === 'count') native.count = { ...native.count, ...preset.count };
+  if (entry.family === 'alarmTable') native.alarmTable = { ...native.alarmTable, ...preset.alarmTable };
+  if (entry.family === 'deviceClaim') native.deviceClaim = { ...native.deviceClaim, ...preset.deviceClaim };
+  if (entry.family === 'entityHierarchy')
+    native.entityHierarchy = { ...native.entityHierarchy, ...preset.entityHierarchy };
+  if (entry.family === 'entityTable') native.entityTable = { ...native.entityTable, ...preset.entityTable };
   if (entry.family === 'range') {
     native.range = { ...native.range, ...preset.range };
     native.chart.dataZoom = true;
@@ -174,7 +225,12 @@ export function createNativeWidget(source: any): DashboardWidget {
     native.showLabel = false;
     native.chart.legendPosition = entry.fqn === 'horizontal_doughnut' ? 'right' : 'bottom';
   }
-  if (['horizontalBar', 'verticalBar'].includes(preset.gaugeType)) {
+  if (preset.gaugeType === 'thermometer') {
+    native.gauge.type = 'thermometer';
+    native.gauge.direction = 'vertical';
+    native.gauge.width = 28;
+    native.gauge.showPointer = false;
+  } else if (['horizontalBar', 'verticalBar'].includes(preset.gaugeType)) {
     native.gauge.type = 'linear';
     native.gauge.direction = preset.gaugeType === 'verticalBar' ? 'vertical' : 'horizontal';
     native.gauge.width = 20;
@@ -197,6 +253,9 @@ export function createNativeWidget(source: any): DashboardWidget {
     title: source?.name || entry.name,
     config: {
       title: source?.name || entry.name,
+      ...(['label_value_card', 'cards.simple_card', 'entity_count', 'alarm_count'].includes(entry.fqn)
+        ? { showTitle: false }
+        : {}),
       native,
       datasources: [],
       units: preset.units || '',
@@ -221,7 +280,24 @@ export function validateNativeWidget(widget: DashboardWidget): string[] {
     return ['部件配置结构无效'];
   if (!widget.title?.trim()) errors.push('请填写部件标题');
   const sources = widget.config.datasources || [];
-  if (!sources.length) errors.push('请选择至少一个设备或资产');
+  if (
+    !sources.length &&
+    !['count', 'alarmTable', 'deviceClaim', 'entityTable', 'advancedControl'].includes(options.family)
+  )
+    errors.push('请选择至少一个设备或资产');
+  if (options.family === 'count' && (sources.length || !['entity_count', 'alarm_count'].includes(options.fqn)))
+    errors.push('计数部件使用筛选条件，不绑定遥测数据源');
+  if (options.family === 'alarmTable' && (sources.length || options.fqn !== 'alarm_widgets.alarms_table'))
+    errors.push('告警表格使用筛选条件，不绑定遥测数据源');
+  if (options.family === 'deviceClaim' && (sources.length || options.fqn !== 'input_widgets.device_claiming_widget'))
+    errors.push('设备认领不绑定遥测数据源');
+  const entityTableFqns = [
+    'cards.entities_table',
+    'entity_admin_widgets.asset_admin_table',
+    'entity_admin_widgets.device_admin_table',
+  ];
+  if (options.family === 'entityTable' && (sources.length || !entityTableFqns.includes(options.fqn)))
+    errors.push('实体表格使用实体筛选，不绑定遥测数据源');
   if (sources.length > 8) errors.push('每个部件最多选择 8 个数据源');
   if (sources.some((source) => !source || !Array.isArray(source.dataKeys) || source.dataKeys.some((key) => !key)))
     return ['数据源或字段结构无效'];
@@ -230,12 +306,101 @@ export function validateNativeWidget(widget: DashboardWidget): string[] {
     errors.push('聚合卡需要一个实体和一个遥测字段');
   if (options.family === 'liquid' && (sources.length !== 1 || keyCount !== 1))
     errors.push('液位容器需要一个实体和一个字段');
+  if (['battery', 'signal'].includes(options.family) && (sources.length !== 1 || keyCount !== 1))
+    errors.push('状态指示器需要一个实体和一个字段');
+  if (options.family === 'wind' && (sources.length !== 1 || keyCount < 1 || keyCount > 2))
+    errors.push('风速风向部件需要一个实体、一个风向字段和可选风速字段');
+  if (options.family === 'rpcButton' && (sources.length !== 1 || sources[0]?.entityType !== 'DEVICE' || keyCount !== 0))
+    errors.push('RPC 按钮需要一个设备，不需要数据字段');
+  if (options.family === 'control') {
+    if (
+      !nativeControlKind(options.fqn) ||
+      sources.length !== 1 ||
+      sources[0]?.entityType !== 'DEVICE' ||
+      keyCount !== 0
+    )
+      errors.push('控制部件需要一个设备，不需要数据字段');
+    if (!options.control) errors.push('控制配置缺失');
+    else errors.push(...validateNativeControlSettings(options.control));
+  }
+  if (options.family === 'advancedControl') {
+    const expectedMode = nativeAdvancedControlMode(options.fqn);
+    const settings = options.advancedControl;
+    if (!expectedMode || !settings || settings.mode !== expectedMode) errors.push('高级控制部件类型与原生定义不一致');
+    if (keyCount !== 0) errors.push('控制、RPC 与 GPIO 部件不使用数据字段');
+    if (settings && advancedControlNeedsDevice(settings.mode)) {
+      if (sources.length !== 1 || sources[0]?.entityType !== 'DEVICE') errors.push('此控制部件需要一个目标设备');
+    } else if (sources.length > 1 || (sources[0] && sources[0].entityType !== 'DEVICE')) {
+      errors.push('此控制部件最多绑定一个可选设备');
+    }
+    if (settings) errors.push(...validateNativeAdvancedControlSettings(settings));
+  }
+  if (
+    options.family === 'entityHierarchy' &&
+    (options.fqn !== 'cards.entities_hierarchy' || sources.length !== 1 || keyCount !== 0)
+  )
+    errors.push('实体层级需要一个设备或资产作为根节点，不需要数据字段');
+  if (options.family === 'multiInput' && keyCount < 1) errors.push('多属性更新至少需要一个字段');
+  const inputSpec = options.family === 'input' ? nativeInputSpec(options.fqn, options.input) : null;
+  if (options.family === 'input') {
+    if (!inputSpec || sources.length !== 1 || keyCount !== 1) errors.push('输入部件需要一个实体和一个字段');
+    if (inputSpec?.scope === 'SHARED_SCOPE' && sources[0]?.entityType !== 'DEVICE')
+      errors.push('共享属性输入仅支持设备');
+    const key = (sources[0] as NativeSource | undefined)?.dataKeys?.[0];
+    if (
+      inputSpec &&
+      key &&
+      (key.type !== inputSpec.mode || (inputSpec.mode === 'attribute' && key.scope !== inputSpec.scope))
+    )
+      errors.push('字段类型或属性范围与原生输入部件不一致');
+  }
+  if (options.family === 'locationInput') {
+    const spec = nativeLocationSpec(options.fqn);
+    const settings = options.locationInput;
+    if (!spec || sources.length !== 1 || keyCount !== 2) errors.push('位置输入需要一个实体和经纬度两个字段');
+    if (spec?.scope === 'SHARED_SCOPE' && sources[0]?.entityType !== 'DEVICE') errors.push('共享位置属性仅支持设备');
+    if (!settings || !locationKeysValid(settings) || !['row', 'column'].includes(settings.inputFieldsAlignment))
+      errors.push('经纬度字段或输入排列无效');
+    const keys = (sources[0] as NativeSource | undefined)?.dataKeys || [];
+    if (
+      spec &&
+      settings &&
+      locationKeysValid(settings) &&
+      [settings.latKeyName, settings.lngKeyName].some(
+        (name) =>
+          !keys.some(
+            (key) =>
+              key.name === name && key.type === spec.mode && (spec.mode === 'timeseries' || key.scope === spec.scope),
+          ),
+      )
+    )
+      errors.push('经纬度字段类型或属性范围与原生部件不一致');
+  }
+  if (options.family === 'photoInput') {
+    if (!nativePhotoSpec(options.fqn) || sources.length !== 1 || keyCount !== 1)
+      errors.push('拍照输入需要一个实体和一个照片字段');
+    const key = (sources[0] as NativeSource | undefined)?.dataKeys?.[0];
+    if (key && !(key.type === 'timeseries' || (key.type === 'attribute' && key.scope === 'SERVER_SCOPE')))
+      errors.push('拍照字段只支持遥测或服务端属性');
+    if (!options.photoInput) errors.push('拍照配置缺失');
+    else errors.push(...validateNativePhotoSettings(options.photoInput));
+  }
+  if (options.family === 'ledIndicator') {
+    if (!nativeLedSpec(options.fqn) || sources.length !== 1 || sources[0]?.entityType !== 'DEVICE' || keyCount !== 0)
+      errors.push('LED 指示灯需要一个目标设备，不需要数据字段');
+    if (!options.ledIndicator) errors.push('LED 配置缺失');
+    else errors.push(...validateNativeLedSettings(options.ledIndicator));
+  }
   if (options.family === 'range' && keyCount > 1) errors.push('原生范围图只支持一个遥测字段');
   if (keyCount > 32) errors.push('每个部件最多展示 32 个字段');
   if (options.family === 'gauge' && keyCount > 4) errors.push('仪表部件最多展示 4 个字段，请拆成多个部件');
   for (const source of sources) {
     if (!['DEVICE', 'ASSET'].includes(source.entityType || '') || !source.entityId) errors.push('数据源实体无效');
-    if (!source.dataKeys?.length) errors.push('每个数据源至少选择一个字段');
+    if (
+      !source.dataKeys?.length &&
+      !['rpcButton', 'control', 'advancedControl', 'count', 'entityHierarchy', 'ledIndicator'].includes(options.family)
+    )
+      errors.push('每个数据源至少选择一个字段');
     if (!Array.isArray(source.dataKeys)) {
       errors.push('数据字段结构无效');
       continue;
@@ -249,6 +414,7 @@ export function validateNativeWidget(widget: DashboardWidget): string[] {
         errors.push('历史部件仅支持遥测字段');
       if (key.decimals != null && (!Number.isInteger(key.decimals) || key.decimals < 0 || key.decimals > 8))
         errors.push('小数位必须为 0–8');
+      if (options.family === 'multiInput') errors.push(...validateMultiInputKey(key, source.entityType || ''));
     }
   }
   if (
@@ -288,6 +454,79 @@ export function validateNativeWidget(widget: DashboardWidget): string[] {
     if (options.window.aggregation !== 'NONE') errors.push('状态图须使用无聚合的原始状态');
   }
   if (settings.family === 'liquid') errors.push(...validateLiquidSettings(settings.liquid));
+  if (settings.family === 'battery') errors.push(...validateIndicatorSettings('battery', settings.battery));
+  if (settings.family === 'signal') errors.push(...validateIndicatorSettings('signal', settings.signal));
+  if (settings.family === 'wind') errors.push(...validateWindSettings(settings.wind));
+  if (settings.family === 'rpcButton') errors.push(...validateRpcButtonSettings(settings.rpcButton));
+  if (settings.family === 'control') errors.push(...validateNativeControlSettings(settings.control));
+  if (settings.family === 'advancedControl')
+    errors.push(...validateNativeAdvancedControlSettings(settings.advancedControl));
+  if (settings.family === 'multiInput') errors.push(...validateMultiInputSettings(settings.multiInput));
+  if (settings.family === 'count') errors.push(...validateNativeCount(settings.count, settings.fqn));
+  if (
+    settings.family === 'attributeCard' &&
+    (!Number.isFinite(settings.attributeCard.labelWidth) ||
+      settings.attributeCard.labelWidth < 10 ||
+      settings.attributeCard.labelWidth > 90)
+  )
+    errors.push('属性卡片标签宽度须为 10–90%');
+  if (
+    settings.family === 'alarmTable' &&
+    (!Number.isInteger(settings.alarmTable.defaultPageSize) ||
+      settings.alarmTable.defaultPageSize < 1 ||
+      settings.alarmTable.defaultPageSize > 100)
+  )
+    errors.push('告警表格每页条数必须为 1–100');
+  if (
+    settings.family === 'entityHierarchy' &&
+    (typeof settings.entityHierarchy.relationType !== 'string' ||
+      !settings.entityHierarchy.relationType.trim() ||
+      !Number.isInteger(settings.entityHierarchy.maxDepth) ||
+      settings.entityHierarchy.maxDepth < 1 ||
+      settings.entityHierarchy.maxDepth > 5)
+  )
+    errors.push('实体层级关系类型不能为空，深度须为 1–5');
+  if (settings.family === 'entityTable') {
+    const table = settings.entityTable;
+    const expectedEntityType = settings.fqn === 'entity_admin_widgets.asset_admin_table' ? 'ASSET' : 'DEVICE';
+    if (!['DEVICE', 'ASSET'].includes(table.entityType)) errors.push('实体表格类型须为设备或资产');
+    if (settings.fqn.startsWith('entity_admin_widgets.') && table.entityType !== expectedEntityType)
+      errors.push('实体管理部件类型与原生定义不一致');
+    if (settings.fqn.startsWith('entity_admin_widgets.') && !table.adminMode)
+      errors.push('实体管理部件必须启用管理模式');
+    if (settings.fqn === 'cards.entities_table' && table.adminMode) errors.push('普通实体表格不能启用管理模式');
+    if (
+      ['adminMode', 'allowCreate', 'allowEdit', 'allowDelete', 'editLocation'].some(
+        (key) => typeof table[key as keyof typeof table] !== 'boolean',
+      )
+    )
+      errors.push('实体管理权限配置无效');
+    if (!Number.isInteger(table.pageSize) || table.pageSize < 1 || table.pageSize > 100)
+      errors.push('实体表格每页条数须为 1–100');
+    if (
+      !Array.isArray(table.columns) ||
+      table.columns.length > 16 ||
+      table.columns.some(
+        (column) =>
+          !column ||
+          typeof column.key !== 'string' ||
+          !column.key.trim() ||
+          !['TIME_SERIES', 'SERVER_ATTRIBUTE', 'CLIENT_ATTRIBUTE', 'SHARED_ATTRIBUTE'].includes(column.type),
+      )
+    )
+      errors.push('实体表格字段配置无效或超过 16 列');
+    else if (new Set(table.columns.map((column) => `${column.type}:${column.key}`)).size !== table.columns.length)
+      errors.push('实体表格字段不能重复');
+  }
+  if (settings.family === 'input') {
+    const input = settings.input;
+    if (
+      (input.min != null && !Number.isFinite(input.min)) ||
+      (input.max != null && !Number.isFinite(input.max)) ||
+      (input.min != null && input.max != null && input.min > input.max)
+    )
+      errors.push('输入范围无效');
+  }
   if (settings.family === 'aggregate') {
     const slots = settings.aggregate.slots;
     if (

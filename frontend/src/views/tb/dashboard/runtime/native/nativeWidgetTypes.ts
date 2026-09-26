@@ -15,7 +15,323 @@ export type NativeFamily =
   | 'aggregate'
   | 'liquid'
   | 'state'
+  | 'battery'
+  | 'signal'
+  | 'wind'
+  | 'rpcButton'
+  | 'control'
+  | 'advancedControl'
+  | 'multiInput'
+  | 'count'
+  | 'attributeCard'
+  | 'alarmTable'
+  | 'deviceClaim'
+  | 'entityHierarchy'
+  | 'entityTable'
+  | 'input'
+  | 'locationInput'
+  | 'photoInput'
+  | 'ledIndicator'
   | 'table';
+export interface NativeInputSettings {
+  widgetMode?: 'ATTRIBUTE' | 'TIME_SERIES';
+  attributeScope?: 'SERVER_SCOPE' | 'SHARED_SCOPE';
+  showLabel: boolean;
+  showResultMessage: boolean;
+  required: boolean;
+  label: string;
+  showTimeInput: boolean;
+  min: number | null;
+  max: number | null;
+  displayPreview?: boolean;
+  displayClearButton?: boolean;
+  displayApplyButton?: boolean;
+  displayDiscardButton?: boolean;
+}
+export interface NativeLocationSettings {
+  latKeyName: string;
+  lngKeyName: string;
+  showGetLocation: boolean;
+  enableHighAccuracy: boolean;
+  showLabel: boolean;
+  showResultMessage: boolean;
+  latLabel: string;
+  lngLabel: string;
+  inputFieldsAlignment: 'row' | 'column';
+  isLatRequired: boolean;
+  isLngRequired: boolean;
+  requiredErrorMessage: string;
+}
+export interface NativePhotoSettings {
+  saveToGallery: boolean;
+  usePublicGalleryLink: boolean;
+  imageFormat: 'image/png' | 'image/jpeg' | 'image/webp';
+  imageQuality: number;
+  maxWidth: number;
+  maxHeight: number;
+}
+export interface NativeLedSettings {
+  title: string;
+  ledColor: string;
+  initialValue: boolean;
+  valueAttribute: string;
+  retrieveValueMethod: 'attribute' | 'timeseries';
+  attributeScope: 'SERVER_SCOPE' | 'SHARED_SCOPE' | 'CLIENT_SCOPE';
+  parseValueFunction: string;
+  performCheckStatus: boolean;
+  checkStatusMethod: string;
+  requestTimeout: number;
+  requestPersistent: boolean;
+  persistentPollingInterval: number;
+}
+export interface NativeControlSettings {
+  kind:
+    | 'switch'
+    | 'roundSwitch'
+    | 'slideToggle'
+    | 'knob'
+    | 'power'
+    | 'singleSwitch'
+    | 'toggleButton'
+    | 'slider'
+    | 'stepper';
+  title: string;
+  initialValue: number | boolean;
+  retrieveValueMethod: 'rpc' | 'attribute' | 'timeseries' | 'none';
+  valueKey: string;
+  attributeScope: 'SERVER_SCOPE' | 'SHARED_SCOPE' | 'CLIENT_SCOPE';
+  getValueMethod: string;
+  setValueMethod: string;
+  requestTimeout: number;
+  requestPersistent: boolean;
+  persistentPollingInterval: number;
+  min: number;
+  max: number;
+  step: number;
+  decimals: number;
+  units: string;
+  showValue: boolean;
+  showOnOffLabels: boolean;
+  onLabel: string;
+  offLabel: string;
+  activeColor: string;
+  inactiveColor: string;
+}
+export type NativeAdvancedControlMode =
+  | 'actionButton'
+  | 'gpioControl'
+  | 'gpioPanel'
+  | 'persistentTable'
+  | 'rpcTerminal'
+  | 'rpcShell'
+  | 'serviceRpc'
+  | 'status'
+  | 'segment'
+  | 'attributeUpdate';
+export interface NativeAdvancedControlSettings {
+  mode: NativeAdvancedControlMode;
+  title: string;
+  buttonText: string;
+  method: string;
+  params: string;
+  requestTimeout: number;
+  requestPersistent: boolean;
+  pollingInterval: number;
+  readMethod: string;
+  writeMethod: string;
+  pins: { pin: string; label: string; row: number; col: number; color: string }[];
+  panelColor: string;
+  pageSize: number;
+  allowDelete: boolean;
+  maxLines: number;
+  actionMode: 'none' | 'url';
+  actionTarget: string;
+  leftLabel: string;
+  rightLabel: string;
+  initialValue: boolean;
+  onLabel: string;
+  offLabel: string;
+  onColor: string;
+  offColor: string;
+  attributeScope: 'SERVER_SCOPE' | 'SHARED_SCOPE' | 'CLIENT_SCOPE';
+  attributesJson: string;
+  isConnector: boolean;
+}
+export interface NativeMultiInputSettings {
+  showResultMessage: boolean;
+  showActionButtons: boolean;
+  updateAllValues: boolean;
+  saveButtonLabel: string;
+  resetButtonLabel: string;
+  showGroupTitle: boolean;
+  groupTitle: string;
+  fieldsAlignment: 'row' | 'column';
+  fieldsInRow: number;
+  rowGap: number;
+  columnGap: number;
+}
+export interface NativeMultiInputKeySettings {
+  dataKeyValueType:
+    | 'string'
+    | 'double'
+    | 'integer'
+    | 'JSON'
+    | 'booleanCheckbox'
+    | 'booleanSwitch'
+    | 'dateTime'
+    | 'date'
+    | 'time'
+    | 'select'
+    | 'radio'
+    | 'color';
+  required: boolean;
+  isEditable: 'editable' | 'disabled' | 'readonly';
+  dataKeyHidden: boolean;
+  disabledOnDataKey: string;
+  selectOptions: { value: string | null; label: string }[];
+  step: number;
+  minValue: number | null;
+  maxValue: number | null;
+}
+export interface NativeCountSettings {
+  kind: 'entity' | 'alarm';
+  singleEntityId?: string;
+  entityType: 'ALL' | 'DEVICE' | 'ASSET';
+  nameFilter: string;
+  statusList: ('ACTIVE' | 'CLEARED' | 'ACK' | 'UNACK')[];
+  severityList: ('CRITICAL' | 'MAJOR' | 'MINOR' | 'WARNING' | 'INDETERMINATE')[];
+  typeList: string;
+  timeWindowMs: number;
+  label: string;
+  showLabel: boolean;
+  layout: 'row' | 'column';
+  showIcon: boolean;
+  icon: string;
+  iconSize: number;
+  iconColor: string;
+  iconBackgroundColor: string;
+  showIconBackground: boolean;
+  valueColor: string;
+  valueFontSize: number;
+}
+export interface NativeAttributeCardSettings {
+  showSourceTitle: boolean;
+  labelWidth: number;
+  showMissing: boolean;
+}
+export interface NativeAlarmTableSettings {
+  singleEntityId?: string;
+  enableSelection: boolean;
+  enableSearch: boolean;
+  enableFilter: boolean;
+  displayDetails: boolean;
+  displayPagination: boolean;
+  defaultPageSize: number;
+  defaultSortOrder: 'ASC' | 'DESC';
+  statusList: string[];
+  severityList: string[];
+  useTimeWindow: boolean;
+  allowAcknowledgment: boolean;
+  allowClear: boolean;
+}
+export interface NativeDeviceClaimSettings {
+  deviceSecret: boolean;
+  showLabel: boolean;
+  deviceLabel: string;
+  secretKeyLabel: string;
+  claimButtonLabel: string;
+  successfulClaimDevice: string;
+  failedClaimDevice: string;
+}
+export interface NativeEntityHierarchySettings {
+  relationType: string;
+  direction: 'FROM' | 'TO';
+  maxDepth: number;
+  showEntityType: boolean;
+  sortByName: boolean;
+  expandRoot: boolean;
+}
+export interface NativeEntityTableColumn {
+  type: 'TIME_SERIES' | 'SERVER_ATTRIBUTE' | 'CLIENT_ATTRIBUTE' | 'SHARED_ATTRIBUTE';
+  key: string;
+  label: string;
+}
+export interface NativeEntityTableSettings {
+  entityType: 'DEVICE' | 'ASSET';
+  singleEntityId?: string;
+  enableSearch: boolean;
+  displayPagination: boolean;
+  pageSize: number;
+  sortOrder: 'ASC' | 'DESC';
+  showLabel: boolean;
+  showType: boolean;
+  stickyHeader: boolean;
+  columns: NativeEntityTableColumn[];
+  adminMode: boolean;
+  allowCreate: boolean;
+  allowEdit: boolean;
+  allowDelete: boolean;
+  editLocation: boolean;
+}
+export interface NativeWindSettings {
+  layout: 'default' | 'advanced' | 'simplified';
+  centerValueFontSize: number;
+  centerValueColor: NativeLiquidColor;
+  ticksColor: string;
+  directionalNamesElseDegrees: boolean;
+  majorTicksColor: string;
+  majorTicksFontSize: number;
+  minorTicksColor: string;
+  minorTicksFontSize: number;
+  arrowColor: string;
+  backgroundType: 'color' | 'image';
+  backgroundColor: string;
+  backgroundImage: string;
+  overlayEnabled: boolean;
+  overlayColor: string;
+  overlayBlur: number;
+  padding: number;
+}
+export interface NativeRpcButtonSettings {
+  methodName: string;
+  methodParams: string;
+  requestTimeout: number;
+  oneWayElseTwoWay: boolean;
+  buttonText: string;
+  styleButton: { isRaised: boolean; isPrimary: boolean; bgColor?: string | null; textColor?: string | null };
+}
+export interface NativeBatterySettings {
+  layout: 'vertical_solid' | 'horizontal_solid' | 'vertical_divided' | 'horizontal_divided';
+  sectionsCount: number;
+  showValue: boolean;
+  autoScaleValueSize: boolean;
+  valueFontSize: number;
+  valueColor: NativeLiquidColor;
+  batteryLevelColor: NativeLiquidColor;
+  batteryShapeColor: NativeLiquidColor;
+  padding: number;
+}
+export interface NativeSignalSettings {
+  layout: 'wifi' | 'cellular_bar';
+  showDate: boolean;
+  dateFormat: 'locale' | 'date' | 'time' | 'iso' | 'relative';
+  dateFontSize: number;
+  dateColor: string;
+  activeBarsColor: NativeLiquidColor;
+  noSignalRssiValue: number;
+  inactiveBarsColor: string;
+  showTooltip: boolean;
+  showTooltipValue: boolean;
+  tooltipValueFontSize: number;
+  tooltipValueColor: string;
+  showTooltipDate: boolean;
+  tooltipDateFormat: 'locale' | 'date' | 'time' | 'iso' | 'relative';
+  tooltipDateFontSize: number;
+  tooltipDateColor: string;
+  tooltipBackgroundColor: string;
+  tooltipBackgroundBlur: number;
+  padding: number;
+}
 export interface NativeStateSettings {
   includePrevious: boolean;
   extendToEnd: boolean;
@@ -208,5 +524,22 @@ export interface NativeOptions {
   range?: { fillOpacity: number; outOfRangeColor: string; showBoundaries: boolean };
   liquid?: NativeLiquidSettings;
   state?: NativeStateSettings;
+  battery?: NativeBatterySettings;
+  signal?: NativeSignalSettings;
+  wind?: NativeWindSettings;
+  rpcButton?: NativeRpcButtonSettings;
+  control?: NativeControlSettings;
+  advancedControl?: NativeAdvancedControlSettings;
+  input?: NativeInputSettings;
+  locationInput?: NativeLocationSettings;
+  photoInput?: NativePhotoSettings;
+  ledIndicator?: NativeLedSettings;
+  multiInput?: NativeMultiInputSettings;
+  count?: NativeCountSettings;
+  attributeCard?: NativeAttributeCardSettings;
+  alarmTable?: NativeAlarmTableSettings;
+  deviceClaim?: NativeDeviceClaimSettings;
+  entityHierarchy?: NativeEntityHierarchySettings;
+  entityTable?: NativeEntityTableSettings;
   aggregate?: { showChart: boolean; showSubtitle: boolean; subtitle: string; slots: NativeAggregateSlot[] };
 }

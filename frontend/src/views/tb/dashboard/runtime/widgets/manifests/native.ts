@@ -16,6 +16,23 @@ const families: [NativeFamily, string][] = [
   ['range', '范围图'],
   ['aggregate', '聚合数值卡'],
   ['liquid', '液位容器'],
+  ['battery', '电池电量'],
+  ['signal', '信号强度'],
+  ['wind', '风速风向'],
+  ['rpcButton', 'RPC 按钮'],
+  ['control', '设备控制'],
+  ['advancedControl', '控制、RPC 与 GPIO'],
+  ['multiInput', '多属性更新'],
+  ['count', '实体与告警计数'],
+  ['attributeCard', '属性卡片'],
+  ['alarmTable', '告警表格'],
+  ['deviceClaim', '设备认领'],
+  ['entityHierarchy', '实体层级'],
+  ['entityTable', '实体表格'],
+  ['input', '属性与遥测输入'],
+  ['locationInput', '位置输入'],
+  ['photoInput', '拍照输入'],
+  ['ledIndicator', 'LED 指示灯'],
   ['state', '状态图'],
   ['table', '历史数据表'],
 ];
@@ -45,7 +62,21 @@ export const widgets: WidgetDefinition[] = families.map(([family, title]) => {
     component: NativeWidgetRenderer,
     editor: historical ? 'timeseries' : 'latest',
     supportsTimewindow: historical,
-    allowedKeyTypes: historical ? ['timeseries'] : ['timeseries', 'attribute'],
+    allowedKeyTypes: [
+      'rpcButton',
+      'control',
+      'advancedControl',
+      'count',
+      'alarmTable',
+      'deviceClaim',
+      'entityHierarchy',
+      'entityTable',
+      'ledIndicator',
+    ].includes(family)
+      ? []
+      : historical
+        ? ['timeseries']
+        : ['timeseries', 'attribute'],
     hosts: ['dashboard', 'point-detail', 'editor'],
     dataProvider: 'static',
     previewKind:
