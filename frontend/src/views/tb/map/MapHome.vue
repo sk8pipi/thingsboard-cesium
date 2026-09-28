@@ -69,6 +69,16 @@
       <strong>{{ appliedAssetName }}</strong>
       <span>该资产及其子资产下没有可显示的传感器或监控点位</span>
     </div>
+    <div
+      v-else-if="isCustomerUserMap && hasAssignedTemplate && runtimeLocationStatus !== 'ready'"
+      class="map-asset-empty-state"
+      role="status"
+    >
+      {{ runtimeLocationStatus === 'loading' ? '正在加载设备位置…' : '设备位置数据加载失败，请刷新页面重试' }}
+    </div>
+    <div v-else-if="locationUnavailableCount" class="map-asset-empty-state" role="status">
+      {{ locationUnavailableCount }} 个设备的位置暂不可用，等待位置数据更新
+    </div>
 
     <SensorWidgetPopup
       v-if="!showDefaultGlobeOnly"
@@ -94,6 +104,7 @@
 </template>
 
 <script setup lang="ts">
+  import { applyDeviceLocation, hasRenderableLocation } from './services/globalDeviceLocation';
   import { hydrateProfilePoint, migrateProfileRules, readDeviceProfile } from './services/deviceProfilePresentation';
   import {
     filterExcludedMapPoints,
@@ -233,6 +244,7 @@
   let templateReloading = false;
   let queuedTemplateReload = '';
   let mapTemplateRuntimeAvailable = true;
+  const runtimeLocationStatus = ref<'loading' | 'ready' | 'error'>('loading');
   let unsubscribeMapTemplateUpdates: (() => void) | undefined;
   let assetCatalogRequestId = 0;
   let assetFilterRequestId = 0;
@@ -310,7 +322,9 @@
   const mapPoints = computed(() => {
     if (isCustomerUserMap.value) {
       return filterExcludedMapPoints(
-        applyAssignedTemplatePointStatuses(assignedTemplateMapPoints.value),
+        applyAssignedTemplatePointStatuses(assignedTemplateMapPoints.value).map((point) =>
+          applyDeviceLocation(point, assignedTemplateRuntimeDeviceMap.value[point.entityId]?.deviceLocation),
+        ),
         assignedTemplateState.value?.excludedDeviceIds,
       );
     }
@@ -318,6 +332,9 @@
     return mergeMapPoints(deviceMapPoints.value, manualMapPoints.value);
   });
   const hasAssignedTemplate = computed(() => Boolean(assignedTemplateState.value));
+  const locationUnavailableCount = computed(
+    () => mapPoints.value.filter((point) => !hasRenderableLocation(point)).length,
+  );
   const hasSensorDeviceTypeStyles = computed(
     () => Object.keys(assignedTemplateState.value?.sensorDeviceTypeStyles || {}).length > 0,
   );
@@ -337,12 +354,16 @@
   const visibleSensorPoints = computed(() =>
     showDefaultGlobeOnly.value
       ? []
-      : filteredMapPoints.value.filter((point): point is SensorMapPoint => point.type === 'sensor'),
+      : filteredMapPoints.value.filter(
+          (point): point is SensorMapPoint => point.type === 'sensor' && hasRenderableLocation(point),
+        ),
   );
   const visibleCameraPoints = computed(() =>
     showDefaultGlobeOnly.value
       ? []
-      : filteredMapPoints.value.filter((point): point is CameraMapPoint => point.type === 'camera'),
+      : filteredMapPoints.value.filter(
+          (point): point is CameraMapPoint => point.type === 'camera' && hasRenderableLocation(point),
+        ),
   );
   const visibleMapPoints = computed<MapPoint[]>(() => [...visibleSensorPoints.value, ...visibleCameraPoints.value]);
   const appliedAssetName = computed(
@@ -481,6 +502,7 @@
     assignedTemplateRuntimeDeviceMap.value = runtime.devices || {};
     assignedTemplateState.value = mergeRuntimeIntoTemplateState(normalized, assignedTemplateRuntimeDeviceMap.value);
     assignedTemplateDeviceStatuses.value = [];
+    runtimeLocationStatus.value = 'ready';
     syncOpenPopupsFromAssignedTemplate(assignedTemplateRuntimeDeviceMap.value);
   }
 
@@ -788,8 +810,12 @@
         assignedTemplateState.value,
         assignedTemplateRuntimeDeviceMap.value,
       );
+      runtimeLocationStatus.value = 'ready';
       syncOpenPopupsFromAssignedTemplate(assignedTemplateRuntimeDeviceMap.value);
     } catch (error) {
+      if (dashboardId === currentAssignedTemplateDashboardId.value && runtimeLocationStatus.value !== 'ready') {
+        runtimeLocationStatus.value = 'error';
+      }
       if (getHttpStatus(error) === 404) {
         mapTemplateRuntimeAvailable = false;
         return;
@@ -839,6 +865,7 @@
     assignedTemplateState.value = null;
     currentAssignedTemplateTitle.value = '';
     assignedTemplateRuntimeDeviceMap.value = {};
+    runtimeLocationStatus.value = 'loading';
 
     const customerId = userStore.getUserInfo?.customerId?.id || '';
     const userId = userStore.getUserInfo?.id?.id || '';

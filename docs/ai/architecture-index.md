@@ -27,6 +27,7 @@ decisions.md 和 verification.md。实际使用子 Agent、独立 worktree 或�
 | Vue 部件资源、原生定义适配、配置预览、部件液态玻璃与数据运行 | docs/ai/vue-widget-library-architecture.md | 基础适配清单、原始定义保留、只读数据和显式保存边界 |
 | 设备配置驱动点位图标、详情类型、分类统计、旧 deviceType 样式迁移 | docs/ai/map-device-profile-architecture.md | 配置 ID 关联、保留元数据、模板迁移；摄像头仍读视频架构与 API |
 | 统一选点、模型锚点、设备位置同步、模板移除/恢复、点位遮挡 | docs/ai/map-model-anchor-architecture.md | 草稿与确认写回分层、模板排除不删设备；摄像头仍须读视频架构和 API |
+| 跨模板同设备唯一位置、位置并发、旧模板位置确认 | docs/ai/map-device-location-architecture.md、docs/ai/map-model-anchor-architecture.md、docs/api/map-device-location-api.md | 新位置规则覆盖旧模板坐标优先决策；摄像头仍读视频架构与 API |
 | ThingsBoard Java 后端、DAO、权限、数据库 | docs/ai/project-architecture.md | 若触及视频绑定或状态，再追加视频文档 |
 | 报警趋势持久化、报警历史统计、采集与补录 | docs/ai/alarm-statistics-architecture.md、docs/api/alarm-statistics-api.md | 历史计数独立于现存报警，迁移须单独批准 |
 | video-platform/、本地视频容器、相关启动脚本 | docs/ai/video-platform-architecture.md | 不得泄露本地密钥或并行争用共享端口 |

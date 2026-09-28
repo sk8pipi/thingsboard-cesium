@@ -76,6 +76,7 @@ import org.thingsboard.server.dao.model.ModelConstants;
 import org.thingsboard.server.queue.util.TbCoreComponent;
 import org.thingsboard.server.service.device.DeviceBulkImportService;
 import org.thingsboard.server.service.entitiy.device.TbDeviceService;
+import org.thingsboard.server.service.map.MapDeviceLocationService;
 import org.thingsboard.server.service.security.model.SecurityUser;
 import org.thingsboard.server.service.security.permission.Operation;
 import org.thingsboard.server.service.security.permission.Resource;
@@ -193,9 +194,11 @@ public class DeviceController extends BaseController {
                              @RequestParam(name = "uniquifyStrategy", defaultValue = "RANDOM") UniquifyStrategy uniquifyStrategy) throws Exception {
         device.setTenantId(getCurrentUser().getTenantId());
         if (device.getId() != null) {
-            checkDeviceId(device.getId(), Operation.WRITE);
+            Device existing = checkDeviceId(device.getId(), Operation.WRITE);
+            MapDeviceLocationService.protectGenericSave(device, existing);
         } else {
             checkEntity(null, device, Resource.DEVICE);
+            MapDeviceLocationService.protectGenericSave(device, null);
         }
         return tbDeviceService.save(device, accessToken, new NameConflictStrategy(nameConflictPolicy, uniquifySeparator, uniquifyStrategy), getCurrentUser());
     }
@@ -232,7 +235,13 @@ public class DeviceController extends BaseController {
         Device device = deviceAndCredentials.getDevice();
         DeviceCredentials credentials = deviceAndCredentials.getCredentials();
         device.setTenantId(getCurrentUser().getTenantId());
-        checkEntity(device.getId(), device, Resource.DEVICE);
+        if (device.getId() != null) {
+            Device existing = checkDeviceId(device.getId(), Operation.WRITE);
+            MapDeviceLocationService.protectGenericSave(device, existing);
+        } else {
+            checkEntity(null, device, Resource.DEVICE);
+            MapDeviceLocationService.protectGenericSave(device, null);
+        }
         return tbDeviceService.saveDeviceWithCredentials(device, credentials, new NameConflictStrategy(nameConflictPolicy, uniquifySeparator, uniquifyStrategy), getCurrentUser());
     }
 

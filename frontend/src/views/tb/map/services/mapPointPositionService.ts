@@ -1,71 +1,66 @@
 import { readDeviceProfile } from './deviceProfilePresentation';
+import { applyDeviceLocation, locationWriteCandidates } from './globalDeviceLocation';
 import type { MapPoint, MapPointLocation } from '../types/mapPointTypes';
 
 export function usesTemplatePosition(point: Pick<MapPoint, 'modelAnchor' | 'positionSource'>): boolean {
-  return Boolean(point.modelAnchor || point.positionSource === 'template');
+  return point.positionSource !== 'device' && Boolean(point.modelAnchor || point.positionSource === 'template');
 }
 
 export function mergeDeviceMapPoint(dynamicPoint: MapPoint, templatePoint: MapPoint): MapPoint {
   const useDeviceLocation = dynamicPoint.locationSource === 'deviceInfo' && !usesTemplatePosition(templatePoint);
-  return {
-    ...dynamicPoint,
-    ...templatePoint,
-    longitude: useDeviceLocation ? dynamicPoint.longitude : templatePoint.longitude,
-    latitude: useDeviceLocation ? dynamicPoint.latitude : templatePoint.latitude,
-    height: useDeviceLocation ? dynamicPoint.height : templatePoint.height,
-    heightMode: useDeviceLocation ? dynamicPoint.heightMode : templatePoint.heightMode,
-    locationSource: useDeviceLocation ? 'deviceInfo' : 'manual',
-    ...readDeviceProfile(dynamicPoint, templatePoint),
-    online: dynamicPoint.online,
-    statusText: dynamicPoint.statusText,
-    color: dynamicPoint.color,
-  } as MapPoint;
+  return applyDeviceLocation(
+    {
+      ...dynamicPoint,
+      ...templatePoint,
+      longitude: useDeviceLocation ? dynamicPoint.longitude : templatePoint.longitude,
+      latitude: useDeviceLocation ? dynamicPoint.latitude : templatePoint.latitude,
+      height: useDeviceLocation ? dynamicPoint.height : templatePoint.height,
+      heightMode: useDeviceLocation ? dynamicPoint.heightMode : templatePoint.heightMode,
+      locationSource: useDeviceLocation ? 'deviceInfo' : 'manual',
+      ...readDeviceProfile(dynamicPoint, templatePoint),
+      online: dynamicPoint.online,
+      statusText: dynamicPoint.statusText,
+      color: dynamicPoint.color,
+    } as MapPoint,
+    dynamicPoint.deviceLocation,
+  );
 }
 
 /** 遥测可以有与定位同名的 key，但不得覆盖模板身份、锚点或坐标。 */
 export function mergePointRuntimeFields(point: MapPoint, runtime: Record<string, unknown>): MapPoint {
-  return {
-    ...point,
-    ...runtime,
-    ...readDeviceProfile(runtime, point),
-    pointStyleOverride: point.pointStyleOverride,
-    sensorStyleOverride: point.sensorStyleOverride,
-    id: point.id,
-    type: point.type,
-    name: point.name,
-    entityType: point.entityType,
-    entityId: point.entityId,
-    entityName: point.entityName,
-    longitude: point.longitude,
-    latitude: point.latitude,
-    height: point.height,
-    heightMode: point.heightMode,
-    locationSource: point.locationSource,
-    positionSource: point.positionSource,
-    deviceLocationSynced: point.deviceLocationSynced,
-    modelAnchor: point.modelAnchor,
-  } as MapPoint;
+  return applyDeviceLocation(
+    {
+      ...point,
+      ...runtime,
+      ...readDeviceProfile(runtime, point),
+      pointStyleOverride: point.pointStyleOverride,
+      sensorStyleOverride: point.sensorStyleOverride,
+      id: point.id,
+      type: point.type,
+      name: point.name,
+      entityType: point.entityType,
+      entityId: point.entityId,
+      entityName: point.entityName,
+      longitude: point.longitude,
+      latitude: point.latitude,
+      height: point.height,
+      heightMode: point.heightMode,
+      locationSource: point.locationSource,
+      positionSource: point.positionSource,
+      deviceLocationSynced: point.deviceLocationSynced,
+      modelAnchor: point.modelAnchor,
+      deviceLocation: point.deviceLocation,
+      locationRevision: point.locationRevision,
+      locationPending: point.locationPending,
+      locationStatus: point.locationStatus,
+    } as MapPoint,
+    runtime.deviceLocation,
+  );
 }
 
-/** 统一选点保存计划：位置变化与遗留模型绑定需要同步，纯样式编辑无需重写坐标。 */
-export function unifiedDeviceLocationWriteCandidates(points: MapPoint[], originals: MapPoint[]): MapPoint[] {
-  const byDevice = new Map(originals.map((point) => [point.entityId, point]));
-  const unique = new Map<string, MapPoint>();
-  for (const point of points) {
-    if (point.entityType !== 'DEVICE' || !point.entityId) continue;
-    const original = byDevice.get(point.entityId);
-    const changed = !original
-      ? point.deviceLocationSynced !== true
-      : original.longitude !== point.longitude ||
-        original.latitude !== point.latitude ||
-        (original.height ?? 0) !== (point.height ?? 0) ||
-        original.heightMode !== point.heightMode;
-    const unsynced =
-      point.deviceLocationSynced === false ||
-      (usesTemplatePosition(point) && point.deviceLocationSynced !== true && original?.deviceLocationSynced !== true);
-    if (changed || unsynced) unique.set(point.entityId, point);
-  }
-  return [...unique.values()];
+/** 仅显式位置草稿可写设备；旧模板/旧同步标志不触发隐式迁移。 */
+export function unifiedDeviceLocationWriteCandidates(points: MapPoint[], _originals: MapPoint[]): MapPoint[] {
+  return locationWriteCandidates(points);
 }
 
 export function filterExcludedMapPoints<T extends MapPoint>(

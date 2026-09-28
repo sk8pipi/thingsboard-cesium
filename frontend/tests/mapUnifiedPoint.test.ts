@@ -38,18 +38,27 @@ const camera: MapPoint = {
   entityId: 'device-2',
   name: '监控',
 };
-const positioned = { ...point, positionSource: 'template' as const };
-const synced = { ...positioned, deviceLocationSynced: true };
+const positioned = { ...point, positionSource: 'template' as const, locationPending: true, locationRevision: 1 };
+const synced = { ...positioned, locationPending: false, deviceLocationSynced: true };
 assert.equal(unifiedDeviceLocationWriteCandidates([point], [point]).length, 0);
-assert.equal(unifiedDeviceLocationWriteCandidates([positioned], [positioned]).length, 1, '遗留模板位置首次同步');
-assert.equal(unifiedDeviceLocationWriteCandidates([synced], [synced]).length, 0, '相同已同步位置不写');
-assert.equal(unifiedDeviceLocationWriteCandidates([{ ...synced, height: 33 }], [synced]).length, 1);
 assert.equal(
-  unifiedDeviceLocationWriteCandidates([{ ...synced, deviceLocationSynced: false }], [synced]).length,
+  unifiedDeviceLocationWriteCandidates([{ ...point, positionSource: 'template' }], [point]).length,
+  0,
+  '遗留模板不自动写回',
+);
+assert.equal(unifiedDeviceLocationWriteCandidates([synced], [synced]).length, 0, '相同已同步位置不写');
+assert.equal(unifiedDeviceLocationWriteCandidates([{ ...synced, height: 33 }], [synced]).length, 0);
+assert.equal(
+  unifiedDeviceLocationWriteCandidates([{ ...synced, locationPending: true, deviceLocationSynced: false }], [synced])
+    .length,
   1,
   '持久化待同步支持刷新重试',
 );
-assert.equal(unifiedDeviceLocationWriteCandidates([point, point, camera], []).length, 2, '设备 UUID 去重');
+assert.equal(
+  unifiedDeviceLocationWriteCandidates([positioned, positioned, { ...camera, locationPending: true }], []).length,
+  2,
+  '设备 UUID 去重',
+);
 assert.equal(unifiedDeviceLocationWriteCandidates([], [point]).length, 0, '移除不清空设备坐标');
 assert.equal(normalizeMapPoint(point)?.deviceLocationSynced, undefined, '不能把普通旧点误标待同步');
 assert.equal(normalizeMapPoint(synced)?.deviceLocationSynced, true);
@@ -121,39 +130,26 @@ const code = file.statements
   .filter((node) => names.includes(node.name!.text))
   .map((node) => node.getText(file))
   .join('\n');
-const devices = new Map<string, any>([
-  [
-    point.entityId,
-    { id: { id: point.entityId }, additionalInfo: { longitude: 100, latitude: 20, altitude: 0, keep: '保留' } },
-  ],
-  [camera.entityId, { id: { id: camera.entityId }, additionalInfo: { longitude: 100, latitude: 20, altitude: 0 } }],
-]);
-const attributes = new Map<string, Record<string, number>>();
-let failAttributeId = camera.entityId;
-let writes = 0;
+let calls = 0;
+let conflict = false;
 const ctx = vm.createContext({
   exports: {},
   DEFAULT_CONCURRENCY: 8,
-  LOCATION_KEYS: ['lon', 'lng', 'longitude', 'lat', 'latitude', 'alt', 'altitude', 'height'],
-  EntityType: { DEVICE: 'DEVICE' },
-  Scope: { SERVER_SCOPE: 'SERVER_SCOPE' },
-  getDeviceById: async (id: string) => {
-    if (!devices.has(id)) throw new Error('403');
-    return structuredClone(devices.get(id));
-  },
-  getAttributesByScope: async ({ id }: { id: string }, scope: string) => {
-    assert.equal(scope, 'SERVER_SCOPE');
-    return Object.entries(attributes.get(id) || {}).map(([key, value]) => ({ key, value }));
-  },
-  saveDevice: async (device: any) => {
-    writes++;
-    devices.set(device.id.id, structuredClone(device));
-  },
-  saveEntityAttributesV2: async ({ id }: { id: string }, scope: string, values: Record<string, number>) => {
-    assert.equal(scope, 'SERVER_SCOPE');
-    if (id === failAttributeId) throw new Error('private upstream detail must not leak');
-    writes++;
-    attributes.set(id, { ...values });
+  saveMapDeviceLocation: async (p: MapPoint) => {
+    calls++;
+    if (conflict) throw { response: { status: 409 }, message: 'private upstream detail' };
+    return {
+      location: {
+        longitude: p.longitude,
+        latitude: p.latitude,
+        height: p.height ?? 0,
+        revision: 2,
+        updatedTime: 2,
+        heightMode: 'absolute',
+        source: 'confirmed',
+      },
+      attributesSynced: p.entityId !== camera.entityId,
+    };
   },
 });
 vm.runInContext(
@@ -163,31 +159,14 @@ vm.runInContext(
 );
 const sync = ctx.exports.syncDeviceMapPointLocations;
 const result = await sync([positioned, camera, positioned]);
-assert.deepEqual(Array.from(result.succeeded), [point.entityId]);
-assert.equal(result.failed[0].deviceId, camera.entityId, '属性失败不可算全部成功');
-assert.equal(result.failed[0].message.includes('private'), false);
-assert.equal(devices.get(point.entityId).additionalInfo.keep, '保留');
-assert.equal(devices.get(point.entityId).additionalInfo.longitude, positioned.longitude);
-assert.equal(attributes.get(point.entityId)?.height, 32);
-assert.equal(devices.get(point.entityId).additionalInfo.lon, positioned.longitude);
-assert.equal(devices.get(point.entityId).additionalInfo.lat, positioned.latitude);
-assert.equal(devices.get(point.entityId).additionalInfo.height, positioned.height);
-const firstWrites = writes;
-failAttributeId = '';
-assert.equal((await sync([positioned, camera])).failed.length, 0);
-assert.equal(writes, firstWrites + 1, '仅补写失败属性，相同成功设备不重复写');
-const afterRetry = writes;
-assert.equal((await sync([positioned, camera])).failed.length, 0);
-assert.equal(writes, afterRetry, '重复重试幂等');
-devices.get(point.entityId).additionalInfo.lon = 1;
-devices.get(point.entityId).additionalInfo.lat = 2;
-devices.get(point.entityId).additionalInfo.height = 3;
-assert.equal((await sync([positioned])).failed.length, 0);
-assert.equal(devices.get(point.entityId).additionalInfo.lon, positioned.longitude, '标准字段相同但旧别名不同仍要修复');
-assert.equal(devices.get(point.entityId).additionalInfo.height, positioned.height);
-const afterAliasRepair = writes;
-assert.equal((await sync([{ ...point, entityId: 'denied' }])).failed.length, 1);
-assert.equal((await sync([{ ...point, longitude: NaN }])).failed.length, 1);
+assert.equal(calls, 2, '同设备只调用一次位置接口');
+assert.equal(result.succeeded.length, 2, '正式位置成功与兼容投影失败分开报告');
+assert.deepEqual(Array.from(result.projectionPending), [camera.entityId]);
+assert.equal(result.locations[point.entityId].revision, 2);
+conflict = true;
+const stale = await sync([positioned]);
+assert.equal(stale.failed[0].conflict, true);
+assert.equal(stale.failed[0].message.includes('private'), false);
+assert.equal(stale.succeeded.length, 0);
 assert.equal((await sync([{ ...point, heightMode: 'relativeToGround' }])).failed.length, 1);
-assert.equal(writes, afterAliasRepair, '无权限/无效坐标不写');
-console.log('统一点位：排除/恢复/标准化、候选去重、遗留同步、部分失败、属性重试与幂等通过');
+console.log('统一点位：排除/恢复/显式草稿、位置冲突与兼容投影分项报告通过');

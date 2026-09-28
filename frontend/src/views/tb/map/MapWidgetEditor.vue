@@ -72,6 +72,14 @@
           </button>
           <button
             class="mw-btn"
+            type="button"
+            :disabled="editorMode !== 'editing' || isSavingEdit"
+            @click="locationPanelVisible = true"
+          >
+            设备位置
+          </button>
+          <button
+            class="mw-btn"
             :class="{ active: pageSettingsVisible }"
             type="button"
             :disabled="editorMode !== 'editing'"
@@ -157,6 +165,68 @@
             ><option value="alwaysVisible">穿透显示</option>
           </select>
         </label>
+      </div>
+
+      <div v-if="locationPanelVisible" class="mw-dialog-mask" @click.self="locationPanelVisible = false">
+        <div class="mw-dialog-card mw-removed-card">
+          <div class="mw-dialog-title">设备全局位置</div>
+          <p>所有大屏共用设备位置。以下选择只更新草稿，顶部保存后生效。</p>
+          <button class="mw-btn" :disabled="locationActionBusy || isSavingEdit" @click="scanLocationInventory"
+            >只读盘点所有模板</button
+          >
+          <p v-if="locationInventory"
+            >已盘点 {{ Object.keys(locationInventory.devices).length }} 个设备；{{
+              locationInventory.complete ? '读取完成' : '读取不完整，请重试'
+            }}。</p
+          >
+          <div v-for="point in draftMapPoints" :key="point.id" class="mw-removed-entry">
+            <strong>{{ point.name }}</strong>
+            <div>{{ deviceLocationSummary(point) }}</div>
+            <div v-if="locationHasConflict(point, templateRuntimeDevices[point.entityId]?.deviceLocation)"
+              >其他大屏已更新位置，当前草稿尚未覆盖。</div
+            >
+            <div v-if="legacyPositionSnapshots[point.entityId]"
+              >本模板原位置：{{ positionText(legacyPositionSnapshots[point.entityId]) }}</div
+            >
+            <div v-for="entry in locationInventory?.devices[point.entityId]?.templates || []" :key="entry.dashboardId">
+              {{ entry.dashboardTitle }}：{{ positionText(entry)
+              }}{{ entry.heightMode === 'relativeToGround' ? '（相对高度，需重新选点）' : '' }}
+              <button
+                class="mw-btn"
+                :disabled="entry.heightMode === 'relativeToGround' || locationActionBusy || isSavingEdit"
+                @click="reviewInventoryLocation(point, entry)"
+                >采用此位置</button
+              >
+            </div>
+            <div class="mw-dialog-actions">
+              <button
+                class="mw-btn"
+                :disabled="locationActionBusy || isSavingEdit"
+                @click="reviewDeviceLocation(point, 'current')"
+                >采用设备当前位置</button
+              >
+              <button
+                v-if="point.locationPending || legacyPositionSnapshots[point.entityId]"
+                class="mw-btn"
+                :disabled="locationActionBusy || isSavingEdit"
+                @click="reviewDeviceLocation(point, 'draft')"
+                >确认草稿 / 原模板位置</button
+              >
+              <button
+                class="mw-btn"
+                :disabled="locationActionBusy || isSavingEdit"
+                @click="
+                  locationPanelVisible = false;
+                  startRelocatingPoint(point);
+                "
+                >重新选点</button
+              >
+            </div>
+          </div>
+          <div class="mw-dialog-actions"
+            ><button class="mw-btn" @click="locationPanelVisible = false">关闭</button></div
+          >
+        </div>
       </div>
 
       <div v-if="removedPointsVisible" class="mw-dialog-mask" @click.self="closeRemovedPoints">
@@ -724,7 +794,22 @@
     assertNoRemovedModelBindings,
     isValidModelAnchor,
   } from './services/mapModelAnchorService';
-  import { filterExcludedMapPoints, unifiedDeviceLocationWriteCandidates } from './services/mapPointPositionService';
+  import { filterExcludedMapPoints } from './services/mapPointPositionService';
+  import {
+    applyDeviceLocation,
+    readDeviceLocation,
+    hasRenderableLocation,
+    locationWriteCandidates,
+    locationHasConflict,
+    sameDevicePosition,
+    serializeLocationPoint,
+  } from './services/globalDeviceLocation';
+  import { getMapDeviceLocation } from './services/mapDeviceLocationService';
+  import {
+    inspectMapLocations,
+    type LocationInventory,
+    type LocationInventoryEntry,
+  } from './services/mapLocationInventoryService';
   import { getDeviceInfoById } from '/@/api/tb/device';
   import SelectDeviceDialog from './SelectDeviceDialog.vue';
   import SensorWidgetPopup from './SensorWidgetPopup.vue';
@@ -944,6 +1029,10 @@
   let editorDisposed = false;
   const saveStatus = ref('');
   const saveFailures = ref<DeviceLocationSyncResult['failed']>([]);
+  const locationPanelVisible = ref(false);
+  const locationActionBusy = ref(false);
+  const locationInventory = ref<LocationInventory | null>(null);
+  const legacyPositionSnapshots = ref<Record<string, MapPoint>>({});
 
   const selectedSensor = ref<SensorMapPoint | null>(null);
   const sensorConfigVisible = ref(false);
@@ -1117,9 +1206,19 @@
       .filter((binding): binding is DevicePointBindingInfo => Boolean(binding)),
   );
   const presentationPoints = computed(() =>
-    activeMapPoints.value.map((point) =>
-      hydrateProfilePoint(point, templateRuntimeDevices.value[point.entityId], effectiveProfileRules.value),
-    ),
+    activeMapPoints.value
+      .map((point) =>
+        hydrateProfilePoint(
+          applyDeviceLocation(
+            point,
+            templateRuntimeDevices.value[point.entityId]?.deviceLocation,
+            editorMode.value !== 'view',
+          ),
+          templateRuntimeDevices.value[point.entityId],
+          effectiveProfileRules.value,
+        ),
+      )
+      .filter(hasRenderableLocation),
   );
   const sensorPoints = computed(() =>
     presentationPoints.value.filter((point): point is SensorMapPoint => point.type === 'sensor'),
@@ -1612,6 +1711,11 @@
     templateViewport.value = cloneJson(normalized.viewport);
     layout.value = normalized.layout;
     widgets.value = normalizeWidgetState(normalized.widgets);
+    legacyPositionSnapshots.value = Object.fromEntries(
+      normalized.mapPoints
+        .filter((p) => p.entityType === 'DEVICE' && p.positionSource !== 'device' && !p.locationPending)
+        .map((p) => [p.entityId, cloneJson(p)]),
+    );
     originalMapPoints.value = cloneJson(normalized.mapPoints);
     originalExcludedDeviceIds.value = [...normalized.excludedDeviceIds];
     draftExcludedDeviceIds.value = [...normalized.excludedDeviceIds];
@@ -1628,7 +1732,7 @@
   function getEditorState(): MapWidgetEditorState {
     return {
       ...createDefaultMapTemplateState(),
-      version: 8,
+      version: 9,
       sensorDeviceTypeStyles: cloneJson(legacyTypeStyles.value),
       profileMigrationBackup: profileMigrationBackup.value,
       scene: cloneJson(templateScene.value),
@@ -1647,7 +1751,8 @@
             hydrateProfilePoint(rawPoint, templateRuntimeDevices.value[rawPoint.entityId], effectiveProfileRules.value),
           )
           .map((point) => {
-            if (!isValidModelAnchor(point.modelAnchor)) return point;
+            if (point.positionSource === 'device' || !point.locationPending || !isValidModelAnchor(point.modelAnchor))
+              return serializeLocationPoint(point);
             if (cesiumMapRef.value?.getPointAnchorStatus(point) !== 'attached') return point;
             const location = cesiumMapRef.value?.getResolvedPointLocation(point) || point;
             const fallback = {
@@ -1658,10 +1763,11 @@
             return {
               ...point,
               ...fallback,
-              heightMode: 'absolute',
+              heightMode: 'absolute' as const,
               modelAnchor: { ...point.modelAnchor, fallbackWorldPosition: fallback },
             };
-          }),
+          })
+          .map((point) => serializeLocationPoint(point as MapPoint)),
       ),
       sensorPopupBindings: cloneJson(draftSensorPopupBindings.value),
     };
@@ -1712,11 +1818,22 @@
   }
 
   function applyTemplateRuntimeDevices(devices?: MapTemplateRuntimeDevices | null) {
-    templateRuntimeDevices.value = devices || {};
-    datasourceRuntime.refreshExternalValues();
-    if (isDashboardTemplateMode.value && editorMode.value === 'view') {
-      draftMapPoints.value = cloneJson(originalMapPoints.value);
+    const merged = { ...(devices || {}) };
+    for (const [id, old] of Object.entries(templateRuntimeDevices.value)) {
+      const previous = readDeviceLocation(old.deviceLocation);
+      const next = readDeviceLocation(merged[id]?.deviceLocation);
+      if (previous && (!next || next.revision < previous.revision)) {
+        merged[id] = { ...(merged[id] || old), deviceLocation: previous };
+      }
     }
+    templateRuntimeDevices.value = merged;
+    originalMapPoints.value = originalMapPoints.value.map((p) =>
+      applyDeviceLocation(p, merged[p.entityId]?.deviceLocation, true),
+    );
+    draftMapPoints.value = draftMapPoints.value.map((p) =>
+      applyDeviceLocation(p, merged[p.entityId]?.deviceLocation, true),
+    );
+    datasourceRuntime.refreshExternalValues();
   }
 
   let stopProfileRuntime: (() => void) | undefined;
@@ -2321,6 +2438,7 @@
 
   function closeAllOverlays() {
     editPointId.value = '';
+    locationPanelVisible.value = false;
     addPanelVisible.value = false;
     aggregateConfigVisible.value = false;
     areaKeyCompareConfigVisible.value = false;
@@ -2341,11 +2459,90 @@
   }
 
   function getChangedDeviceLocationPoints(points: MapPoint[]) {
-    const baseline = originalMapPoints.value.map((point) => {
-      const currentRead = restoredPositionReads.get(point.entityId);
-      return currentRead ? ({ ...point, ...currentRead, deviceLocationSynced: true } as MapPoint) : point;
-    });
-    return unifiedDeviceLocationWriteCandidates(points, baseline);
+    const retry = points
+      .filter((p) => p.locationProjectionPending && !p.locationPending)
+      .map((p) => applyDeviceLocation(p, templateRuntimeDevices.value[p.entityId]?.deviceLocation));
+    return [...locationWriteCandidates(points), ...retry];
+  }
+
+  async function scanLocationInventory() {
+    if (locationActionBusy.value || isSavingEdit.value) return;
+    locationActionBusy.value = true;
+    try {
+      locationInventory.value = await inspectMapLocations();
+    } catch {
+      errorMsg.value = '模板盘点未完成，请重试；未修改任何位置';
+    } finally {
+      locationActionBusy.value = false;
+    }
+  }
+
+  async function reviewInventoryLocation(point: MapPoint, entry: LocationInventoryEntry) {
+    if (entry.heightMode === 'relativeToGround') return;
+    const target = {
+      ...point,
+      longitude: entry.longitude,
+      latitude: entry.latitude,
+      height: entry.height ?? 0,
+      heightMode: 'absolute' as const,
+      positionSource: 'device' as const,
+      locationPending: true,
+    };
+    await reviewDeviceLocation(target, 'draft');
+  }
+
+  function positionText(point: MapPointLocation) {
+    return `${Number(point.longitude).toFixed(7)}, ${Number(point.latitude).toFixed(7)} / ${Number(point.height ?? 0).toFixed(2)} m`;
+  }
+
+  function deviceLocationSummary(point: MapPoint) {
+    const current = readDeviceLocation(templateRuntimeDevices.value[point.entityId]?.deviceLocation);
+    if (!current) return '设备位置尚不可用，请读取当前位置或重新选点';
+    return `${current.source === 'legacy' ? '遗留设备位置（待确认）' : '全局位置'}：${positionText(current)}${point.locationPending ? '；有待保存草稿' : ''}`;
+  }
+
+  async function reviewDeviceLocation(point: MapPoint, choice: 'current' | 'draft') {
+    if (isSavingEdit.value || locationActionBusy.value || editorMode.value !== 'editing') return;
+    locationActionBusy.value = true;
+    const targetDashboard = dashboardId.value;
+    try {
+      const current = await getMapDeviceLocation(point.entityId);
+      if (editorDisposed || targetDashboard !== dashboardId.value || editorMode.value !== 'editing') return;
+      const target =
+        choice === 'current' ? current : point.locationPending ? point : legacyPositionSnapshots.value[point.entityId];
+      if (
+        !target ||
+        ![target.longitude, target.latitude, target.height ?? 0].every(Number.isFinite) ||
+        target.heightMode === 'relativeToGround'
+      ) {
+        errorMsg.value = '没有可用绝对位置，请重新选点';
+        return;
+      }
+      if (!window.confirm(`采用 ${positionText(target)}？顶部保存后将更新该设备在所有大屏中的位置。`)) return;
+      templateRuntimeDevices.value[point.entityId] = {
+        ...(templateRuntimeDevices.value[point.entityId] || {}),
+        deviceLocation: current,
+      };
+      const pending = choice === 'draft' || current?.source === 'legacy';
+      const next = {
+        ...point,
+        longitude: target.longitude,
+        latitude: target.latitude,
+        height: target.height ?? 0,
+        heightMode: 'absolute' as const,
+        positionSource: 'device' as const,
+        locationRevision: current?.revision ?? 0,
+        locationPending: pending,
+        deviceLocationSynced: !pending,
+        deviceLocation: current || undefined,
+      };
+      draftMapPoints.value = draftMapPoints.value.map((p) => (p.entityId === point.entityId ? next : p));
+      delete legacyPositionSnapshots.value[point.entityId];
+    } catch {
+      errorMsg.value = '当前位置读取失败，未改变草稿';
+    } finally {
+      locationActionBusy.value = false;
+    }
   }
 
   function removeDraftPoint(pointId: string) {
@@ -2464,7 +2661,7 @@
   function locationDescription(location: MapPointLocation & { modelAnchor?: MapPickedLocation['modelAnchor'] }) {
     if (!location.modelAnchor) return '地面位置（不跟随模型）';
     const model = effectiveAnchorModels.value.find((item) => item.id === location.modelAnchor?.modelId);
-    return '模型表面：' + (model?.name || location.modelAnchor.modelId) + '（跟随模型变化）';
+    return '模型表面：' + (model?.name || location.modelAnchor.modelId) + '（选点草稿跟随模型，保存后全局共享）';
   }
 
   function validatePickedLocation(location: MapPickedLocation) {
@@ -2541,9 +2738,22 @@
     editPointId.value = point.id;
   }
 
-  function startRelocatingPoint(point: MapPoint) {
+  async function startRelocatingPoint(point: MapPoint) {
     if (editorMode.value !== 'editing' || isSavingEdit.value) return;
-    if (startPickingPoint()) relocatingPointId.value = point.id;
+    try {
+      const current = await getMapDeviceLocation(point.entityId);
+      if (editorDisposed || editorMode.value !== 'editing' || isSavingEdit.value) return;
+      templateRuntimeDevices.value[point.entityId] = {
+        ...(templateRuntimeDevices.value[point.entityId] || {}),
+        deviceLocation: current,
+      };
+      draftMapPoints.value = draftMapPoints.value.map((p) =>
+        p.entityId === point.entityId ? { ...p, locationRevision: current?.revision ?? 0 } : p,
+      );
+      if (startPickingPoint()) relocatingPointId.value = point.id;
+    } catch {
+      errorMsg.value = '无法读取设备位置，未开始重新定位';
+    }
   }
 
   function pointWithPickedLocation(point: MapPoint, location: MapPickedLocation): MapPoint {
@@ -2559,7 +2769,7 @@
           positionSource: 'template' as const,
           locationSource: 'manual' as const,
         };
-    return { ...positioned, deviceLocationSynced: false, updatedAt: Date.now() } as MapPoint;
+    return { ...positioned, locationPending: true, deviceLocationSynced: false, updatedAt: Date.now() } as MapPoint;
   }
 
   function unexcludeDevice(deviceId: string) {
@@ -2660,7 +2870,7 @@
     removedPointsLoading.value = true;
     try {
       const device = await getDeviceInfoById(entry.deviceId);
-      const location = repick ? null : await loadDeviceMapPointLocation(entry.deviceId);
+      const location = await loadDeviceMapPointLocation(entry.deviceId);
       if (request !== pointActionRequest || !removedPointsVisible.value) return;
       if (!repick && !location) throw new Error('设备没有可用坐标，请使用“重新选点恢复”');
       const point = {
@@ -2681,8 +2891,11 @@
         latitude: location?.latitude ?? 0,
         height: location?.height ?? 0,
         heightMode: 'absolute',
-        locationSource: location?.source || 'manual',
-        positionSource: 'template',
+        locationSource: 'deviceInfo',
+        positionSource: 'device',
+        deviceLocation: location || undefined,
+        locationRevision: location?.revision ?? 0,
+        locationPending: false,
         deviceLocationSynced: !repick,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -2729,6 +2942,8 @@
       heightMode: 'absolute' as const,
       modelAnchor: location.modelAnchor,
       positionSource: 'template' as const,
+      locationPending: true,
+      locationRevision: readDeviceLocation(templateRuntimeDevices.value[deviceId]?.deviceLocation)?.revision ?? 0,
       deviceLocationSynced: false,
       locationSource: 'manual' as const,
       entityType: 'DEVICE' as const,
@@ -2746,6 +2961,12 @@
     let device;
     try {
       device = await getDeviceInfoById(deviceId);
+      const location = await getMapDeviceLocation(deviceId);
+      if (request !== pointActionRequest) return false;
+      templateRuntimeDevices.value[deviceId] = {
+        ...(templateRuntimeDevices.value[deviceId] || {}),
+        deviceLocation: location,
+      };
     } catch {
       if (request === pointActionRequest) errorMsg.value = '无法读取设备或已无访问权限，请重试';
       return false;
@@ -2888,8 +3109,10 @@
   function adoptSavedState(state: MapTemplateState) {
     templateDeviceProfileStyles.value = cloneJson(state.deviceProfileStyles);
     profileMigrationBackup.value = state.profileMigrationBackup;
-    originalMapPoints.value = cloneJson(state.mapPoints);
-    draftMapPoints.value = cloneJson(state.mapPoints);
+    originalMapPoints.value = state.mapPoints.map((p) =>
+      applyDeviceLocation(cloneJson(p), templateRuntimeDevices.value[p.entityId]?.deviceLocation, true),
+    );
+    draftMapPoints.value = cloneJson(originalMapPoints.value);
     originalSensorPopupBindings.value = cloneJson(state.sensorPopupBindings);
     draftSensorPopupBindings.value = cloneJson(state.sensorPopupBindings);
     originalExcludedDeviceIds.value = [...state.excludedDeviceIds];
@@ -2929,6 +3152,15 @@
     syncLayoutFromGrid();
     const state = getEditorState();
     const candidates = getChangedDeviceLocationPoints(state.mapPoints);
+    if (
+      candidates.some((point) =>
+        locationHasConflict(point, templateRuntimeDevices.value[point.entityId]?.deviceLocation),
+      )
+    ) {
+      errorMsg.value = '其他大屏已更新设备位置，请在设备位置面板核对并重新确认草稿';
+      locationPanelVisible.value = true;
+      return;
+    }
     for (const point of candidates) {
       if (
         !Number.isFinite(point.longitude) ||
@@ -2941,7 +3173,11 @@
         errorMsg.value = '“' + point.name + '”坐标无效或不是绝对高度，请重新选点';
         return;
       }
-      if (point.modelAnchor && cesiumMapRef.value?.getPointAnchorStatus(point) !== 'attached') {
+      if (
+        point.positionSource !== 'device' &&
+        point.modelAnchor &&
+        cesiumMapRef.value?.getPointAnchorStatus(point) !== 'attached'
+      ) {
         errorMsg.value = '“' + point.name + '”关联模型尚不可用或已隐藏，请加载/显示模型或重新选点后保存';
         return;
       }
@@ -2950,7 +3186,7 @@
       !window.confirm(
         '保存当前大屏布局与点位？将直接同步 ' +
           candidates.length +
-          ' 个设备的经纬度和高度；当前排除 ' +
+          ' 个设备在所有大屏中的经纬度和高度；当前排除 ' +
           state.excludedDeviceIds.length +
           ' 个设备（不删除设备、不修改被移除设备的坐标）。不备份旧坐标。',
       )
@@ -2995,21 +3231,32 @@
         result = await syncDeviceMapPointLocations(candidates);
         saveFailures.value = result.failed;
         const succeeded = new Set(result.succeeded);
+        const projectionPending = new Set(result.projectionPending);
+        for (const [id, location] of Object.entries(result.locations)) {
+          templateRuntimeDevices.value[id] = { ...(templateRuntimeDevices.value[id] || {}), deviceLocation: location };
+        }
         const finalState = cloneJson(state);
         finalState.mapPoints = finalState.mapPoints.map((point) =>
-          succeeded.has(point.entityId) ? { ...point, deviceLocationSynced: true } : point,
+          succeeded.has(point.entityId)
+            ? serializeLocationPoint({
+                ...applyDeviceLocation(point, result!.locations[point.entityId]),
+                locationProjectionPending: projectionPending.has(point.entityId),
+              })
+            : point,
         );
         const latest = await getDashboardById(targetDashboardId);
         await persistEditorState(finalState, latest, false);
         adoptSavedState(finalState);
       }
-      if (result?.failed.length) {
+      if (result?.failed.length || result?.projectionPending.length) {
         saveStatus.value =
           '模板已保存；坐标同步成功 ' +
           result.succeeded.length +
           ' 个，失败 ' +
           result.failed.length +
-          ' 个。可再次保存重试；刷新后待同步标志仍保留。取消编辑不会撤销已保存结果。';
+          ' 个；兼容属性待重试 ' +
+          (result.projectionPending?.length || 0) +
+          ' 个。冲突请在设备位置面板核对后重新确认。取消编辑不会撤销已保存结果。';
       } else {
         saveStatus.value = '模板已保存，设备坐标同步完成（' + candidates.length + ' 个）。';
         leaveEditMode();

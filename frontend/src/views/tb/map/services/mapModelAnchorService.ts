@@ -10,7 +10,10 @@ export interface SceneModelRuntime {
   status: 'loading' | 'ready' | 'failed';
   matrix?: Matrix4;
 }
-export type AnchoredLocation = MapPointLocation & { modelAnchor?: MapModelAnchor; positionSource?: 'template' };
+export type AnchoredLocation = MapPointLocation & {
+  modelAnchor?: MapModelAnchor;
+  positionSource?: 'template' | 'device';
+};
 
 export function getEffectiveSceneModels(models: MapSceneModel[], globeOnly: boolean): MapSceneModel[] {
   if (globeOnly) return [];

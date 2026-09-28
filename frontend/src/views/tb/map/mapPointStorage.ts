@@ -25,7 +25,18 @@ export function normalizeMapPoint(point: unknown): MapPoint | null {
       rawPoint.modelAnchor && typeof rawPoint.modelAnchor === 'object'
         ? (rawPoint.modelAnchor as MapModelAnchor)
         : undefined,
-    positionSource: rawPoint.positionSource === 'template' ? ('template' as const) : undefined,
+    positionSource:
+      rawPoint.positionSource === 'device'
+        ? ('device' as const)
+        : rawPoint.positionSource === 'template'
+          ? ('template' as const)
+          : undefined,
+    locationPending: rawPoint.locationPending === true && Number.isSafeInteger(rawPoint.locationRevision),
+    locationProjectionPending: rawPoint.locationProjectionPending === true,
+    locationRevision:
+      Number.isSafeInteger(rawPoint.locationRevision) && Number(rawPoint.locationRevision) >= 0
+        ? Number(rawPoint.locationRevision)
+        : undefined,
     deviceLocationSynced:
       typeof rawPoint.deviceLocationSynced === 'boolean' ? rawPoint.deviceLocationSynced : undefined,
     id: String(rawPoint.id || ''),

@@ -1,4 +1,11 @@
 import {
+  applyDeviceLocation,
+  readDeviceLocation,
+  locationWriteCandidates,
+  locationHasConflict,
+  serializeLocationPoint,
+} from '../src/views/tb/map/services/globalDeviceLocation';
+import {
   readDeviceProfile,
   defaultProfileRule,
   hydrateProfilePoint,
@@ -135,6 +142,14 @@ const globals: Record<string, any> = {
   editorDisposed: false,
   toMapBusinessBinding,
   unifiedDeviceLocationWriteCandidates,
+  applyDeviceLocation,
+  readDeviceLocation,
+  locationWriteCandidates,
+  locationHasConflict,
+  serializeLocationPoint,
+  locationPanelVisible: ref(false),
+  dashboardId: ref('dashboard-1'),
+  getMapDeviceLocation: async () => ({ ...ground, revision: 1, updatedTime: 1, source: 'confirmed' }),
   draftExcludedPointTypes: ref({}),
   draftSensorPopupBindings: ref({ s1: [] }),
   originalSensorPopupBindings: ref({ s1: [] }),
@@ -199,7 +214,7 @@ const { api: editor } = compileFunctions(
   globals,
 );
 
-editor.startRelocatingPoint(original);
+await editor.startRelocatingPoint(original);
 assert.equal(globals.editorMode.value, 'pickingPoint');
 editor.onMapPicked(picked);
 assert.ok(isProxy(globals.pendingPointLocation.value.modelAnchor), '重现页面 ref 将候选锚点包装为 Proxy');
@@ -208,7 +223,7 @@ assert.equal(globals.draftMapPoints.value[0].longitude, 113, '预览不改草稿
 editor.cancelPointTypeSelection();
 assert.equal(globals.draftMapPoints.value[0].longitude, 113, '取消仍是原位');
 assert.ok(previewClears > 0);
-editor.startRelocatingPoint(original);
+await editor.startRelocatingPoint(original);
 editor.onMapPicked(picked);
 currentPick = false;
 editor.confirmPointLocation();
@@ -217,7 +232,7 @@ currentPick = true;
 editor.confirmPointLocation();
 assert.equal(globals.draftMapPoints.value[0].modelAnchor.modelId, 'building');
 assert.equal(globals.draftMapPoints.value[0].deviceLocationSynced, false);
-editor.startRelocatingPoint(globals.draftMapPoints.value[0]);
+await editor.startRelocatingPoint(globals.draftMapPoints.value[0]);
 editor.onMapPicked(ground);
 editor.confirmPointLocation();
 assert.equal(globals.draftMapPoints.value[0].modelAnchor, undefined, '从模型移回地面');
@@ -302,7 +317,16 @@ for (const type of ['sensor', 'camera']) {
 
 // 保存阶段：执行真实 saveEdit/adoptSavedState，模板及设备 API 使用内存故障注入。
 const initial = createDefaultMapTemplateState();
-initial.mapPoints = [{ ...original, longitude: 114, positionSource: 'template', deviceLocationSynced: false }];
+initial.mapPoints = [
+  {
+    ...original,
+    longitude: 114,
+    positionSource: 'template',
+    deviceLocationSynced: false,
+    locationPending: true,
+    locationRevision: 1,
+  },
+];
 const events: string[] = [];
 let persisted: any = null;
 let failSaveNumber = 0;
@@ -349,8 +373,31 @@ const saveGlobals: Record<string, any> = {
     events.push('device');
     assert.equal(persisted.mapPoints[0].deviceLocationSynced, false);
     return failDevice
-      ? { succeeded: [], failed: [{ deviceId: 'd1', name: '传感器', message: '写入失败' }] }
-      : { succeeded: points.map((point) => point.entityId), failed: [] };
+      ? {
+          succeeded: [],
+          locations: {},
+          projectionPending: [],
+          failed: [{ deviceId: 'd1', name: '传感器', message: '写入失败' }],
+        }
+      : {
+          succeeded: points.map((point) => point.entityId),
+          locations: Object.fromEntries(
+            points.map((p) => [
+              p.entityId,
+              {
+                longitude: p.longitude,
+                latitude: p.latitude,
+                height: p.height ?? 0,
+                heightMode: 'absolute',
+                revision: 2,
+                updatedTime: 2,
+                source: 'confirmed',
+              },
+            ]),
+          ),
+          projectionPending: [],
+          failed: [],
+        };
   },
   leaveEditMode: () => {
     saveGlobals.editorMode.value = 'view';

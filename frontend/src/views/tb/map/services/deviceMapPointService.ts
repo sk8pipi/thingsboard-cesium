@@ -3,15 +3,15 @@ import {
   getAttributes,
   getAttributesByScope,
   getLatestTimeseries,
-  saveEntityAttributesV2,
   type TsKvEntity,
   type kvEntity,
 } from '/@/api/tb/telemetry';
-import { getDeviceById, getDeviceInfoById, saveDevice, type DeviceInfo } from '/@/api/tb/device';
+import { getDeviceInfoById, type DeviceInfo } from '/@/api/tb/device';
 import { EntityType } from '/@/enums/entityTypeEnum';
 import { Scope } from '/@/enums/telemetryEnum';
 import type { CameraMapPoint, MapPoint, SensorMapPoint } from '../types/mapPointTypes';
-import { usesTemplatePosition } from './mapPointPositionService';
+import { applyDeviceLocation, type DeviceLocation } from './globalDeviceLocation';
+import { getMapDeviceLocation, saveMapDeviceLocation } from './mapDeviceLocationService';
 
 export type DeviceNodeKind = 'sensor' | 'camera';
 export type DeviceMapPointStatus = {
@@ -280,174 +280,63 @@ async function loadDeviceState(device: DeviceInfo) {
   } satisfies LoadedDeviceState;
 }
 
-export async function loadDeviceMapPointLocation(deviceId: string): Promise<DeviceMapPointLocation | null> {
-  const normalizedDeviceId = String(deviceId || '').trim();
-  if (!normalizedDeviceId) return null;
-
-  const device = await getDeviceInfoById(normalizedDeviceId);
-  const state = await loadDeviceState(device);
-  return resolveLoadedDeviceLocation(device, state);
+export async function loadDeviceMapPointLocation(deviceId: string): Promise<DeviceLocation | null> {
+  return getMapDeviceLocation(deviceId);
 }
 
 export async function applyDeviceInfoMapPointLocations(
   points: MapPoint[],
   concurrency = DEFAULT_CONCURRENCY,
 ): Promise<MapPoint[]> {
-  const deviceIds = uniqueBy(
-    points.filter((point) => point.entityType === 'DEVICE' && Boolean(point.entityId) && !usesTemplatePosition(point)),
-    (point) => point.entityId,
-  ).map((point) => point.entityId);
-
-  const locations = await mapWithConcurrency(deviceIds, concurrency, async (deviceId) => {
+  const ids = [...new Set(points.filter((p) => p.entityType === 'DEVICE').map((p) => p.entityId))];
+  const values = await mapWithConcurrency(ids, concurrency, async (id) => {
     try {
-      const device = await getDeviceInfoById(deviceId);
-      return [deviceId, resolveDeviceInfoLocation(device)] as const;
-    } catch (error) {
-      console.warn('[deviceMapPointService] Failed to load device info location:', deviceId, error);
-      return [deviceId, null] as const;
+      return [id, await getMapDeviceLocation(id)] as const;
+    } catch {
+      return [id, null] as const;
     }
   });
-  const locationMap = new Map(locations);
-
-  return points.map((point) => {
-    if (usesTemplatePosition(point)) return point;
-    const location = locationMap.get(point.entityId);
-    if (!location) return point;
-
-    return {
-      ...point,
-      longitude: location.longitude,
-      latitude: location.latitude,
-      height: location.height,
-      locationSource: 'deviceInfo',
-    } as MapPoint;
-  });
-}
-
-function buildLocationAttributes(point: Pick<MapPoint, 'longitude' | 'latitude' | 'height'>) {
-  const height = point.height ?? 0;
-  return {
-    lon: point.longitude,
-    lng: point.longitude,
-    longitude: point.longitude,
-    lat: point.latitude,
-    latitude: point.latitude,
-    alt: height,
-    altitude: height,
-    height,
-  };
-}
-
-async function saveDeviceServerLocationAttributes(point: MapPoint) {
-  await saveEntityAttributesV2(
-    { entityType: EntityType.DEVICE, id: point.entityId } as any,
-    Scope.SERVER_SCOPE,
-    buildLocationAttributes(point),
-  );
-}
-
-function sameLocation(
-  additionalInfo: DeviceInfo['additionalInfo'] | undefined,
-  point: Pick<MapPoint, 'longitude' | 'latitude' | 'height'>,
-) {
-  return (
-    toNumber(additionalInfo?.longitude) === point.longitude &&
-    toNumber(additionalInfo?.latitude) === point.latitude &&
-    toNumber(additionalInfo?.altitude) === (point.height ?? 0)
-  );
-}
-
-export async function saveDeviceMapPointLocations(points: MapPoint[], concurrency = DEFAULT_CONCURRENCY) {
-  const devicePoints = uniqueBy(
-    points.filter((point) => point.entityType === 'DEVICE' && Boolean(point.entityId) && !usesTemplatePosition(point)),
-    (point) => point.entityId,
-  );
-
-  await mapWithConcurrency(devicePoints, concurrency, async (point) => {
-    const device = await getDeviceById(point.entityId);
-    if (!sameLocation(device.additionalInfo, point)) {
-      await saveDevice({
-        ...device,
-        additionalInfo: {
-          ...(device.additionalInfo || {}),
-          longitude: point.longitude,
-          latitude: point.latitude,
-          altitude: point.height ?? 0,
-        },
-      });
-    }
-
-    try {
-      await saveDeviceServerLocationAttributes(point);
-    } catch (error) {
-      console.warn('[deviceMapPointService] Failed to sync device location attributes:', point.entityId, error);
-    }
-  });
+  const locations = new Map(values);
+  return points.map((point) => applyDeviceLocation(point, locations.get(point.entityId)));
 }
 
 export type DeviceLocationSyncResult = {
   succeeded: string[];
-  failed: { deviceId: string; name: string; message: string }[];
+  locations: Record<string, DeviceLocation>;
+  projectionPending: string[];
+  failed: { deviceId: string; name: string; message: string; conflict?: boolean }[];
 };
 
-/** 仅供管理员确认保存后的统一选点流程使用。包含已解析的模型位置，不存历史坐标。 */
+/** 专用位置接口执行权限、乐观锁与正式位置提交；前端不再拼装完整 Device 写回。 */
 export async function syncDeviceMapPointLocations(
   points: MapPoint[],
   concurrency = DEFAULT_CONCURRENCY,
 ): Promise<DeviceLocationSyncResult> {
-  const devicePoints = uniqueBy(
-    points.filter((point) => point.entityType === 'DEVICE' && Boolean(point.entityId)),
-    (point) => point.entityId,
+  const result: DeviceLocationSyncResult = { succeeded: [], failed: [], locations: {}, projectionPending: [] };
+  const unique = uniqueBy(
+    points.filter((p) => p.entityType === 'DEVICE' && !!p.entityId),
+    (p) => p.entityId,
   );
-  const results = await mapWithConcurrency(
-    devicePoints,
-    Math.max(1, Math.min(8, Math.floor(concurrency) || 1)),
-    async (point) => {
-      try {
-        if (
-          ![point.longitude, point.latitude, point.height ?? 0].every(Number.isFinite) ||
-          Math.abs(point.longitude) > 180 ||
-          Math.abs(point.latitude) > 90 ||
-          point.heightMode === 'relativeToGround'
-        )
-          throw new Error('请重新选点，设备位置必须是有效经纬度和绝对高度');
-        // 两次读均成功后再写；API 继续执行 ThingsBoard 的设备权限校验。
-        const device = await getDeviceById(point.entityId);
-        const attributes = kvListToObject(
-          await getAttributesByScope({ entityType: EntityType.DEVICE, id: point.entityId } as any, Scope.SERVER_SCOPE, {
-            keys: LOCATION_KEYS.join(','),
-          }),
-        );
-        const targetAttributes = buildLocationAttributes(point);
-        if (Object.entries(targetAttributes).some(([key, value]) => toNumber(device.additionalInfo?.[key]) !== value)) {
-          await saveDevice({
-            ...device,
-            additionalInfo: {
-              ...(device.additionalInfo || {}),
-              // 读取兼容 lat/lon/lng/height 等别名，必须一并更新，避免旧别名优先覆盖新坐标。
-              ...targetAttributes,
-            },
-          });
-        }
-        if (Object.entries(targetAttributes).some(([key, value]) => toNumber(attributes[key]) !== value)) {
-          // 不吞属性写失败：Device additionalInfo 成功但属性失败也属于待重试。
-          await saveDeviceServerLocationAttributes(point);
-        }
-        return { deviceId: point.entityId };
-      } catch {
-        // 不把后端原始错误正文（可能包含敏感信息）直接显示或写日志。
-        return {
-          deviceId: point.entityId,
-          name: point.name || point.entityId,
-          message: '设备位置同步失败，请检查设备权限、坐标及网络后重试；部分字段可能已更新',
-        };
-      }
-    },
-  );
-  return {
-    succeeded: results.filter((result) => !('message' in result)).map((result) => result.deviceId),
-    failed: results.filter((result): result is DeviceLocationSyncResult['failed'][number] => 'message' in result),
-  };
+  await mapWithConcurrency(unique, Math.max(1, Math.min(8, concurrency)), async (point) => {
+    try {
+      if (point.heightMode === 'relativeToGround') throw new Error('需要绝对高度');
+      const response = await saveMapDeviceLocation(point);
+      result.succeeded.push(point.entityId);
+      result.locations[point.entityId] = response.location;
+      if (!response.attributesSynced) result.projectionPending.push(point.entityId);
+    } catch (error: any) {
+      const conflict = Number(error?.response?.status || error?.status) === 409;
+      result.failed.push({
+        deviceId: point.entityId,
+        name: point.name || point.entityId,
+        conflict,
+        message: conflict
+          ? '其他大屏已更新位置，请核对当前位置后重新确认草稿'
+          : '位置保存未确认成功，请读取当前位置后重试',
+      });
+    }
+  });
+  return result;
 }
 
 export async function loadDeviceMapPoints(options: DeviceMapPointLoadOptions): Promise<MapPoint[]> {
@@ -457,7 +346,8 @@ export async function loadDeviceMapPoints(options: DeviceMapPointLoadOptions): P
   const points = await mapWithConcurrency(devices, concurrency, async (device) => {
     try {
       const state = await loadDeviceState(device);
-      return toMapPoint(device, state);
+      const point = toMapPoint(device, state);
+      return point ? applyDeviceLocation(point, await getMapDeviceLocation(device.id.id)) : null;
     } catch (error) {
       console.warn('[deviceMapPointService] Failed to load device map point:', device.id?.id, error);
       return null;

@@ -347,11 +347,13 @@
   }
 
   function getResolvedPointLocation(point: AnchoredLocation): MapPointLocation {
-    return point.modelAnchor ? resolveModelAnchor(point, modelRuntimes).location : point;
+    return point.modelAnchor && point.positionSource !== 'device'
+      ? resolveModelAnchor(point, modelRuntimes).location
+      : point;
   }
 
   function pointIsVisible(point: AnchoredLocation) {
-    return !point.modelAnchor || resolveModelAnchor(point, modelRuntimes).visible;
+    return point.positionSource === 'device' || !point.modelAnchor || resolveModelAnchor(point, modelRuntimes).visible;
   }
 
   function pointDepthDistance(point: AnchoredLocation) {
@@ -360,7 +362,7 @@
 
   function updateAnchorWarnings() {
     anchorWarnings.value = [...props.sensorPoints, ...props.cameraPoints].flatMap((point) => {
-      if (!point.modelAnchor) return [];
+      if (!point.modelAnchor || point.positionSource === 'device') return [];
       const { status } = resolveModelAnchor(point, modelRuntimes);
       return status === 'attached' ? [] : [`${point.name}：${modelAnchorStatusText(status)}`];
     });

@@ -88,6 +88,7 @@ public class MapTemplateRuntimeService {
     private final AttributesService attributesService;
     private final TimeseriesService tsService;
     private final DeviceProfileService deviceProfileService;
+    private final MapDeviceLocationService locationService;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, runnable -> {
         Thread thread = new Thread(runnable, "map-template-runtime-poll");
         thread.setDaemon(true);
@@ -282,11 +283,21 @@ public class MapTemplateRuntimeService {
 
         DeviceInfo deviceInfo = putDeviceInfo(values, tenantId, deviceId);
         putAttributes(values, tenantId, deviceId, request.getAttributeKeys());
-        putDeviceLocation(values, deviceInfo != null ? deviceInfo.getAdditionalInfo() : null);
         putTimeseries(values, tenantId, deviceId, request.getTelemetryKeys());
         applyDerivedStatus(values);
         // Reserved metadata must be written last: device attributes/telemetry are not authoritative.
         values.put("entityMetadata", buildEntityMetadata(tenantId, deviceInfo, profiles));
+        MapDeviceLocationService.DeviceLocation location = null;
+        if (deviceInfo != null) {
+            try {
+                location = locationService.read(deviceInfo);
+            } catch (Exception e) {
+                log.debug("[{}] Failed to load map template runtime device location", deviceId);
+            }
+        }
+        values.put("deviceLocation", location);
+        // Other runtime keys remain available to ordinary widgets. The map uses only
+        // the reserved deviceLocation record, so telemetry can never move a point.
         return values;
     }
 
@@ -332,66 +343,6 @@ public class MapTemplateRuntimeService {
             }
         } catch (Exception e) {
             log.debug("[{}] Failed to load map template runtime device info", deviceId, e);
-        }
-        return null;
-    }
-
-    private void putDeviceLocation(Map<String, Object> values, JsonNode additionalInfo) {
-        Double longitude = firstNumber(values, List.of("longitude", "lon", "lng"));
-        Double latitude = firstNumber(values, List.of("latitude", "lat"));
-        Double height = firstNumber(values, List.of("altitude", "height", "alt"));
-        String source = longitude != null && latitude != null ? "attribute" : "deviceInfo";
-
-        if ((longitude == null || latitude == null) && additionalInfo != null && additionalInfo.isObject()) {
-            longitude = firstNumber(additionalInfo, List.of("longitude", "lon", "lng"));
-            latitude = firstNumber(additionalInfo, List.of("latitude", "lat"));
-            height = firstNumber(additionalInfo, List.of("altitude", "height", "alt"));
-        }
-
-        if (longitude == null || latitude == null ||
-                Math.abs(longitude) > 180D || Math.abs(latitude) > 90D) {
-            return;
-        }
-
-        values.put("longitude", longitude);
-        values.put("latitude", latitude);
-        if (height != null) {
-            values.put("height", height);
-        }
-        values.put("mapLocationSource", source);
-    }
-
-    private Double firstNumber(Map<String, Object> source, List<String> keys) {
-        for (String key : keys) {
-            Object value = source.get(key);
-            if (value == null || String.valueOf(value).isBlank()) {
-                continue;
-            }
-            try {
-                double number = value instanceof Number numberValue ? numberValue.doubleValue() : Double.parseDouble(String.valueOf(value));
-                if (Double.isFinite(number)) {
-                    return number;
-                }
-            } catch (NumberFormatException ignored) {
-                // Try the next supported location alias.
-            }
-        }
-        return null;
-    }
-    private Double firstNumber(JsonNode source, List<String> keys) {
-        for (String key : keys) {
-            JsonNode value = source.get(key);
-            if (value == null || value.isNull()) {
-                continue;
-            }
-            try {
-                double number = value.isNumber() ? value.asDouble() : Double.parseDouble(value.asText());
-                if (Double.isFinite(number)) {
-                    return number;
-                }
-            } catch (NumberFormatException ignored) {
-                // Try the next supported location alias.
-            }
         }
         return null;
     }

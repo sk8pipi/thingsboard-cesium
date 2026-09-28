@@ -63,7 +63,7 @@ public class MapTemplateRuntimeServiceTest {
                 .thenReturn(Futures.immediateFuture(List.of()));
         when(timeseriesService.findLatest(eq(tenantId), any(DeviceId.class), anyCollection()))
                 .thenReturn(Futures.immediateFuture(List.of()));
-        service = new MapTemplateRuntimeService(null, deviceService, attributesService, timeseriesService, profileService);
+        service = new MapTemplateRuntimeService(null, deviceService, attributesService, timeseriesService, profileService, new MapDeviceLocationService(attributesService, null, null));
     }
 
     @After
@@ -73,7 +73,7 @@ public class MapTemplateRuntimeServiceTest {
 
     @Test
     public void removedMapDevicesRemainInBusinessRuntimeWithoutCoordinates() throws Exception {
-        MapTemplateRuntimeService service = new MapTemplateRuntimeService(null, null, null, null, null);
+        MapTemplateRuntimeService service = new MapTemplateRuntimeService(null, null, null, null, null, null);
         try {
             String id = "11111111-1111-4111-8111-111111111111";
             JsonNode template = JacksonUtil.OBJECT_MAPPER.readTree("""
@@ -217,6 +217,7 @@ public class MapTemplateRuntimeServiceTest {
     private DeviceInfo device(DeviceProfileId profileId) {
         DeviceInfo device = new DeviceInfo(new DeviceId(UUID.randomUUID()));
         device.setName("sim-device");
+        device.setTenantId(tenantId);
         device.setDeviceProfileId(profileId);
         device.setDeviceProfileName("device-info-name");
         device.setActive(true);
