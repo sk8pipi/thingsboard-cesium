@@ -645,94 +645,15 @@
         />
       </div>
 
-      <div v-if="canEditTemplate && editorMode === 'editing' && addPanelVisible" class="mw-add-panel">
-        <div class="mw-add-title">
-          <strong>添加部件</strong>
-          <div class="mw-add-actions">
-            <button class="mw-btn" type="button" @click="fileInputEl?.click()">↑ 导入部件</button>
-            <button class="mw-btn" type="button" @click="showImportedWidgets = !showImportedWidgets">已导入</button>
-            <button class="mw-btn" type="button" aria-label="关闭部件库" @click="addPanelVisible = false">×</button>
-          </div>
-        </div>
-
-        <div class="mw-add-list">
-          <input
-            ref="fileInputEl"
-            type="file"
-            accept="application/json"
-            style="display: none"
-            @change="onImportFileChange"
-          />
-
-          <template v-if="!showImportedWidgets">
-            <div class="mw-lib-title">原生部件</div>
-            <NativeWidgetBrowser
-              class="mw-native-browser"
-              :active="!nativeEditSource"
-              @select="nativeEditSource = $event"
-            />
-
-            <div class="mw-lib-title">内置部件</div>
-
-            <div class="mw-widget-grid">
-              <button
-                v-for="def in builtInWidgetDefs"
-                :key="def.key"
-                class="mw-widget-card"
-                type="button"
-                @click="addWidgetByKey(def.key)"
-              >
-                <div class="mw-widget-preview">
-                  <img
-                    class="mw-widget-preview-img"
-                    :src="getBuiltInPreview(def.key)"
-                    :alt="def.title"
-                    loading="lazy"
-                  />
-                </div>
-                <div class="mw-widget-info">
-                  <div class="mw-widget-name" :title="def.title">{{ def.title }}</div>
-                  <div class="mw-widget-meta">{{ getBuiltInKindLabel(def.key) }}</div>
-                </div>
-              </button>
-            </div>
-          </template>
-          <template v-else>
-            <div class="mw-lib-title"
-              >已导入部件 <button class="mw-btn" @click="showImportedWidgets = false">返回部件库</button></div
-            >
-
-            <div v-if="libraryDefs.length" class="mw-widget-grid">
-              <div v-for="def in libraryDefs" :key="def.id" class="mw-widget-card-wrap">
-                <button class="mw-widget-card" type="button" @click="addFromLibrary(def)">
-                  <div class="mw-widget-preview">
-                    <img
-                      v-if="getLibraryPreview(def)"
-                      class="mw-widget-preview-img"
-                      :src="getLibraryPreview(def)"
-                      :alt="def.name"
-                      loading="lazy"
-                    />
-                    <div v-else class="mw-widget-preview-placeholder">{{ getLibraryKindLabel(def.kind) }}</div>
-                  </div>
-                  <div class="mw-widget-info">
-                    <div class="mw-widget-name" :title="def.name">{{ def.name }}</div>
-                    <div class="mw-widget-meta">{{ getLibraryKindLabel(def.kind) }}</div>
-                  </div>
-                </button>
-                <button class="mw-lib-del" type="button" title="删除" @click="deleteFromLibrary(def.id)">删除</button>
-              </div>
-            </div>
-
-            <div v-if="!libraryDefs.length" class="mw-empty-hint">暂无已导入部件</div>
-          </template>
-        </div>
-
-        <div class="mw-add-footer">
-          <button class="mw-btn" type="button" @click="addPanelVisible = false">关闭</button>
-        </div>
-      </div>
-
+      <MapWidgetLibrary
+        :visible="canEditTemplate && editorMode === 'editing' && addPanelVisible"
+        host="dashboard"
+        :native-selection-paused="Boolean(nativeEditSource)"
+        @close="addPanelVisible = false"
+        @select-native="nativeEditSource = $event"
+        @select-builtin="addWidgetByKey"
+        @select-imported="addFromLibrary"
+      />
       <div
         ref="gridEl"
         class="mw-grid grid-stack"
@@ -762,7 +683,7 @@
 </template>
 
 <script setup lang="ts">
-  import NativeWidgetBrowser from '../dashboard/runtime/native/NativeWidgetBrowser.vue';
+  import MapWidgetLibrary from './components/MapWidgetLibrary.vue';
   import NativeWidgetComposer from '../dashboard/runtime/native/NativeWidgetComposer.vue';
   import { getNativeWidgetSupport } from '../dashboard/runtime/native/nativeWidgetCatalog';
   import { createProfileBillboardCache } from './services/profileBillboardCache';
@@ -860,7 +781,6 @@
   import {
     buildWidgetConfig,
     createWidgetInstance,
-    listWidgetDefinitions,
     normalizeWidgetRecord,
     resolveWidgetDefinitionKey,
     widgetAppearanceStyleText,
@@ -874,9 +794,8 @@
     WidgetAppearance,
   } from '../dashboard/runtime/types';
   import type { AlarmFocusPayload } from '../dashboard/runtime/widgets/alarm/focus';
-  import { importThingsboardJson } from './widgetLibrary/importThingsboardWidget';
-  import { loadWidgetLibrary, removeWidget, upsertWidget } from './widgetLibrary/libraryStorage';
   import type { CustomWidgetDefinition } from './widgetLibrary/types';
+  import { escapeSvgText } from './widgetLibrary/widgetLibraryPreview';
   import WidgetHost from '../dashboard/runtime/widgets/WidgetHost.vue';
   import { createDatasourceRuntime } from '../dashboard/runtime/datasourceRuntime';
   import ControlSwitchEditor from '../dashboard/runtime/widgets/control/ControlSwitchEditor.vue';
@@ -998,7 +917,6 @@
 
   const gridEl = ref<HTMLDivElement | null>(null);
   const stageEl = ref<HTMLDivElement | null>(null);
-  const fileInputEl = ref<HTMLInputElement | null>(null);
   const sensorStyleIconInputEl = ref<HTMLInputElement | null>(null);
   let grid: any = null;
   let applyingScreenMetrics = false;
@@ -1045,7 +963,6 @@
   const cameraRuntimeError = ref('');
   let cameraRuntimeRequestId = 0;
 
-  const libraryDefs = ref<CustomWidgetDefinition[]>([]);
   const selectedWidgetId = ref('');
 
   const layout = ref<GridItem[]>([]);
@@ -1145,16 +1062,11 @@
 
   let renderPatched = false;
 
-  const builtInWidgetDefs = computed(() =>
-    listWidgetDefinitions('dashboard').filter((item) => item.key !== 'cesium3d' && !item.key.startsWith('native_')),
-  );
-  const showImportedWidgets = ref(false);
   const nativeEditSource = ref<Record<string, any> | null>(null);
   watch(
     () => editorMode.value,
     (mode) => {
       if (mode !== 'editing') {
-        showImportedWidgets.value = false;
         nativeEditSource.value = null;
       }
     },
@@ -1511,169 +1423,6 @@
     ),
   );
 
-  const widgetPreviewByKey: Partial<Record<LocalWidgetKey, string>> = {
-    timeseriesLine: createWidgetPreviewSvg('Line', 'line', '#2563eb', '#22c55e'),
-    timeseriesScatter: createWidgetPreviewSvg('Scatter', 'scatter', '#2563eb', '#f59e0b'),
-    timeseriesBarWithLabels: createWidgetPreviewSvg('Bar', 'bar', '#0f766e', '#38bdf8'),
-    rangeChart: createWidgetPreviewSvg('Range', 'area', '#7c3aed', '#f59e0b'),
-    stateChart: createWidgetPreviewSvg('State', 'step', '#0891b2', '#84cc16'),
-    latestPie: createWidgetPreviewSvg('Pie', 'pie', '#7c3aed', '#f97316'),
-    latestBar: createWidgetPreviewSvg('Bar', 'bar', '#2563eb', '#f59e0b'),
-    latestRadar: createWidgetPreviewSvg('Radar', 'radar', '#0f766e', '#22c55e'),
-    latestPolarArea: createWidgetPreviewSvg('Polar', 'pie', '#be185d', '#38bdf8'),
-    ledIndicator: createWidgetPreviewSvg('LED', 'led', '#16a34a', '#facc15'),
-    staticHtml: createWidgetPreviewSvg('HTML', 'static', '#475569', '#38bdf8'),
-    alarmTable: createWidgetPreviewSvg('Alarm Table', 'table', '#dc2626', '#f97316'),
-    alarmCard: createWidgetPreviewSvg('Alarm Card', 'card', '#dc2626', '#f59e0b'),
-    alarmTrend: createWidgetPreviewSvg('报警趋势', 'bar', '#38bdf8', '#7dd3fc'),
-    controlSwitch: createWidgetPreviewSvg('Switch', 'switch', '#0284c7', '#22c55e'),
-    templateDeviceOverview: createWidgetPreviewSvg('Device Overview', 'card', '#0284c7', '#22c55e'),
-    templateAlarmOverview: createWidgetPreviewSvg('Alarm Overview', 'card', '#dc2626', '#f59e0b'),
-    templateKeyAggregate: createWidgetPreviewSvg('Key Aggregate', 'card', '#0e7490', '#38bdf8'),
-    templateKeyTrend: createWidgetPreviewSvg('Key Trend', 'line', '#2563eb', '#22c55e'),
-    templateStatusDistribution: createWidgetPreviewSvg('Status Distribution', 'pie', '#16a34a', '#ef4444'),
-  };
-
-  function getBuiltInPreview(key: LocalWidgetKey) {
-    return widgetPreviewByKey[key] || createWidgetPreviewSvg('閮ㄤ欢', 'card', '#2563eb', '#22c55e');
-  }
-
-  function getBuiltInKindLabel(key: LocalWidgetKey) {
-    const def = widgetRegistry[key];
-    if (!def) return 'Widget';
-
-    const map: Record<string, string> = {
-      timeseries: 'Timeseries',
-      latest: 'Latest',
-      alarm: '报警部件',
-      aggregate: 'Aggregate',
-      control: 'Control',
-      static: 'Static',
-    };
-    return map[def.category] || 'Widget';
-  }
-
-  function getLibraryKindLabel(kind?: string) {
-    const map: Record<string, string> = {
-      chart: 'Chart',
-      pie: 'Pie',
-      bar: 'Bar',
-      static: 'Static',
-      cesium3d: '3D Map',
-      native: 'Vue 基础适配',
-      unknown: '待适配（保留原始定义）',
-    };
-    return map[String(kind || 'unknown')] || String(kind || 'Imported Widget');
-  }
-
-  function getLibraryPreview(def: CustomWidgetDefinition) {
-    const rawImage =
-      def.raw?.image ||
-      def.raw?.previewImage ||
-      def.raw?.widget?.image ||
-      def.raw?.widgetType?.image ||
-      def.raw?.descriptor?.image ||
-      def.tb?.raw?.image;
-
-    return resolveWidgetPreviewImage(rawImage) || createWidgetPreviewSvg(def.name, def.kind, '#2563eb', '#22c55e');
-  }
-
-  function resolveWidgetPreviewImage(image?: string) {
-    if (!image || typeof image !== 'string') return '';
-    const value = image.trim();
-    if (!value || value.startsWith('tb-image;')) return '';
-    if (value.startsWith('data:')) return value;
-    if (/^(https?:|blob:|\/)/.test(value)) return value;
-    if (value.startsWith('<svg')) {
-      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(value)}`;
-    }
-    return `data:image/png;base64,${value}`;
-  }
-
-  function createWidgetPreviewSvg(label: string, kind: string, primary: string, accent: string) {
-    const safeLabel = escapeSvgText(label || 'Widget');
-    const normalizedKind = String(kind || '').toLowerCase();
-    const chartShape = getPreviewShape(normalizedKind, primary, accent);
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
-        <rect width="320" height="180" rx="16" fill="#f8fafc"/>
-        <rect x="18" y="18" width="284" height="144" rx="14" fill="#ffffff" stroke="#dbe3ef"/>
-        <text x="160" y="45" fill="#172033" font-family="Arial, sans-serif" font-size="18" font-weight="700" text-anchor="middle">${safeLabel}</text>
-        ${chartShape}
-      </svg>
-    `;
-    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-  }
-
-  function getPreviewShape(kind: string, primary: string, accent: string) {
-    if (kind.includes('pie')) {
-      return `
-        <circle cx="160" cy="104" r="42" fill="${primary}" opacity=".9"/>
-        <path d="M160 104 L160 62 A42 42 0 0 1 199 120 Z" fill="${accent}"/>
-        <circle cx="160" cy="104" r="18" fill="#fff" opacity=".95"/>
-      `;
-    }
-
-    if (kind.includes('bar')) {
-      return `
-        <rect x="92" y="106" width="24" height="34" rx="5" fill="${accent}"/>
-        <rect x="128" y="82" width="24" height="58" rx="5" fill="${primary}"/>
-        <rect x="164" y="96" width="24" height="44" rx="5" fill="${accent}" opacity=".78"/>
-        <rect x="200" y="70" width="24" height="70" rx="5" fill="${primary}" opacity=".78"/>
-      `;
-    }
-
-    if (kind.includes('scatter')) {
-      return `
-        <circle cx="96" cy="124" r="8" fill="${accent}"/>
-        <circle cx="126" cy="96" r="7" fill="${primary}"/>
-        <circle cx="164" cy="116" r="9" fill="${accent}" opacity=".8"/>
-        <circle cx="204" cy="78" r="8" fill="${primary}" opacity=".85"/>
-        <circle cx="232" cy="108" r="7" fill="${accent}"/>
-      `;
-    }
-
-    if (kind.includes('switch')) {
-      return `
-        <rect x="94" y="82" width="132" height="54" rx="27" fill="${primary}" opacity=".9"/>
-        <circle cx="198" cy="109" r="22" fill="#fff"/>
-        <path d="M117 109 h48" stroke="${accent}" stroke-width="10" stroke-linecap="round"/>
-      `;
-    }
-
-    if (kind.includes('led')) {
-      return `
-        <circle cx="160" cy="104" r="38" fill="${accent}" opacity=".95"/>
-        <circle cx="148" cy="90" r="11" fill="#fff" opacity=".75"/>
-        <path d="M118 146 h84" stroke="${primary}" stroke-width="8" stroke-linecap="round"/>
-      `;
-    }
-
-    if (kind.includes('table')) {
-      return `
-        <rect x="78" y="70" width="164" height="74" rx="8" fill="#f8fafc" stroke="${primary}" stroke-width="3"/>
-        <path d="M78 94 H242 M78 118 H242 M120 70 V144 M184 70 V144" stroke="${accent}" stroke-width="3" opacity=".85"/>
-      `;
-    }
-
-    if (kind.includes('static') || kind.includes('card')) {
-      return `
-        <rect x="86" y="70" width="148" height="74" rx="10" fill="#f8fafc" stroke="${primary}" stroke-width="3"/>
-        <path d="M108 94 H212 M108 116 H184" stroke="${accent}" stroke-width="8" stroke-linecap="round"/>
-      `;
-    }
-
-    return `
-      <path d="M70 128 C106 86 132 122 160 92 S218 68 250 108" fill="none" stroke="${primary}" stroke-width="10" stroke-linecap="round"/>
-      <path d="M70 140 H250" stroke="#dbe3ef" stroke-width="4" stroke-linecap="round"/>
-      <circle cx="160" cy="92" r="8" fill="${accent}"/>
-    `;
-  }
-
-  function escapeSvgText(text: string) {
-    return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
   function patchGridstackRenderOnce() {
     if (renderPatched) return;
     renderPatched = true;
@@ -1681,10 +1430,6 @@
       const html = (widget as any)?.content ?? '';
       el.innerHTML = String(html);
     };
-  }
-
-  function reloadLibrary() {
-    libraryDefs.value = loadWidgetLibrary();
   }
 
   function widgetStorageKey() {
@@ -2327,44 +2072,6 @@
     createWidgetAndAddToGrid(key, title, {
       ...def.defaultConfig,
     });
-  }
-
-  async function onImportFileChange(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-
-    try {
-      if (file.size > 20 * 1024 * 1024) throw new Error('文件超过 20 MB，请拆分后导入');
-      const text = await file.text();
-      const json = JSON.parse(text);
-      const defs = importThingsboardJson(json);
-
-      if (!defs.length) {
-        errorMsg.value = 'Import failed: unrecognized ThingsBoard widget or bundle format';
-        return;
-      }
-
-      for (const def of defs) {
-        upsertWidget(def);
-      }
-
-      reloadLibrary();
-      showImportedWidgets.value = true;
-      const unavailable = defs.filter((def) => def.kind === 'unknown').length;
-      errorMsg.value = unavailable
-        ? `已保留 ${defs.length} 个原始定义，其中 ${unavailable} 个尚未适配；点击条目可查看原因。`
-        : '';
-    } catch (error: any) {
-      errorMsg.value = error?.message || String(error);
-    } finally {
-      input.value = '';
-    }
-  }
-
-  function deleteFromLibrary(id: string) {
-    removeWidget(id);
-    reloadLibrary();
   }
 
   function mapImportedKindToLocalKey(def: CustomWidgetDefinition): LocalWidgetKey | '' {
@@ -3521,8 +3228,6 @@
     } catch (error: any) {
       errorMsg.value = error?.message || '鍔犺浇澶у睆妯℃澘澶辫触';
     }
-    reloadLibrary();
-
     grid = GridStack.init(
       {
         column: mapScreen.metrics.value.columns,
@@ -4256,200 +3961,6 @@
       grid-template-columns: 1fr;
     }
   }
-  .mw-add-panel {
-    position: absolute;
-    top: calc(var(--map-top-bar-offset, 0px) + 12px);
-    left: 12px;
-    z-index: 30;
-    width: min(620px, calc(100% - 24px));
-    max-height: calc(100% - var(--map-top-bar-offset, 0px) - 24px);
-    overflow: hidden;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    background: #d4dfe4;
-    color: #253746;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .mw-add-title {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    padding: 14px;
-    background: #30577f;
-    color: #fff;
-    flex: 0 0 auto;
-  }
-
-  .mw-add-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .mw-add-panel .mw-add-title {
-    margin: 0;
-  }
-  .mw-add-panel .mw-add-footer {
-    padding: 8px 14px;
-    flex: 0 0 auto;
-  }
-
-  .mw-add-title,
-  .mw-lib-title {
-    font-size: 13px;
-    font-weight: 600;
-    margin: 4px 0 8px;
-  }
-
-  .mw-add-list {
-    display: flex;
-    flex-direction: column;
-    max-height: calc(100vh - 170px);
-    gap: 10px;
-    overflow-y: auto;
-    padding: 12px;
-    min-height: 0;
-  }
-
-  .mw-add-list > * {
-    flex: 0 0 auto;
-  }
-
-  .mw-native-browser {
-    height: clamp(320px, 55vh, 620px);
-    min-height: 320px;
-    overflow: hidden;
-    border-radius: 6px;
-  }
-
-  .mw-widget-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .mw-widget-card-wrap {
-    position: relative;
-    min-width: 0;
-  }
-
-  .mw-widget-card {
-    width: 100%;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    background: #fff;
-    color: #253746;
-    border-radius: 8px;
-    padding: 8px;
-    cursor: pointer;
-    text-align: left;
-    transition:
-      border-color 0.16s ease,
-      background 0.16s ease,
-      transform 0.16s ease;
-  }
-  .mw-widget-card:hover {
-    transform: translateY(-1px);
-    border-color: rgba(125, 211, 252, 0.75);
-    background: rgba(255, 255, 255, 0.14);
-  }
-  .mw-widget-card--import {
-    display: grid;
-    grid-template-columns: 96px 1fr;
-    gap: 10px;
-    align-items: center;
-  }
-
-  .mw-widget-preview {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    overflow: hidden;
-    border-radius: 7px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(15, 23, 42, 0.56);
-  }
-  .mw-widget-preview--import {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #bae6fd;
-    font-size: 18px;
-    font-weight: 800;
-    letter-spacing: 0;
-    background: linear-gradient(135deg, rgba(14, 165, 233, 0.24), rgba(34, 197, 94, 0.2));
-  }
-  .mw-widget-preview-img {
-    width: 100%;
-    height: 100%;
-    display: block;
-    object-fit: cover;
-  }
-  .mw-widget-preview-placeholder {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 100%;
-    color: rgba(255, 255, 255, 0.76);
-    font-size: 13px;
-    font-weight: 700;
-    background: linear-gradient(135deg, rgba(37, 99, 235, 0.28), rgba(20, 184, 166, 0.22));
-  }
-
-  .mw-widget-info {
-    min-width: 0;
-    padding-top: 8px;
-  }
-  .mw-widget-card--import .mw-widget-info {
-    padding-top: 0;
-  }
-  .mw-widget-name {
-    overflow: hidden;
-    font-size: 13px;
-    font-weight: 700;
-    line-height: 18px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .mw-widget-meta,
-  .mw-widget-desc {
-    margin-top: 3px;
-    overflow: hidden;
-    color: rgba(255, 255, 255, 0.68);
-    font-size: 12px;
-    line-height: 16px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .mw-lib-del {
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    z-index: 2;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    background: rgba(127, 29, 29, 0.86);
-    color: #fff;
-    border-radius: 999px;
-    padding: 3px 7px;
-    cursor: pointer;
-    font-size: 12px;
-    line-height: 16px;
-  }
-
-  .mw-empty-hint {
-    opacity: 0.72;
-    font-size: 12px;
-  }
-
-  .mw-add-footer {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 12px;
-  }
-
   .mw-grid {
     position: absolute;
     top: 0;
@@ -4649,7 +4160,6 @@
     .mw-page-settings-panel,
     .mw-appearance-panel,
     .mw-sensor-style-panel,
-    .mw-add-panel,
     .mw-control-editor {
       right: 8px;
       left: 8px;
@@ -4660,14 +4170,6 @@
       right: 8px;
       left: 8px;
       flex-wrap: wrap;
-    }
-
-    .mw-widget-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .mw-widget-card--import {
-      grid-template-columns: 72px minmax(0, 1fr);
     }
   }
 </style>

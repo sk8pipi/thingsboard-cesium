@@ -2,29 +2,25 @@
   "schemaVersion": 1,
   "tasks": [
     {
-      "taskId": "map-device-location",
-      "status": "验证中",
+      "taskId": "map-widget-library-unification",
+      "status": "待人工提交",
       "sharedResources": [],
       "fileScopes": [
-        "frontend/src/views/tb/map",
+        "frontend/src/views/tb/map/MapWidgetEditor.vue",
+        "frontend/src/views/tb/map/SensorPopupWidgetEditor.vue",
+        "frontend/src/views/tb/map/components/MapWidgetLibrary.vue",
+        "frontend/src/views/tb/map/widgetLibrary/widgetLibraryPreview.ts",
         "frontend/tests",
-        "backend/application/src/main/java/org/thingsboard/server/service/map",
-        "backend/application/src/main/java/org/thingsboard/server/controller/MapDeviceLocationController.java",
-        "backend/application/src/main/java/org/thingsboard/server/controller/DeviceController.java",
-        "backend/application/src/test/java/org/thingsboard/server/service/map",
-        "backend/application/src/test/java/org/thingsboard/server/controller",
-        "docs/ai",
-        "docs/api/map-device-location-api.md",
-        "docs/changes/map-device-location",
-        "docs/changes/vue-widget-library/delivery.md",
+        "docs/ai/vue-widget-library-architecture.md",
+        "docs/changes/map-widget-library-unification",
         "docs/changes/active-tasks.json"
       ],
       "owner": "主 Agent",
-      "taskDirectory": "docs/changes/map-device-location",
-      "lastUpdated": "2026-09-27",
+      "taskDirectory": "docs/changes/map-widget-library-unification",
+      "lastUpdated": "2026-09-28",
       "worktree": ".",
-      "name": "设备全局位置与跨模板同步"
+      "name": "大屏与点位详情共用部件库"
     }
   ],
-  "updatedAt": "2026-09-27"
+  "updatedAt": "2026-09-28"
 }

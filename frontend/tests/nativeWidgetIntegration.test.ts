@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc';
+import { nextTick, reactive, ref as vueRef, watch as vueWatch } from 'vue';
 import { nativeWidgetCatalog, createNativeWidget } from '../src/views/tb/dashboard/runtime/native/nativeWidgetCatalog';
 import { nativeSeriesSettings } from '../src/views/tb/dashboard/runtime/native/nativeWidgetSettings';
 import { resolveNativeOverlayTarget } from '../src/views/tb/dashboard/runtime/native/useNativeOverlayTarget';
@@ -20,6 +21,7 @@ for (const file of [
   'map/MapWidgetLayer.vue',
   'map/SensorPopupWidgetEditor.vue',
   'map/SensorPopupWidgetGrid.vue',
+  'map/components/MapWidgetLibrary.vue',
   'dashboard/runtime/native/NativeWidgetComposer.vue',
   'dashboard/runtime/native/NativeWidgetPicker.vue',
   'dashboard/runtime/native/NativeWidgetRenderer.vue',
@@ -116,18 +118,123 @@ assert.equal(mapGlobals.widgets.value[widget.id].title, 'changed');
 let emitted = 0;
 const pointGlobals: any = {
   localWidgets: ref([]),
-  nativePickerVisible: ref(true),
+  widgetLibraryVisible: ref(true),
   nativeEditSource: ref(null),
   emit: () => emitted++,
 };
 const point = functions('map/SensorPopupWidgetEditor.vue', ['applyNativeWidget', 'toPopupWidgetConfig'], pointGlobals);
 point.applyNativeWidget(widget);
 assert.equal(pointGlobals.localWidgets.value.length, 1);
+assert.equal(pointGlobals.widgetLibraryVisible.value, false);
 assert.equal(emitted, 0, '配置仅改草稿，不提前保存设备位置');
 point.applyNativeWidget({ ...widget, title: 'point changed' });
 assert.equal(pointGlobals.localWidgets.value.length, 1);
 assert.equal(pointGlobals.localWidgets.value[0].typeFullFqn, widget.typeFullFqn);
 assert.deepEqual(pointGlobals.localWidgets.value[0].appearance, widget.appearance);
+const mapEditor = fs.readFileSync(new URL(root + 'map/MapWidgetEditor.vue', import.meta.url), 'utf8');
+const pointEditor = fs.readFileSync(new URL(root + 'map/SensorPopupWidgetEditor.vue', import.meta.url), 'utf8');
+assert.match(mapEditor, /<MapWidgetLibrary[\s\S]*?host="dashboard"/);
+assert.match(pointEditor, /<MapWidgetLibrary[\s\S]*?host="point-detail"/);
+assert.doesNotMatch(pointEditor, /原生部件库 · Vue/);
+const hostProps = { host: 'point-detail' };
+const catalog = functions('map/components/MapWidgetLibrary.vue', ['unavailableReason'], {
+  props: hostProps,
+  getNativeWidgetSupport: () => ({ supported: true, localWidgetKey: 'native_chart', reason: '' }),
+  getWidgetDefinition: (key: string) =>
+    ({
+      native_chart: { hosts: ['dashboard', 'point-detail'] },
+      staticHtml: { hosts: ['dashboard', 'point-detail'] },
+      templateDeviceOverview: { hosts: ['dashboard'] },
+    })[key],
+  resolveWidgetDefinitionKey: (def: any) => def.localWidgetKey,
+});
+assert.equal(catalog.unavailableReason({ localWidgetKey: 'staticHtml' }), '');
+assert.equal(catalog.unavailableReason({ localWidgetKey: 'templateDeviceOverview' }), '仅大屏画布可用');
+assert.equal(catalog.unavailableReason({ raw: { descriptor: {} } }), '');
+hostProps.host = 'dashboard';
+assert.equal(catalog.unavailableReason({ localWidgetKey: 'templateDeviceOverview' }), '');
+const importedConfig = ref<any>(null);
+const importedTitle = ref('');
+const importedLibraryVisible = ref(true);
+let selectedImportedKey = '';
+const pointImport = functions('map/SensorPopupWidgetEditor.vue', ['selectImportedWidget'], {
+  currentDeviceId: ref('current-device'),
+  importedConfig,
+  importedTitle,
+  widgetLibraryVisible: importedLibraryVisible,
+  nativeEditSource: ref(null),
+  getNativeWidgetSupport: () => ({ supported: false }),
+  getWidgetDefinition: (key: string) => (key === 'timeseriesLine' ? { hosts: ['point-detail'] } : null),
+  resolveWidgetDefinitionKey: (definition: any) => definition.localWidgetKey,
+  openKeyDialog: (key: string) => {
+    selectedImportedKey = key;
+  },
+});
+pointImport.selectImportedWidget({
+  kind: 'chart',
+  localWidgetKey: 'timeseriesLine',
+  name: '导入曲线',
+  defaultConfig: {
+    datasource: { entityId: 'old-device' },
+    datasources: [{ entityId: 'old-device' }],
+    settings: { color: 'blue' },
+  },
+});
+assert.equal(selectedImportedKey, 'timeseriesLine');
+assert.equal(importedTitle.value, '导入曲线');
+assert.equal(importedConfig.value.datasource, undefined, '导入定义不能沿用旧设备数据源');
+assert.equal(importedConfig.value.datasources, undefined);
+assert.equal(importedConfig.value.settings.color, 'blue');
+assert.equal(importedLibraryVisible.value, false);
+const pointScript = parse(pointEditor).descriptor.scriptSetup!.content;
+const pointAst = ts.createSourceFile('SensorPopupWidgetEditor.ts', pointScript, ts.ScriptTarget.Latest, true);
+const draftWatch = pointAst.statements.find(
+  (statement) =>
+    ts.isExpressionStatement(statement) &&
+    statement.getText(pointAst).startsWith('watch(') &&
+    statement.getText(pointAst).includes('props.sensor?.id'),
+);
+assert.ok(draftWatch, '点位草稿监听必须存在');
+const watchCode = ts
+  .transpileModule(draftWatch.getText(pointAst), { compilerOptions: { target: ts.ScriptTarget.ES2022 } })
+  .outputText.trim()
+  .replace(/;$/, '');
+const watchProps = reactive({ visible: true, sensor: { id: 'point-a' }, widgets: [{ id: 'widget-a' }] });
+const watchLibraryVisible = vueRef(false);
+const watchWidgets = vueRef<any[]>([]);
+const watcherContext = vm.createContext({
+  watch: vueWatch,
+  props: watchProps,
+  widgetLibraryVisible: watchLibraryVisible,
+  keyDialogVisible: vueRef(false),
+  importedConfig: vueRef(null),
+  importedTitle: vueRef(''),
+  nativeEditSource: vueRef(null),
+  localWidgets: watchWidgets,
+  result: {},
+});
+vm.runInContext(`result.stop = ${watchCode};`, watcherContext);
+assert.equal(watchWidgets.value[0].id, 'widget-a');
+watchLibraryVisible.value = true;
+watchProps.sensor = { id: 'point-a' };
+watchProps.widgets = [{ id: 'runtime-refreshed' }];
+await nextTick();
+assert.equal(watchLibraryVisible.value, true, '同一点位的实时刷新不能关闭部件库');
+assert.equal(watchWidgets.value[0].id, 'widget-a', '实时刷新不能覆盖未保存草稿');
+watchProps.sensor = { id: 'point-b' };
+watchProps.widgets = [{ id: 'widget-b' }];
+await nextTick();
+assert.equal(watchLibraryVisible.value, false, '切换点位时应关闭旧部件库');
+assert.equal(watchWidgets.value[0].id, 'widget-b');
+watchLibraryVisible.value = true;
+watchProps.visible = false;
+await nextTick();
+assert.equal(watchLibraryVisible.value, false, '关闭点位编辑器时应关闭部件库');
+watchProps.widgets = [{ id: 'widget-b-reopened' }];
+watchProps.visible = true;
+await nextTick();
+assert.equal(watchWidgets.value[0].id, 'widget-b-reopened', '重新打开时应读取已保存配置');
+(watcherContext.result as any).stop();
 const renderer = fs.readFileSync(
   new URL(root + 'dashboard/runtime/native/NativeWidgetRenderer.vue', import.meta.url),
   'utf8',

@@ -1,36 +1,6 @@
 <template>
   <div v-if="visible && sensor" class="spwe-panel tb-widget-surface">
-    <Teleport to="body">
-      <div v-if="widgetLibraryVisible" class="spwe-lib-mask" @click.self="widgetLibraryVisible = false">
-        <div class="spwe-lib">
-          <div class="spwe-lib-header">
-            <div>
-              <div class="spwe-lib-title">部件库</div>
-              <div class="spwe-lib-sub">选择要添加到传感器点位弹窗里的部件</div>
-            </div>
-            <button class="spwe-btn" type="button" @click="widgetLibraryVisible = false">关闭</button>
-          </div>
-
-          <div class="spwe-lib-grid">
-            <button
-              v-for="item in popupWidgetLibrary"
-              :key="item.key"
-              class="spwe-lib-card"
-              type="button"
-              @click="selectWidgetFromLibrary(item.key)"
-            >
-              <div class="spwe-lib-preview" :class="`spwe-lib-preview--${item.previewKind}`">
-                <i v-for="index in 5" :key="index"></i>
-              </div>
-              <div class="spwe-lib-card-main">
-                <div class="spwe-lib-card-title">{{ item.title }}</div>
-                <div class="spwe-lib-card-sub">{{ item.category }}</div>
-              </div>
-            </button>
-          </div>
-        </div>
-      </div>
-
+    <Teleport :to="overlayTarget">
       <div v-if="keyDialogVisible" class="spwe-key-mask" @click.self="closeKeyDialog">
         <div class="spwe-key-dialog">
           <div class="spwe-key-header">
@@ -82,6 +52,16 @@
         </div>
       </div>
     </Teleport>
+    <MapWidgetLibrary
+      :visible="widgetLibraryVisible && visible && Boolean(currentDeviceId)"
+      host="point-detail"
+      overlay
+      :native-selection-paused="Boolean(nativeEditSource)"
+      @close="widgetLibraryVisible = false"
+      @select-native="nativeEditSource = $event"
+      @select-builtin="selectWidgetFromLibrary"
+      @select-imported="selectImportedWidget"
+    />
 
     <div class="spwe-header">
       <div>
@@ -105,6 +85,7 @@
         v-if="normalizedWidgets.length"
         :widgets="normalizedWidgets"
         :runtime="datasourceRuntime"
+        :context="{ host: 'point-detail', readonly: true, entity: sensor }"
         removable
         editable
         @edit="editNativeWidget"
@@ -115,10 +96,14 @@
       <div class="spwe-section-title">添加部件</div>
 
       <div class="spwe-actions">
-        <button class="spwe-btn" type="button" :disabled="!currentDeviceId" @click="nativePickerVisible = true"
-          >原生部件库 · Vue</button
+        <button
+          class="spwe-add-btn"
+          type="button"
+          aria-label="添加部件"
+          :disabled="!currentDeviceId"
+          @click="openWidgetLibrary"
+          >+</button
         >
-        <button class="spwe-add-btn" type="button" aria-label="添加部件" @click="openWidgetLibrary">+</button>
       </div>
 
       <div class="spwe-footer">
@@ -127,13 +112,6 @@
       </div>
     </div>
   </div>
-  <NativeWidgetPicker
-    v-if="visible && currentDeviceId"
-    :visible="nativePickerVisible"
-    :locked-entity="{ entityId: currentDeviceId, name: currentDeviceName }"
-    @close="nativePickerVisible = false"
-    @confirm="applyNativeWidget"
-  />
   <NativeWidgetComposer
     v-if="visible && nativeEditSource && currentDeviceId"
     :visible="true"
@@ -145,8 +123,10 @@
 </template>
 
 <script setup lang="ts">
-  import NativeWidgetPicker from '../dashboard/runtime/native/NativeWidgetPicker.vue';
+  import MapWidgetLibrary from './components/MapWidgetLibrary.vue';
   import NativeWidgetComposer from '../dashboard/runtime/native/NativeWidgetComposer.vue';
+  import { getNativeWidgetSupport } from '../dashboard/runtime/native/nativeWidgetCatalog';
+  import { useNativeOverlayTarget } from '../dashboard/runtime/native/useNativeOverlayTarget';
   import { profileLabel } from './services/deviceProfilePresentation';
   import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
   import { getTimeseriesKeys } from '/@/api/tb/telemetry';
@@ -155,13 +135,16 @@
   import {
     createWidgetInstance,
     getWidgetDefinition,
-    listWidgetDefinitions,
     normalizeWidgetList,
+    resolveWidgetDefinitionKey,
   } from '../dashboard/runtime/widgets/core/widgetInstance';
   import '../dashboard/runtime/widgets/core/widgetSurface.css';
   import SensorPopupWidgetGrid from './SensorPopupWidgetGrid.vue';
   import type { PopupWidgetConfig } from './sensorPopupWidgetStorage';
   import type { SensorDatasourceKey } from './types/mapPointTypes';
+  import type { CustomWidgetDefinition } from './widgetLibrary/types';
+
+  const overlayTarget = useNativeOverlayTarget();
 
   type SensorPoint = {
     id: string;
@@ -204,7 +187,6 @@
   }>();
 
   const localWidgets = ref<PopupWidgetConfig[]>([]);
-  const nativePickerVisible = ref(false);
   const nativeEditSource = ref<Record<string, any> | null>(null);
   function editNativeWidget(id: string) {
     nativeEditSource.value = normalizedWidgets.value.find((widget) => widget.id === id) || null;
@@ -213,12 +195,14 @@
     const index = localWidgets.value.findIndex((item) => item.id === widget.id);
     if (index < 0) localWidgets.value.push(toPopupWidgetConfig(widget));
     else localWidgets.value[index] = toPopupWidgetConfig(widget);
-    nativePickerVisible.value = false;
+    widgetLibraryVisible.value = false;
     nativeEditSource.value = null;
   }
   const widgetLibraryVisible = ref(false);
   const keyDialogVisible = ref(false);
   const selectedWidgetKey = ref<LocalWidgetKey | ''>('');
+  const importedConfig = ref<Record<string, any> | null>(null);
+  const importedTitle = ref('');
   const availableKeys = ref<string[]>([]);
   const selectedKeys = ref<string[]>([]);
   const keysLoading = ref(false);
@@ -227,21 +211,6 @@
   const datasourceRuntime = props.runtime || ownedDatasourceRuntime!;
 
   const normalizedWidgets = computed<WidgetData[]>(() => normalizeWidgetList(localWidgets.value) as WidgetData[]);
-
-  const popupWidgetLibrary = computed(
-    () =>
-      listWidgetDefinitions('point-detail')
-        .filter((def) => def.key !== 'cesium3d' && !def.key.startsWith('native_'))
-        .map((def) => {
-          return {
-            key: def.key,
-            title: def.title,
-            category: getCategoryLabel(def.category),
-            previewKind: def.previewKind,
-          };
-        })
-        .filter(Boolean) as Array<{ key: LocalWidgetKey; title: string; category: string; previewKind: string }>,
-  );
 
   function formatCoordinate(value: unknown) {
     const coordinate = Number(value);
@@ -264,7 +233,7 @@
 
   const selectedWidgetDef = computed(() => getWidgetDefinition(selectedWidgetKey.value));
 
-  const selectedWidgetTitle = computed(() => selectedWidgetDef.value?.title || '添加部件');
+  const selectedWidgetTitle = computed(() => importedTitle.value || selectedWidgetDef.value?.title || '添加部件');
 
   const keySelectionRequired = computed(() => Boolean(selectedWidgetDef.value?.allowedKeyTypes?.length));
 
@@ -277,17 +246,6 @@
   const currentPollMs = computed(() => props.sensor?.datasource?.pollMs || 2000);
 
   const canConfirmKeySelection = computed(() => !keySelectionRequired.value || selectedKeys.value.length > 0);
-
-  function getCategoryLabel(category: string) {
-    const map: Record<string, string> = {
-      timeseries: '时序部件',
-      latest: '最新值部件',
-      alarm: '告警部件',
-      control: '控制部件',
-      static: '静态部件',
-    };
-    return map[category] || '部件';
-  }
 
   function toPopupWidgetConfig(widget: DashboardWidget): PopupWidgetConfig {
     return {
@@ -309,7 +267,8 @@
     const definition = getWidgetDefinition(type);
     const widget = createWidgetInstance(type, {
       id: `popup_${type}_${Date.now()}`,
-      title: `${payload.deviceName}-${definition?.title || '部件'}`,
+      title: importedTitle.value || `${payload.deviceName}-${definition?.title || '部件'}`,
+      config: importedConfig.value || undefined,
       binding: payload,
     });
     if (!widget) throw new Error(`未找到部件定义：${type}`);
@@ -317,20 +276,59 @@
   }
 
   function openWidgetLibrary() {
+    if (!currentDeviceId.value) return;
     widgetLibraryVisible.value = true;
   }
 
   function selectWidgetFromLibrary(type: LocalWidgetKey) {
-    widgetLibraryVisible.value = false;
-
     const def = getWidgetDefinition(type);
-    if (!def) return;
+    if (!def?.hosts.includes('point-detail') || !currentDeviceId.value) return;
 
-    openKeyDialog(type);
+    widgetLibraryVisible.value = false;
+    importedConfig.value = null;
+    importedTitle.value = '';
+    void openKeyDialog(type);
+  }
+
+  function selectImportedWidget(def: CustomWidgetDefinition) {
+    if (!currentDeviceId.value) return;
+    if (def.raw && (def.raw.descriptor || def.defaultConfig?.native || def.kind === 'unknown')) {
+      const support = getNativeWidgetSupport(def.raw);
+      if (!support.supported || !getWidgetDefinition(support.localWidgetKey)?.hosts.includes('point-detail')) return;
+      nativeEditSource.value = def.raw.config?.native ? { ...def.raw, id: `native-${Date.now()}` } : def.raw;
+      return;
+    }
+    const key = resolveWidgetDefinitionKey({
+      localWidgetKey: def.localWidgetKey,
+      typeFullFqn: def.typeFullFqn,
+      kind: def.kind,
+    });
+    if (!getWidgetDefinition(key)?.hosts.includes('point-detail')) return;
+    const config = JSON.parse(JSON.stringify(def.defaultConfig || {}));
+    delete config.datasource;
+    delete config.datasources;
+    importedConfig.value = config;
+    importedTitle.value = def.name;
+    widgetLibraryVisible.value = false;
+    void openKeyDialog(key);
   }
 
   function buildWidgetWithoutDatasource(type: LocalWidgetKey): PopupWidgetConfig {
-    const widget = createWidgetInstance(type, { id: `popup_${type}_${Date.now()}` });
+    const definition = getWidgetDefinition(type);
+    const widget = createWidgetInstance(type, {
+      id: `popup_${type}_${Date.now()}`,
+      title: importedTitle.value || definition?.title,
+      config: importedConfig.value || undefined,
+      binding:
+        definition?.category === 'static'
+          ? undefined
+          : {
+              deviceId: currentDeviceId.value,
+              deviceName: currentDeviceName.value,
+              keys: [],
+              pollMs: currentPollMs.value,
+            },
+    });
     if (!widget) throw new Error(`未找到部件定义：${type}`);
     return toPopupWidgetConfig(widget);
   }
@@ -354,6 +352,8 @@
     selectedWidgetKey.value = '';
     selectedKeys.value = [];
     keysError.value = '';
+    importedConfig.value = null;
+    importedTitle.value = '';
   }
 
   function getPointSeedKeys() {
@@ -425,10 +425,14 @@
     emit('close');
   }
 
+  // 父级会随设备实时状态重建展示对象；仅切换点位或开关编辑器时重置草稿。
   watch(
-    () => [props.visible, props.sensor?.id, props.widgets],
+    [() => props.visible, () => props.sensor?.id],
     () => {
-      nativePickerVisible.value = false;
+      widgetLibraryVisible.value = false;
+      keyDialogVisible.value = false;
+      importedConfig.value = null;
+      importedTitle.value = '';
       nativeEditSource.value = null;
       if (!props.visible || !props.sensor?.id) {
         localWidgets.value = [];
@@ -437,7 +441,7 @@
 
       localWidgets.value = JSON.parse(JSON.stringify(props.widgets || []));
     },
-    { immediate: true, deep: true },
+    { immediate: true },
   );
 
   onMounted(() => {
@@ -548,9 +552,14 @@
     line-height: 1;
   }
 
-  .spwe-add-btn:hover {
+  .spwe-add-btn:hover:not(:disabled) {
     border-color: rgba(56, 189, 248, 0.85);
     background: rgba(56, 189, 248, 0.12);
+  }
+
+  .spwe-add-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   .spwe-footer {
@@ -575,386 +584,6 @@
   .spwe-btn.danger {
     border-color: rgba(248, 113, 113, 0.45);
     color: #fecaca;
-  }
-
-  .spwe-lib-mask {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    display: flex;
-    align-items: stretch;
-    justify-content: flex-start;
-    background: rgba(0, 0, 0, 0.5);
-  }
-
-  .spwe-lib {
-    width: min(33.333vw, 520px);
-    min-width: 360px;
-    height: 100%;
-    overflow: auto;
-    border-right: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(25, 30, 40, 0.98);
-    color: #fff;
-    padding: 14px;
-  }
-
-  .spwe-lib-header {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 14px;
-  }
-
-  .spwe-lib-title {
-    font-size: 15px;
-    font-weight: 700;
-  }
-
-  .spwe-lib-sub {
-    margin-top: 4px;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.68);
-  }
-
-  .spwe-lib-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 12px;
-  }
-
-  .spwe-lib-card {
-    display: grid;
-    grid-template-columns: 132px minmax(0, 1fr);
-    gap: 12px;
-    align-items: center;
-    min-height: 96px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(255, 255, 255, 0.06);
-    color: #fff;
-    border-radius: 10px;
-    padding: 12px;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .spwe-lib-card:hover {
-    border-color: rgba(56, 189, 248, 0.85);
-    background: rgba(56, 189, 248, 0.14);
-  }
-
-  .spwe-lib-card-main {
-    min-width: 0;
-  }
-
-  .spwe-lib-card-title {
-    overflow: hidden;
-    font-size: 13px;
-    font-weight: 700;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .spwe-lib-card-sub {
-    margin-top: 6px;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.68);
-  }
-
-  .spwe-lib-preview {
-    position: relative;
-    height: 72px;
-    overflow: hidden;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    background: rgba(15, 23, 42, 0.7);
-  }
-
-  .spwe-lib-preview i {
-    position: absolute;
-    display: block;
-    background: rgba(56, 189, 248, 0.9);
-  }
-
-  .spwe-lib-preview--line i {
-    width: 34px;
-    height: 3px;
-    transform-origin: left center;
-    border-radius: 999px;
-  }
-
-  .spwe-lib-preview--line i:nth-child(1) {
-    left: 16px;
-    top: 48px;
-    transform: rotate(-28deg);
-  }
-
-  .spwe-lib-preview--line i:nth-child(2) {
-    left: 44px;
-    top: 34px;
-    transform: rotate(18deg);
-  }
-
-  .spwe-lib-preview--line i:nth-child(3) {
-    left: 72px;
-    top: 42px;
-    transform: rotate(-34deg);
-  }
-
-  .spwe-lib-preview--line i:nth-child(n + 4) {
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-    background: #facc15;
-  }
-
-  .spwe-lib-preview--line i:nth-child(4) {
-    left: 42px;
-    top: 31px;
-  }
-
-  .spwe-lib-preview--line i:nth-child(5) {
-    left: 98px;
-    top: 25px;
-  }
-
-  .spwe-lib-preview--bar i {
-    bottom: 14px;
-    width: 14px;
-    border-radius: 5px 5px 2px 2px;
-  }
-
-  .spwe-lib-preview--bar i:nth-child(1) {
-    left: 22px;
-    height: 26px;
-  }
-
-  .spwe-lib-preview--bar i:nth-child(2) {
-    left: 45px;
-    height: 40px;
-    background: #f59e0b;
-  }
-
-  .spwe-lib-preview--bar i:nth-child(3) {
-    left: 68px;
-    height: 32px;
-  }
-
-  .spwe-lib-preview--bar i:nth-child(4) {
-    left: 91px;
-    height: 48px;
-    background: #22c55e;
-  }
-
-  .spwe-lib-preview--bar i:nth-child(5) {
-    display: none;
-  }
-
-  .spwe-lib-preview--scatter i {
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-  }
-
-  .spwe-lib-preview--scatter i:nth-child(1) {
-    left: 22px;
-    top: 46px;
-  }
-
-  .spwe-lib-preview--scatter i:nth-child(2) {
-    left: 44px;
-    top: 28px;
-    background: #f59e0b;
-  }
-
-  .spwe-lib-preview--scatter i:nth-child(3) {
-    left: 68px;
-    top: 39px;
-    background: #22c55e;
-  }
-
-  .spwe-lib-preview--scatter i:nth-child(4) {
-    left: 92px;
-    top: 20px;
-  }
-
-  .spwe-lib-preview--scatter i:nth-child(5) {
-    left: 106px;
-    top: 50px;
-    background: #f59e0b;
-  }
-
-  .spwe-lib-preview--pie i:nth-child(1) {
-    left: 44px;
-    top: 15px;
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-    background: conic-gradient(#38bdf8 0 38%, #f59e0b 38% 66%, #22c55e 66% 100%);
-  }
-
-  .spwe-lib-preview--pie i:nth-child(n + 2),
-  .spwe-lib-preview--radar i:nth-child(n + 2),
-  .spwe-lib-preview--led i:nth-child(n + 2) {
-    display: none;
-  }
-
-  .spwe-lib-preview--radar i:nth-child(1) {
-    left: 38px;
-    top: 13px;
-    width: 54px;
-    height: 46px;
-    background: rgba(56, 189, 248, 0.22);
-    clip-path: polygon(50% 0, 96% 35%, 78% 100%, 22% 100%, 4% 35%);
-    border: 2px solid rgba(56, 189, 248, 0.8);
-  }
-
-  .spwe-lib-preview--led i:nth-child(1) {
-    left: 44px;
-    top: 14px;
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-    background: radial-gradient(circle at 35% 30%, #ffffff 0 8%, #bbf7d0 9% 24%, #22c55e 25% 100%);
-    box-shadow: 0 0 18px rgba(34, 197, 94, 0.55);
-  }
-
-  .spwe-lib-preview--state i,
-  .spwe-lib-preview--range i {
-    height: 3px;
-    border-radius: 999px;
-    transform-origin: left center;
-  }
-
-  .spwe-lib-preview--state i:nth-child(1) {
-    left: 18px;
-    top: 46px;
-    width: 24px;
-  }
-
-  .spwe-lib-preview--state i:nth-child(2) {
-    left: 42px;
-    top: 34px;
-    width: 22px;
-    transform: rotate(-90deg);
-    background: #f59e0b;
-  }
-
-  .spwe-lib-preview--state i:nth-child(3) {
-    left: 42px;
-    top: 34px;
-    width: 32px;
-    background: #f59e0b;
-  }
-
-  .spwe-lib-preview--state i:nth-child(4) {
-    left: 74px;
-    top: 54px;
-    width: 20px;
-    transform: rotate(90deg);
-    background: #22c55e;
-  }
-
-  .spwe-lib-preview--state i:nth-child(5) {
-    left: 74px;
-    top: 54px;
-    width: 34px;
-    background: #22c55e;
-  }
-
-  .spwe-lib-preview--range i:nth-child(1) {
-    left: 16px;
-    top: 46px;
-    width: 92px;
-    height: 16px;
-    border-radius: 999px;
-    background: linear-gradient(90deg, #38bdf8, #22c55e, #f59e0b);
-  }
-
-  .spwe-lib-preview--range i:nth-child(n + 2) {
-    display: none;
-  }
-
-  .spwe-lib-preview--static i:nth-child(1),
-  .spwe-lib-preview--card i:nth-child(1),
-  .spwe-lib-preview--table i:nth-child(1) {
-    left: 18px;
-    top: 16px;
-    width: 92px;
-    height: 40px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.12);
-    border: 1px solid rgba(255, 255, 255, 0.18);
-  }
-
-  .spwe-lib-preview--static i:nth-child(2),
-  .spwe-lib-preview--card i:nth-child(2) {
-    left: 30px;
-    top: 28px;
-    width: 56px;
-    height: 5px;
-    border-radius: 999px;
-  }
-
-  .spwe-lib-preview--static i:nth-child(3),
-  .spwe-lib-preview--card i:nth-child(3) {
-    left: 30px;
-    top: 40px;
-    width: 38px;
-    height: 5px;
-    border-radius: 999px;
-    background: #f59e0b;
-  }
-
-  .spwe-lib-preview--static i:nth-child(n + 4),
-  .spwe-lib-preview--card i:nth-child(n + 4) {
-    display: none;
-  }
-
-  .spwe-lib-preview--table i:nth-child(2),
-  .spwe-lib-preview--table i:nth-child(3),
-  .spwe-lib-preview--table i:nth-child(4) {
-    left: 24px;
-    width: 80px;
-    height: 2px;
-    background: rgba(255, 255, 255, 0.45);
-  }
-
-  .spwe-lib-preview--table i:nth-child(2) {
-    top: 28px;
-  }
-
-  .spwe-lib-preview--table i:nth-child(3) {
-    top: 40px;
-  }
-
-  .spwe-lib-preview--table i:nth-child(4) {
-    top: 52px;
-  }
-
-  .spwe-lib-preview--table i:nth-child(5) {
-    display: none;
-  }
-
-  .spwe-lib-preview--switch i:nth-child(1) {
-    left: 26px;
-    top: 23px;
-    width: 74px;
-    height: 30px;
-    border-radius: 999px;
-    background: rgba(34, 197, 94, 0.85);
-  }
-
-  .spwe-lib-preview--switch i:nth-child(2) {
-    left: 70px;
-    top: 27px;
-    width: 22px;
-    height: 22px;
-    border-radius: 999px;
-    background: #fff;
-  }
-
-  .spwe-lib-preview--switch i:nth-child(n + 3) {
-    display: none;
   }
 
   .spwe-key-mask {
@@ -1074,20 +703,5 @@
   .spwe-key-footer .spwe-btn:disabled {
     opacity: 0.48;
     cursor: not-allowed;
-  }
-
-  @media (max-width: 640px) {
-    .spwe-lib {
-      width: min(88vw, 420px);
-      min-width: 0;
-    }
-
-    .spwe-lib-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .spwe-lib-card {
-      grid-template-columns: 112px minmax(0, 1fr);
-    }
   }
 </style>

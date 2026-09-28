@@ -51,7 +51,7 @@ const globals = {
   localWidgets: { value: clone(original) },
   normalizedWidgets: { value: [first, second] },
   nativeEditSource: { value: null as any },
-  nativePickerVisible: { value: true },
+  widgetLibraryVisible: { value: true },
   emit: (...args: any[]) => events.push(args),
 };
 const point = functions(

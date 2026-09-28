@@ -18,9 +18,11 @@ backend/application/src/main/data/json/system/widget_types/ 是本仓库原生�
 
 ## 数据与配置
 
-NativeWidgetBrowser 的原生包 → 部件是共同浏览入口，NativeWidgetPicker 是独立抽屉包装；大屏添加抽屉直接嵌入 Browser，顶部保留导入。原生分类与图片来自仓库中的 ThingsBoard 系统定义；nativeWidgetBundles.generated.json 是 32 个包的编译期投影。浏览时先显示该投影，再按原始标识合并服务器资源及完整定义；接口返回空数组、部分结果或请求失败均不能清空原生目录。服务器自定义版本在选择时仍需校验适配签名。图片沿用内嵌原图和认证图片 API，按可见区域延迟加载，共用请求随最后一个使用者卸载释放。
+NativeWidgetBrowser 的原生包 → 部件是共同浏览入口，NativeWidgetPicker 保留给其他独立抽屉使用。大屏编辑页顶部“添加部件”和传感器点位详情“+”共同使用 MapWidgetLibrary 面板，统一展示原生、内置和已导入部件及预览；点位详情不再单独显示“原生部件库 · Vue”按钮。部件注册表的 hosts 决定能否在当前宿主添加，画布专用部件在点位库中显示禁用。导入定义继续保存在现有按当前用户范围隔离的浏览器本地部件库；未知、无运行实现或当前宿主不支持的定义保留并标记不可添加。原生分类与图片来自仓库中的 ThingsBoard 系统定义；nativeWidgetBundles.generated.json 是 32 个包的编译期投影。浏览时先显示该投影，再按原始标识合并服务器资源及完整定义；接口返回空数组、部分结果或请求失败均不能清空原生目录。服务器自定义版本在选择时仍需校验适配签名。图片沿用内嵌原图和认证图片 API，按可见区域延迟加载，共用请求随最后一个使用者卸载释放。
 
 NativeWidgetComposer 提供基础/高级分组，在确认前维护独立草稿；点击“预览”复制配置，预览与正式展示共用 NativeWidgetRenderer。点位详情锁定当前设备 UUID，添加/编辑/删除均不提前保存点位；删除、重新编辑使用稳定部件 ID。
+
+点位内置和已导入部件同样先进入当前设备的 key 选择与本地点位草稿；原生部件在 Composer 中锁定当前设备 UUID。点位确认后仍通过既有大屏模板保存流程持久化。已保存模板的旧部件配置和数据源结构不迁移，画布专用部件不强行写入点位。若回退面板实现，可恢复旧入口并继续读取原有模板与本地导入定义；回退前保留模板 JSON。验收需分别检查普通/全屏及窄屏弹层、三类可用部件的添加与取消、画布专用项禁用、保存后重开模板。
 
 native.presentation/chart/table/progress/gauge/pie/latestBar/radial/range/aggregate/liquid/state/battery/signal/wind/input/locationInput/photoInput/ledIndicator/multiInput/rpcButton/control/advancedControl/count/attributeCard/alarmTable/deviceClaim/entityHierarchy/entityTable 是 version:1 的可选增量设置，序列设置位于 dataKeys[].settings.native。旧配置补默认值，保留 false/0/空值及未知扩展；地图与点位保存保留未适配定义，禁止执行未知脚本。坐标轴最多 4 个，删除时将引用移到第一个轴；图例选择与缩放在数据轮询时保留，修改配置时按保存设置重置。当前能力字段清单见本次任务 configuration-coverage.md。
 
